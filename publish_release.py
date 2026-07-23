@@ -7,18 +7,22 @@ Usage (from repo root):
     python publish_release.py --clean
 
 Requires: .NET 10 SDK (`dotnet` on PATH).
+Uses repo-root icon.png (256x256) as the exe ApplicationIcon.
 """
 
 from __future__ import annotations
 
 import argparse
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT / "CrashBandicoot.Launcher" / "CrashBandicoot.Launcher.csproj"
+ICON_PNG = ROOT / "icon.png"
+ICON_ICO = ROOT / "CrashBandicoot.Launcher" / "app.ico"
 DEFAULT_OUT = ROOT / "publish-single"
 
 FORBIDDEN_GLOBS = (
@@ -50,9 +54,58 @@ def require_dotnet() -> None:
     print(f"[publish] SDK {r.stdout.strip()}")
 
 
+def _png_size(png: bytes) -> tuple[int, int]:
+    if len(png) < 24 or png[:8] != b"\x89PNG\r\n\x1a\n":
+        die(f"not a PNG: {ICON_PNG}")
+    if png[12:16] != b"IHDR":
+        die(f"PNG missing IHDR: {ICON_PNG}")
+    w, h = struct.unpack(">II", png[16:24])
+    return int(w), int(h)
+
+
+def png_to_ico(png_path: Path, ico_path: Path) -> None:
+    """Write a Windows .ico that embeds the PNG (Vista+; fine for 256x256)."""
+    png = png_path.read_bytes()
+    w, h = _png_size(png)
+    # ICO width/height bytes use 0 to mean 256
+    wb = 0 if w >= 256 else w
+    hb = 0 if h >= 256 else h
+    offset = 6 + 16
+    header = struct.pack("<HHH", 0, 1, 1)
+    entry = struct.pack(
+        "<BBBBHHII",
+        wb,
+        hb,
+        0,
+        0,
+        1,
+        32,
+        len(png),
+        offset,
+    )
+    ico_path.parent.mkdir(parents=True, exist_ok=True)
+    ico_path.write_bytes(header + entry + png)
+    print(f"[publish] icon {png_path.name} ({w}x{h}) -> {ico_path.relative_to(ROOT)}")
+
+
+def ensure_app_icon() -> Path:
+    if not ICON_PNG.is_file():
+        die(f"missing {ICON_PNG} (expected 256x256 PNG in repo root)")
+    if (
+        not ICON_ICO.is_file()
+        or ICON_PNG.stat().st_mtime > ICON_ICO.stat().st_mtime
+    ):
+        png_to_ico(ICON_PNG, ICON_ICO)
+    else:
+        print(f"[publish] using existing {ICON_ICO.relative_to(ROOT)}")
+    return ICON_ICO
+
+
 def publish(out_dir: Path) -> None:
     if not PROJECT.is_file():
         die(f"project not found: {PROJECT}")
+
+    ico = ensure_app_icon()
 
     out_dir = out_dir.resolve()
     if out_dir.exists():
@@ -76,6 +129,7 @@ def publish(out_dir: Path) -> None:
         "-p:EnableCompressionInSingleFile=true",
         "-p:DebugType=None",
         "-p:DebugSymbols=false",
+        f"-p:ApplicationIcon={ico}",
         "-o",
         str(out_dir),
     ]
@@ -92,13 +146,11 @@ def publish(out_dir: Path) -> None:
     if not exe.is_file():
         die(f"expected exe missing: {exe}")
 
-    # Drop leftover symbols / noise — release artifact should be the exe.
     for junk in out_dir.glob("*.pdb"):
         junk.unlink(missing_ok=True)
     for junk in out_dir.glob("*.xml"):
         junk.unlink(missing_ok=True)
 
-    # Sanity: no retail dumps / derived game sources in the publish folder.
     bad: list[Path] = []
     for pattern in FORBIDDEN_GLOBS:
         bad.extend(out_dir.rglob(pattern))
@@ -116,6 +168,7 @@ def publish(out_dir: Path) -> None:
     print()
     print("[publish] OK")
     print(f"  exe : {exe}")
+    print(f"  icon: {ico}")
     print(f"  size: {size_mb:.1f} MB")
     print()
     print("Test:")

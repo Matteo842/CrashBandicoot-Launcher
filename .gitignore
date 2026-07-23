@@ -26,6 +26,8 @@ publish/
 publish-*/
 publish-single/
 artifacts/
+# Generated from root icon.png by publish_release.py
+CrashBandicoot.Launcher/app.ico
 [Dd]ebug/
 [Rr]elease/
 x64/
