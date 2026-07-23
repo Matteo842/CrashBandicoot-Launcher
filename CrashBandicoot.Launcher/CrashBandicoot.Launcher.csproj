@@ -10,6 +10,8 @@
     <AssemblyName>CrashBandicoot</AssemblyName>
     <RootNamespace>CrashBandicoot.Launcher</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Generated from ../icon.png by EnsureAppIcon (BeforeBuild). -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <Version>1.0.0</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
@@ -53,5 +55,16 @@
     <None Update="Recomp\Patches\main.cs.patch" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Ui\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- Keep app.ico in sync with repo-root icon.png for title-bar / exe icon. -->
+  <Target Name="EnsureAppIcon" BeforeTargets="BeforeBuild;BeforePublish">
+    <PropertyGroup>
+      <_IconPng>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\icon.png'))</_IconPng>
+      <_IconIco>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\app.ico'))</_IconIco>
+      <_IconScript>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\ensure_app_icon.ps1'))</_IconScript>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(_IconScript)&quot; -PngPath &quot;$(_IconPng)&quot; -IcoPath &quot;$(_IconIco)&quot;"
+          IgnoreExitCode="false" />
+  </Target>
 
 </Project>

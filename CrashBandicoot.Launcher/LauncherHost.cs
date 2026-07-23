@@ -3,20 +3,25 @@ using CrashBandicoot.Launcher.Recomp;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using NativeFileDialogSharp;
+using RecompOne.Runtime;
 using RecompOne.Runtime.Config;
 
 namespace CrashBandicoot.Launcher;
-
-public sealed record LaunchRequest(string DllPath, string CuePath, string Fingerprint);
 
 public sealed class LauncherHost : Form
 {
     public const string AppVersion = "1.0.0";
 
     readonly WebView2 _web = new() { Dock = DockStyle.Fill };
+    readonly Panel _gameHost = new()
+    {
+        Dock = DockStyle.Fill,
+        Visible = false,
+        BackColor = Color.Black,
+    };
     readonly JsonSerializerOptions _json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-
-    public LaunchRequest? Launch { get; private set; }
+    bool _inGame;
+    Size _menuClientSize;
 
     public LauncherHost()
     {
@@ -27,14 +32,53 @@ public sealed class LauncherHost : Form
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(6, 16, 24);
+        TryApplyAppIcon();
 
+        Controls.Add(_gameHost);
         Controls.Add(_web);
+        _gameHost.Resize += (_, _) =>
+        {
+            if (_inGame) Runtime.FitEmbeddedWindow();
+        };
         Load += async (_, _) => await InitAsync();
         FormClosing += (_, e) =>
         {
-            // If we already decided to launch, allow close.
-            if (Launch != null) return;
+            // While the game loop is pumping via DoEvents, allow close to tear down the child HWND.
+            if (_inGame) return;
         };
+    }
+
+    void TryApplyAppIcon()
+    {
+        try
+        {
+            // Prefer the exe ApplicationIcon (set via app.ico at build time).
+            var exe = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exe))
+            {
+                using var extracted = Icon.ExtractAssociatedIcon(exe);
+                if (extracted != null)
+                {
+                    Icon = (Icon)extracted.Clone();
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // fall through
+        }
+
+        try
+        {
+            var ico = Path.Combine(AppContext.BaseDirectory, "app.ico");
+            if (File.Exists(ico))
+                Icon = new Icon(ico);
+        }
+        catch
+        {
+            // keep WinForms default
+        }
     }
 
     async Task InitAsync()
@@ -85,7 +129,6 @@ public sealed class LauncherHost : Form
                     _ = StartGameAsync();
                     break;
                 case "exit":
-                    Launch = null;
                     BeginInvoke(Close);
                     break;
                 case "openMods":
@@ -284,8 +327,8 @@ public sealed class LauncherHost : Form
                 return;
             }
 
-            Launch = new LaunchRequest(dllPath, v.CuePath, v.Fingerprint);
-            BeginInvoke(Close);
+            // Run the recompiled game inside this same WinForms window (OpenGL child HWND).
+            BeginInvoke(() => RunEmbeddedGame(dllPath, v.CuePath));
         }
         catch (Exception ex)
         {
@@ -293,6 +336,67 @@ public sealed class LauncherHost : Form
             PostError("Something went wrong", Unwrap(ex), "Try selecting your .cue again, then Start.", "other");
             PushState();
         }
+    }
+
+    void RunEmbeddedGame(string dllPath, string cuePath)
+    {
+        EnterGameMode();
+        try
+        {
+            ConfigManager.Load();
+            ConfigManager.Game.CdPath = cuePath;
+            ConfigManager.SaveGame();
+
+            // Ensure the panel has a real HWND before parenting the Silk window.
+            _gameHost.Visible = true;
+            _ = _gameHost.Handle;
+            Runtime.SetEmbedParent(_gameHost.Handle);
+
+            Console.WriteLine($"[CrashBandicoot] launching (embedded) {dllPath}");
+            GameLoader.Run(dllPath, cuePath);
+        }
+        catch (Exception ex)
+        {
+            var msg = Unwrap(ex);
+            Console.Error.WriteLine("[CrashBandicoot] launch failed: " + msg);
+            MessageBox.Show(
+                msg,
+                "Crash Bandicoot: Recompiled",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Runtime.SetEmbedParent(0);
+            if (!IsDisposed && IsHandleCreated)
+                LeaveGameMode();
+        }
+    }
+
+    void EnterGameMode()
+    {
+        _inGame = true;
+        _menuClientSize = ClientSize;
+        _web.Visible = false;
+        _gameHost.Visible = true;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        if (ClientSize.Width < 1280 || ClientSize.Height < 720)
+            ClientSize = new Size(1280, 720);
+        if (ConfigManager.View.Fullscreen)
+            WindowState = FormWindowState.Maximized;
+    }
+
+    void LeaveGameMode()
+    {
+        _inGame = false;
+        WindowState = FormWindowState.Normal;
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
+        ClientSize = _menuClientSize.Width > 0 ? _menuClientSize : new Size(1024, 720);
+        _gameHost.Visible = false;
+        _web.Visible = true;
+        PushState();
     }
 
     static string Unwrap(Exception ex)

@@ -27,6 +27,12 @@ public static class Runtime
     public static readonly Memory.RamLogger RamLog = new();
     public static readonly Dispatch.OverlayEventLog OverlayLog = new();
 
+    /// <summary>Parent HWND for the next session (0 = standalone Silk window).</summary>
+    public static void SetEmbedParent(nint hwnd) => HostWindow.SetEmbedParent(hwnd);
+
+    /// <summary>Resize an embedded OpenGL child to its host panel.</summary>
+    public static void FitEmbeddedWindow() => HostWindow.FitEmbeddedToParent();
+
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();

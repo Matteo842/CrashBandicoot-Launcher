@@ -98,59 +98,7 @@ internal static class Program
 
         // WebView2 / WinForms require STA ([STAThread] above). Do not flip apartment mode here.
         ApplicationConfiguration.Initialize();
-
-        LaunchRequest? launch;
-        using (var host = new LauncherHost())
-        {
-            Application.Run(host);
-            launch = host.Launch;
-        }
-
-        if (launch == null)
-            return 0;
-
-        try
-        {
-            // Final gate: prepared DLL never replaces ownership of a live .cue+.bin dump.
-            var disc = DiscValidator.EnsureDiscPresentForLaunch(launch.CuePath, launch.Fingerprint);
-            if (!disc.Ok)
-            {
-                var text = disc.Title + "\n\n" + disc.Problem + "\n\n" + disc.Fix;
-                if (!string.IsNullOrWhiteSpace(disc.CuePath))
-                    text += "\n\n.cue: " + disc.CuePath;
-                if (!string.IsNullOrWhiteSpace(disc.BinPath))
-                    text += "\n.bin: " + disc.BinPath;
-                Console.Error.WriteLine("[CrashBandicoot] disc check failed: " + disc.Message);
-                MessageBox.Show(
-                    text,
-                    "Crash Bandicoot: Recompiled",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return 1;
-            }
-
-            RecompOne.Runtime.Config.ConfigManager.Load();
-            RecompOne.Runtime.Config.ConfigManager.Game.CdPath = launch.CuePath;
-            RecompOne.Runtime.Config.ConfigManager.SaveGame();
-
-            Console.WriteLine($"[CrashBandicoot] launching {launch.DllPath}");
-            GameLoader.Run(launch.DllPath, launch.CuePath);
-            return 0;
-        }
-        catch (Exception ex)
-        {
-            var msg = ex;
-            while (msg.InnerException != null) msg = msg.InnerException;
-            RecompOne.Runtime.Diagnostics.SessionLog.Exception("launch", msg);
-            RecompOne.Runtime.Diagnostics.SessionLog.Stop();
-            Console.Error.WriteLine("[CrashBandicoot] launch failed: " + msg.Message);
-            Console.Error.WriteLine(ex);
-            MessageBox.Show(
-                msg.Message,
-                "Crash Bandicoot: Recompiled",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-            return 1;
-        }
+        Application.Run(new LauncherHost());
+        return 0;
     }
 }

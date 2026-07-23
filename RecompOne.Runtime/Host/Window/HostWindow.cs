@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -11,8 +12,28 @@ using RecompOne.Runtime.Host.Window;
 
 namespace RecompOne.Runtime.Host;
 
+/// <summary>Thrown when the game window closes while embedded in a host form (instead of killing the process).</summary>
+public sealed class GameSessionEndedException : Exception
+{
+    public GameSessionEndedException() : base("Game session ended.") { }
+}
+
 internal static class HostWindow
 {
+    const int GwlStyle = -16;
+    const int WsChild = 0x40000000;
+    const int WsVisible = 0x10000000;
+    const int WsClipSiblings = 0x04000000;
+    const int WsCaption = 0x00C00000;
+    const int WsThickFrame = 0x00040000;
+    const int WsMinimizeBox = 0x00020000;
+    const int WsMaximizeBox = 0x00010000;
+    const int WsSysMenu = 0x00080000;
+    const int WsPopup = unchecked((int)0x80000000);
+    const int SwMaximize = 3;
+    const int SwRestore = 9;
+    const uint GaRoot = 2;
+
     static IWindow? _window;
     static GL? _gl;
     static ImGuiController? _imgui;
@@ -36,20 +57,35 @@ internal static class HostWindow
     static bool _closed;
     static DiscPickerPopup? _discPicker;
 
+    /// <summary>When set before <see cref="Initialize"/>, the Silk window is parented into this HWND.</summary>
+    static nint _embedParent;
+    static nint _embedChild;
+    static bool _embedded;
+
+    /// <summary>Parent HWND for the next game session (0 = standalone window).</summary>
+    public static void SetEmbedParent(nint hwnd) => _embedParent = hwnd;
+
+    public static bool IsEmbedded => _embedded;
+
     public static void Initialize(string title)
     {
         ConfigManager.Load();
+        ResetSessionState();
 
         try
         {
+            var embed = _embedParent != 0;
             var options = WindowOptions.Default with
             {
                 Size = new Vector2D<int>(1280, 720),
+                // Hide off-screen until SetParent — avoids a brief second-window flash.
+                Position = embed ? new Vector2D<int>(-32000, -32000) : new Vector2D<int>(100, 100),
                 Title = title,
                 VSync = false,
                 UpdatesPerSecond = 0,
                 FramesPerSecond = 0,
-                WindowState = ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
+                WindowBorder = embed ? WindowBorder.Hidden : WindowBorder.Resizable,
+                WindowState = !embed && ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
                 API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 5)),
             };
             _window = Silk.NET.Windowing.Window.Create(options);
@@ -57,12 +93,69 @@ internal static class HostWindow
             _window.Render += OnRender;
             _window.Closing += OnClosing;
             _window.Initialize();
+
+            // GLFW defaults to a generic icon — use the exe/ApplicationIcon instead.
+            if (_window.Native?.Win32 is { } win32 && win32.Hwnd != 0)
+                ApplyProcessIcon(win32.Hwnd);
+
+            if (embed)
+                TryEmbedIntoParent(_embedParent);
         }
         catch (Exception e)
         {
             Console.Error.WriteLine($"[Host] window unavailable {e.Message}");
             _headless = true;
         }
+    }
+
+    static void ResetSessionState()
+    {
+        _closed = false;
+        _layoutPending = true;
+        _headless = false;
+        _gpu = null;
+        _gl = null;
+        _imgui = null;
+        _glBackend = null;
+        _displayTex = _vramTex = _ramTex = 0;
+        _discPicker = null;
+        _embedded = false;
+        _embedChild = 0;
+        _ramTask = null;
+        _ramReady = false;
+        _ramFrame = 0;
+    }
+
+    static void TryEmbedIntoParent(nint parent)
+    {
+        if (_window?.Native?.Win32 is not { } win32 || parent == 0)
+            return;
+
+        var child = win32.Hwnd;
+        if (child == 0) return;
+
+        // Borderless child of the launcher panel.
+        var style = GetWindowLong(child, GwlStyle);
+        style &= ~(WsCaption | WsThickFrame | WsMinimizeBox | WsMaximizeBox | WsSysMenu | WsPopup);
+        style |= WsChild | WsVisible | WsClipSiblings;
+        SetWindowLong(child, GwlStyle, style);
+
+        SetParent(child, parent);
+        _embedChild = child;
+        _embedded = true;
+        FitEmbeddedToParent();
+    }
+
+    /// <summary>Keep the OpenGL child sized to the host panel (call on panel resize).</summary>
+    public static void FitEmbeddedToParent()
+    {
+        if (!_embedded || _embedChild == 0 || _embedParent == 0) return;
+        if (!GetClientRect(_embedParent, out var rc)) return;
+        int w = Math.Max(1, rc.Right - rc.Left);
+        int h = Math.Max(1, rc.Bottom - rc.Top);
+        MoveWindow(_embedChild, 0, 0, w, h, true);
+        if (_window != null)
+            _window.Size = new Vector2D<int>(w, h);
     }
 
     public static void Present(Gpu? gpu)
@@ -73,7 +166,7 @@ internal static class HostWindow
         catch (Exception e) {
             Console.WriteLine(e.Message);
         }
-        if (_window.IsClosing) { Runtime.Shutdown(); Environment.Exit(0); }
+        if (_window.IsClosing) { EndSession(); return; }
         InputManager.Poll();
         if (InputManager.ConsumeTopBarToggle())
         {
@@ -96,7 +189,7 @@ internal static class HostWindow
     {
         if (_headless || _window == null) return;
         try { _window.DoEvents(); } catch { }
-        if (_window.IsClosing) { Runtime.Shutdown(); Environment.Exit(0); }
+        if (_window.IsClosing) { EndSession(); return; }
         InputManager.Poll();
     }
 
@@ -104,8 +197,17 @@ internal static class HostWindow
     {
         if (_headless || _window == null) return;
         try { _window.DoEvents(); } catch { }
-        if (_window.IsClosing) { Runtime.Shutdown(); Environment.Exit(0); }
+        if (_window.IsClosing) { EndSession(); return; }
         _window.DoRender();
+    }
+
+    static void EndSession()
+    {
+        var embedded = _embedded;
+        Runtime.Shutdown();
+        if (embedded)
+            throw new GameSessionEndedException();
+        Environment.Exit(0);
     }
 
     public static void Shutdown()
@@ -113,11 +215,23 @@ internal static class HostWindow
         if (!_headless && _window != null && !_window.IsClosing)
             _window.Close();
         InputManager.Shutdown();
+        _embedParent = 0;
+        _embedChild = 0;
+        _embedded = false;
     }
 
     public static void SetFullscreen(bool on)
     {
         if (_window == null) return;
+        if (_embedded && _embedParent != 0)
+        {
+            // Maximize the launcher shell instead of exclusive fullscreen on the child.
+            var root = GetAncestor(_embedParent, GaRoot);
+            if (root != 0)
+                ShowWindow(root, on ? SwMaximize : SwRestore);
+            FitEmbeddedToParent();
+            return;
+        }
         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
     }
 
@@ -132,7 +246,7 @@ internal static class HostWindow
         while (StartupNotice.NeedsAck)
         {
             try { _window.DoEvents(); } catch { }
-            if (_window.IsClosing) { Runtime.Shutdown(); Environment.Exit(0); }
+            if (_window.IsClosing) { EndSession(); return; }
             InputManager.Poll();
             _window.DoRender();
         }
@@ -143,10 +257,65 @@ internal static class HostWindow
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return;
 
             try { _window.DoEvents(); } catch { }
-            if (_window.IsClosing) { Runtime.Shutdown(); Environment.Exit(0); }
+            if (_window.IsClosing) { EndSession(); return; }
             InputManager.Poll();
             _window.DoRender();
         }
+    }
+
+    const int WmSetIcon = 0x0080;
+    const nint IconSmall = 0;
+    const nint IconBig = 1;
+
+    static void ApplyProcessIcon(nint hwnd)
+    {
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe) || hwnd == 0) return;
+            _ = ExtractIconEx(exe, 0, out var large, out var small, 1);
+            if (large != 0)
+                SendMessage(hwnd, WmSetIcon, IconBig, large);
+            if (small != 0)
+                SendMessage(hwnd, WmSetIcon, IconSmall, small);
+        }
+        catch
+        {
+            // keep default window icon
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern nint SetParent(nint hWndChild, nint hWndNewParent);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern int GetWindowLong(nint hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern int SetWindowLong(nint hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool MoveWindow(nint hWnd, int x, int y, int nWidth, int nHeight, bool bRepaint);
+
+    [DllImport("user32.dll")]
+    static extern nint SendMessage(nint hWnd, int msg, nint wParam, nint lParam);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    static extern uint ExtractIconEx(string lpszFile, int nIconIndex, out nint phiconLarge, out nint phiconSmall, uint nIcons);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool GetClientRect(nint hWnd, out Rect lpRect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern nint GetAncestor(nint hWnd, uint gaFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct Rect
+    {
+        public int Left, Top, Right, Bottom;
     }
 
     static void OnLoad()
