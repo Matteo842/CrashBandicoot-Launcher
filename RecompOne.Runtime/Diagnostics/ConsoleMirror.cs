@@ -8,7 +8,8 @@ public static class ConsoleMirror
 
     static readonly object _gate = new();
     static readonly List<string> _lines = new();
-    static readonly StringBuilder _pending = new();
+    static readonly StringBuilder _pendingOut = new();
+    static readonly StringBuilder _pendingErr = new();
     static int _version;
     static bool _installed;
 
@@ -18,8 +19,8 @@ public static class ConsoleMirror
     {
         if (_installed) return;
         _installed = true;
-        Console.SetOut(new Tee(Console.Out));
-        Console.SetError(new Tee(Console.Error));
+        Console.SetOut(new Tee(Console.Out, isError: false));
+        Console.SetError(new Tee(Console.Error, isError: true));
     }
 
     public static void Clear()
@@ -27,7 +28,8 @@ public static class ConsoleMirror
         lock (_gate)
         {
             _lines.Clear();
-            _pending.Clear();
+            _pendingOut.Clear();
+            _pendingErr.Clear();
             _version++;
         }
     }
@@ -38,66 +40,77 @@ public static class ConsoleMirror
         {
             dst.Clear();
             dst.AddRange(_lines);
-            if (_pending.Length > 0) dst.Add(_pending.ToString());
+            if (_pendingOut.Length > 0) dst.Add(_pendingOut.ToString());
+            if (_pendingErr.Length > 0) dst.Add(_pendingErr.ToString());
             return _version;
         }
     }
 
-    static void Append(string? text)
+    static void Append(string? text, bool isError)
     {
         if (string.IsNullOrEmpty(text)) return;
         lock (_gate)
         {
+            var pending = isError ? _pendingErr : _pendingOut;
             foreach (char c in text)
             {
-                if (c == '\n') FlushPendingLocked();
-                else if (c != '\r') _pending.Append(c);
+                if (c == '\n') FlushPendingLocked(pending, isError);
+                else if (c != '\r') pending.Append(c);
             }
             _version++;
         }
     }
 
-    static void AppendChar(char c)
+    static void AppendChar(char c, bool isError)
     {
         lock (_gate)
         {
-            if (c == '\n') FlushPendingLocked();
-            else if (c != '\r') _pending.Append(c);
+            var pending = isError ? _pendingErr : _pendingOut;
+            if (c == '\n') FlushPendingLocked(pending, isError);
+            else if (c != '\r') pending.Append(c);
             _version++;
         }
     }
 
-    static void FlushPendingLocked()
+    static void FlushPendingLocked(StringBuilder pending, bool isError)
     {
-        _lines.Add(_pending.ToString());
-        _pending.Clear();
+        var line = pending.ToString();
+        pending.Clear();
+        _lines.Add(line);
         if (_lines.Count > MaxLines) _lines.RemoveRange(0, _lines.Count - MaxLines);
+        SessionLog.CaptureConsoleLine(line, isError);
     }
 
     sealed class Tee : TextWriter
     {
         readonly TextWriter _inner;
-        public Tee(TextWriter inner) => _inner = inner;
+        readonly bool _isError;
+
+        public Tee(TextWriter inner, bool isError)
+        {
+            _inner = inner;
+            _isError = isError;
+        }
 
         public override Encoding Encoding => _inner.Encoding;
 
         public override void Write(char value)
         {
             _inner.Write(value);
-            AppendChar(value);
+            AppendChar(value, _isError);
         }
 
         public override void Write(string? value)
         {
             _inner.Write(value);
-            Append(value);
+            Append(value, _isError);
         }
 
         public override void WriteLine(string? value)
         {
             _inner.WriteLine(value);
-            Append(value);
-            AppendChar('\n');
+            Append(value, _isError);
+            AppendChar('\n', _isError);
         }
 
         public override void Flush() => _inner.Flush();

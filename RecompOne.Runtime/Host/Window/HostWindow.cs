@@ -86,6 +86,8 @@ internal static class HostWindow
             SetFullscreen(ConfigManager.View.Fullscreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
+        if (InputManager.ConsumeSessionMarker())
+            RecompOne.Runtime.Diagnostics.SessionLog.Marker();
         _window.DoRender();
     }
 

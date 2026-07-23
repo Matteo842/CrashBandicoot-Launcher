@@ -98,6 +98,7 @@ memcard*
 *.srm
 
 # --- Logs / crash dumps / temp -----------------------------------------------
+logs/
 *.log
 *.tmp
 *.temp

@@ -136,11 +136,11 @@ public sealed class MemoryCard
         Flush();
     }
 
-    public List<(string name, int size)> Match(string pattern)
+    public List<(string name, int size, int block)> Match(string pattern)
     {
-        var r = new List<(string, int)>();
+        var r = new List<(string, int, int)>();
         for (int b = 1; b <= Dir; b++)
-            if (_d[b * Fr] == 0x51 && Glob(pattern, NameOf(b))) r.Add((NameOf(b), FileSize(b)));
+            if (_d[b * Fr] == 0x51 && Glob(pattern, NameOf(b))) r.Add((NameOf(b), FileSize(b), b));
         return r;
     }
 

@@ -19,6 +19,8 @@ public static class BiosB
     public static uint IntrEnvInInterruptAddr = 0u;
 
     static uint _padBuf;
+    static uint _cardChan;
+    static uint _cardStatus = 1; // 01h = ready (see psx-spx _card_status)
 
     public static void DeliverEvent(uint @class, uint spec)
     {
@@ -32,51 +34,84 @@ public static class BiosB
         for (int i = 0; i < MaxEvents; i++)
         {
             if (_evCBs[i].Status != 2u || _evCBs[i].Class != @class || _evCBs[i].Spec != spec) continue;
+            // EvMdINTR: invoke callback. Always mark ready too so TestEvent polling works.
             if ((_evCBs[i].Mode & 0x1000u) != 0 && _evCBs[i].Func != 0u)
             {
                 var snap = c.Snapshot();
-                RecompOne.Runtime.Dispatch.Dispatcher.Call(c, m, _evCBs[i].Func);
+                try
+                {
+                    RecompOne.Runtime.Dispatch.Dispatcher.Call(c, m, _evCBs[i].Func);
+                }
+                catch (Exception ex)
+                {
+                    Diagnostics.SessionLog.Exception($"card event cb class=0x{@class:X8} spec=0x{spec:X4}", ex);
+                }
                 c.Restore(snap);
             }
-            else
-            {
-                _evCBs[i].Status = 4u;
-            }
+            _evCBs[i].Status = 4u;
         }
     }
+
+    // PCSXR-accurate completion signals (mixing Sw+Hw on every op confuses Crash's state machine
+    // into an INSERT MEMORY CARD / CardAccept loop).
+    public static void SignalSwCard(CpuContext c, IMemory m, bool ok) =>
+        DeliverEventIntr(c, m, 0xF4000001u, ok ? 0x0004u : 0x8000u);
+
+    public static void SignalHwCard(CpuContext c, IMemory m, bool ok) =>
+        DeliverEventIntr(c, m, 0xF0000011u, ok ? 0x0004u : 0x0100u);
     
     public static void CardComplete(CpuContext c, IMemory m, uint port)
     {
         var card = (port & 0x10u) != 0 ? Runtime.CardB : Runtime.CardA;
-        uint spec = card.Enabled ? 0x0004u : 0x0100u;
-        
-        DeliverEventIntr(c, m, 0xF4000001u, spec);
-        DeliverEventIntr(c, m, 0xF0000011u, spec);
+        _cardChan = port;
+        _cardStatus = card.Enabled ? 1u : 0x11u;
+        Diagnostics.SessionLog.Info($"card_complete/_card_load port=0x{port:X2} enabled={card.Enabled}");
+        SignalSwCard(c, m, card.Enabled); // PCSXR: SwCARD only
+    }
+
+    public static void CardInfo(CpuContext c, IMemory m)
+    {
+        _cardChan = c.A0;
+        var card = (c.A0 & 0x10u) != 0 ? Runtime.CardB : Runtime.CardA;
+        _cardStatus = card.Enabled ? 1u : 0x11u;
+        Diagnostics.SessionLog.Info($"card_info port=0x{c.A0:X2} enabled={card.Enabled}");
+        SignalSwCard(c, m, card.Enabled); // PCSXR: SwCARD only
+        c.V0 = 1u;
     }
 
     static void CardRead(CpuContext c, IMemory m)
     {
         var card = (c.A0 & 0x10u) != 0 ? Runtime.CardB : Runtime.CardA;
-        if (card.Enabled && c.A2 != 0u)
+        _cardChan = c.A0;
+        bool ok = card.Enabled && c.A2 != 0u;
+        if (ok)
         {
             Span<byte> f = stackalloc byte[0x80];
             card.FrameRead((int)(c.A1 & 0x3FFu), f);
             for (uint i = 0; i < 0x80u; i++) m.WriteU8(c.A2 + i, f[(int)i]);
+            _cardStatus = 1u;
         }
-        CardComplete(c, m, c.A0);
+        else _cardStatus = 0x11u;
+        Diagnostics.SessionLog.Info($"card_read port=0x{c.A0:X2} sector={c.A1 & 0x3FFu}");
+        SignalHwCard(c, m, ok); // PCSXR: HwCARD only
         c.V0 = 1u;
     }
 
     static void CardWrite(CpuContext c, IMemory m)
     {
         var card = (c.A0 & 0x10u) != 0 ? Runtime.CardB : Runtime.CardA;
-        if (card.Enabled && c.A2 != 0u)
+        _cardChan = c.A0;
+        bool ok = card.Enabled && c.A2 != 0u;
+        if (ok)
         {
             Span<byte> f = stackalloc byte[0x80];
             for (uint i = 0; i < 0x80u; i++) f[(int)i] = m.ReadU8(c.A2 + i);
             card.FrameWrite((int)(c.A1 & 0x3FFu), f);
+            _cardStatus = 1u;
         }
-        CardComplete(c, m, c.A0);
+        else _cardStatus = 0x11u;
+        Diagnostics.SessionLog.Info($"card_write port=0x{c.A0:X2} sector={c.A1 & 0x3FFu}");
+        SignalHwCard(c, m, ok); // PCSXR: HwCARD only
         c.V0 = 1u;
     }
 
@@ -179,7 +214,7 @@ public static class BiosB
             case 0x3F: Console.Write(Bios.ReadString(m, c.A0)); c.V0 = c.A0; break;
             case 0x40: c.V0 = 1u; break;
             case 0x41: c.V0 = BiosA.CardFormat(m, c.A0); break;
-            case 0x42: c.V0 = BiosA.FirstFile(m, c.A0, c.A1); break;
+            case 0x42: c.V0 = BiosA.FirstFile(c, m, c.A0, c.A1); break;
             case 0x43: c.V0 = BiosA.NextFile(m, c.A0); break;
             case 0x44: c.V0 = 0u; break;
             case 0x45: c.V0 = BiosA.CardDelete(m, c.A0); break;
@@ -190,21 +225,21 @@ public static class BiosB
             case 0x4A: c.V0 = 1u; break;
             case 0x4B: c.V0 = 1u; break;
             case 0x4C: c.V0 = 1u; break;
-            case 0x4D: break;
+            case 0x4D: CardInfo(c, m); break;
             case 0x4E: CardWrite(c, m); break;
             case 0x4F: CardRead(c, m); break;
-            case 0x50: break;
+            case 0x50: break; // _new_card — acknowledge card-change latch (no-op in HLE)
             case 0x51: c.V0 = KromFont.Krom2RawAdd(c.A0); break;
             case 0x53: c.V0 = KromFont.Krom2Offset(c.A0); break;
             case 0x54: c.V0 = BiosA.LastErrno; break;
             case 0x55: c.V0 = 0u; break;
             case 0x56: c.V0 = 0u; break;
             case 0x57: c.V0 = 0u; break;
-            case 0x58: break;
+            case 0x58: c.V0 = _cardChan; break;
             case 0x59: c.V0 = BiosA.TestDevice(m, c.A0); break;
             case 0x5B: c.V0 = 0u; break;
-            case 0x5C: c.V0 = 0u; break;
-            case 0x5D: break;
+            case 0x5C: c.V0 = _cardStatus; break; // 1=ready
+            case 0x5D: c.V0 = _cardStatus = 1u; break; // wait → ready immediately
             default: break;
         }
     }

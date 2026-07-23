@@ -30,6 +30,31 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length >= 1 && string.Equals(args[0], "--run", StringComparison.OrdinalIgnoreCase))
+        {
+            var cue = args.Length >= 2
+                ? Path.GetFullPath(args[1])
+                : Path.GetFullPath(@"D:\GitHub\RecompOne\Crash Bandicoot.cue");
+            try
+            {
+                RecompOne.Runtime.Config.ConfigManager.Load();
+                RecompOne.Runtime.Config.ConfigManager.Game.CdPath = cue;
+                RecompOne.Runtime.Config.ConfigManager.SaveGame();
+                var dll = RecompPipeline.EnsureReady(cue);
+                Console.WriteLine("[CrashBandicoot] launching " + dll);
+                GameLoader.Run(dll, cue);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                RecompOne.Runtime.Diagnostics.SessionLog.Exception("--run", ex.GetBaseException());
+                RecompOne.Runtime.Diagnostics.SessionLog.Stop();
+                Console.Error.WriteLine("[CrashBandicoot] FAIL: " + ex.GetBaseException().Message);
+                Console.Error.WriteLine(ex);
+                return 1;
+            }
+        }
+
         if (args.Length >= 1 && string.Equals(args[0], "--smoke", StringComparison.OrdinalIgnoreCase))
         {
             var cue = args.Length >= 2
@@ -66,6 +91,7 @@ internal static class Program
             Console.WriteLine("Crash Bandicoot: Recompiled");
             Console.WriteLine("  (no args)              open the launcher");
             Console.WriteLine("  --prepare <file.cue>   prepare game folder without UI");
+            Console.WriteLine("  --run [file.cue]       prepare (if needed) and play (no UI)");
             Console.WriteLine("  --smoke [file.cue]     load prepared game briefly (debug)");
             return 0;
         }
@@ -115,6 +141,8 @@ internal static class Program
         {
             var msg = ex;
             while (msg.InnerException != null) msg = msg.InnerException;
+            RecompOne.Runtime.Diagnostics.SessionLog.Exception("launch", msg);
+            RecompOne.Runtime.Diagnostics.SessionLog.Stop();
             Console.Error.WriteLine("[CrashBandicoot] launch failed: " + msg.Message);
             Console.Error.WriteLine(ex);
             MessageBox.Show(

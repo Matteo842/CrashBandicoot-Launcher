@@ -30,6 +30,15 @@ public static class Runtime
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();
+        Diagnostics.SessionLog.Start($"title={title}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex)
+                Diagnostics.SessionLog.Exception("UnhandledException", ex);
+            else
+                Diagnostics.SessionLog.Error($"UnhandledException: {e.ExceptionObject}");
+            Diagnostics.SessionLog.Stop();
+        };
         HostWindow.Initialize(title);
         Audio.Initialize();
         Audio.SetMasterVolume(Config.ConfigManager.Game.Muted ? 0f : Config.ConfigManager.Game.MasterVolume);
@@ -70,5 +79,6 @@ public static class Runtime
     {
         Audio.Shutdown();
         HostWindow.Shutdown();
+        Diagnostics.SessionLog.Stop();
     }
 }

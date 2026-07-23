@@ -20,7 +20,7 @@ public static class BiosA
     static readonly Dictionary<uint, (MemoryCard card, int[] chain, int size, int pos)> _cardFiles = new();
     static uint _nextHandle = 2u;
 
-    static List<(string name, int size)> _ff = new();
+    static List<(string name, int size, int block)> _ff = new();
     static int _ffIdx;
 
     public static MemoryCard? CardFor(string path)
@@ -31,23 +31,26 @@ public static class BiosA
     }
     static string CardName(string path) { int i = path.IndexOf(':'); return i >= 0 ? path[(i + 1)..] : path; }
 
-    static void WriteDirEntry(IMemory m, uint ptr, string name, int size)
+    static void WriteDirEntry(IMemory m, uint ptr, string name, int size, int block)
     {
         for (int i = 0; i < 20; i++) m.WriteU8(ptr + (uint)i, i < name.Length ? (byte)name[i] : (byte)0);
-        m.WriteU32(ptr + 0x14u, 0x50u);
+        m.WriteU32(ptr + 0x14u, 0x50u);           // attr: normal memcard file
         m.WriteU32(ptr + 0x18u, (uint)size);
         m.WriteU32(ptr + 0x1Cu, 0u);
-        m.WriteU32(ptr + 0x20u, 0u);
+        m.WriteU32(ptr + 0x20u, (uint)block);     // first block number (1..15)
         m.WriteU32(ptr + 0x24u, 0u);
     }
 
-    public static uint FirstFile(IMemory m, uint wildPtr, uint dirPtr)
+    public static uint FirstFile(CpuContext c, IMemory m, uint wildPtr, uint dirPtr)
     {
         string wild = Bios.ReadString(m, wildPtr);
         var card = CardFor(wild);
+        Diagnostics.SessionLog.Info($"firstfile path={wild} card={(card != null ? "ok" : "null")}");
         if (card == null) return 0u;
         _ff = card.Match(CardName(wild));
         _ffIdx = 0;
+        // Crash waits on HwCARD after directory ops (PCSXR firstfile).
+        BiosB.SignalHwCard(c, m, true);
         return NextFileEntry(m, dirPtr);
     }
 
@@ -55,9 +58,14 @@ public static class BiosA
 
     static uint NextFileEntry(IMemory m, uint dirPtr)
     {
-        if (_ffIdx >= _ff.Count) return 0u;
+        if (_ffIdx >= _ff.Count)
+        {
+            Diagnostics.SessionLog.Info("nextfile: end");
+            return 0u;
+        }
         var e = _ff[_ffIdx++];
-        WriteDirEntry(m, dirPtr, e.name, e.size);
+        Diagnostics.SessionLog.Info($"nextfile: {e.name} size={e.size} block={e.block}");
+        WriteDirEntry(m, dirPtr, e.name, e.size, e.block);
         return dirPtr;
     }
 
@@ -108,9 +116,14 @@ public static class BiosA
                     string cn = CardName(rawPath);
                     int first = card.Find(cn);
                     if (first == 0 && (c.A1 & 0x200u) != 0) first = card.Create(cn, (int)(c.A1 >> 16));
-                    if (first == 0) { c.V0 = 0xFFFFFFFFu; LastErrno = 2; break; }
+                    if (first == 0)
+                    {
+                        Diagnostics.SessionLog.Info($"card_open FAIL path={rawPath} mode=0x{c.A1:X}");
+                        c.V0 = 0xFFFFFFFFu; LastErrno = 2; break;
+                    }
                     uint cfd = _nextHandle++;
                     _cardFiles[cfd] = (card, card.Chain(first), card.FileSize(first), 0);
+                    Diagnostics.SessionLog.Info($"card_open ok path={rawPath} fd={cfd} block={first} size={card.FileSize(first)} mode=0x{c.A1:X}");
                     c.V0 = cfd; LastErrno = 0;
                     break;
                 }
@@ -162,7 +175,8 @@ public static class BiosA
                     int n = (int)Math.Min(c.A2, (uint)(cre.size - cre.pos));
                     for (int i = 0; i < n; i++) m.WriteU8(c.A1 + (uint)i, cre.card.ReadByte(cre.chain, cre.pos + i));
                     _cardFiles[fd] = (cre.card, cre.chain, cre.size, cre.pos + n);
-                    BiosB.DeliverEvent(0xF4000001u, 0x0004u);
+                    Diagnostics.SessionLog.Info($"card_fread fd={fd} n={n} pos={cre.pos}");
+                    BiosB.SignalSwCard(c, m, true);
                     c.V0 = (uint)n; LastErrno = 0; break;
                 }
                 if (!_openFiles.TryGetValue(fd, out var re)) { c.V0 = 0xFFFFFFFFu; LastErrno = 9; break; }
@@ -186,7 +200,8 @@ public static class BiosA
                     for (int i = 0; i < n; i++) cwe.card.WriteByte(cwe.chain, cwe.pos + i, m.ReadU8(c.A1 + (uint)i));
                     cwe.card.Flush();
                     _cardFiles[fd] = (cwe.card, cwe.chain, cwe.size, cwe.pos + n);
-                    BiosB.DeliverEvent(0xF4000001u, 0x0004u);
+                    Diagnostics.SessionLog.Info($"card_fwrite fd={fd} n={n} pos={cwe.pos}");
+                    BiosB.SignalSwCard(c, m, true);
                     c.V0 = (uint)n; LastErrno = 0; break;
                 }
                 c.V0 = 0xFFFFFFFFu; LastErrno = 9; break;
@@ -415,8 +430,11 @@ public static class BiosA
                 break;
             }
             case 0xA6: c.V0 = _cd != null ? _cd.DriveStatusByte() : 0x02u; break;
-            case 0xAB: BiosB.CardComplete(c, m, c.A0); c.V0 = 1u; break;
-            case 0xAC: BiosB.CardComplete(c, m, c.A0); c.V0 = 1u; break;
+            case 0xAB: BiosB.CardInfo(c, m); break; // _card_info
+            case 0xAC: // _card_load
+                BiosB.CardComplete(c, m, c.A0);
+                c.V0 = 1u;
+                break;
             case 0xA7: case 0xA8: case 0xA9: case 0xAA:
             case 0xAD: case 0xAE: case 0xAF: break;
             case 0xB4:

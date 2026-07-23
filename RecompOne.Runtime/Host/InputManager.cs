@@ -34,11 +34,13 @@ internal static unsafe class InputManager
     const int RightStickDown = 109;
     static bool _topBarToggle;
     static bool _fullscreenToggle;
+    static bool _sessionMarker;
     static readonly HashSet<Key> _keysDown = [];
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
+    public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
 
     public static void Initialize(IInputContext input)
     {
@@ -311,6 +313,7 @@ internal static unsafe class InputManager
     {
         if (key != Key.Unknown) _keysDown.Add(key);
         if (key == Key.F1)  _topBarToggle = true;
+        if (key == Key.F9)  _sessionMarker = true;
         if (key == Key.F11) _fullscreenToggle = true;
 
         if (EventBus.HasAnyListeners<KeyboardEvent>())

@@ -25,6 +25,7 @@ public static class AppPaths
     public static string SaveDir => Path.Combine(Root, "save");
     public static string GameDir => Path.Combine(Root, "game");
     public static string ModsDir => Path.Combine(Root, "mods");
+    public static string LogsDir => Path.Combine(Root, "logs");
     public static string SettingsPath => Path.Combine(Root, "settings.json");
     public static string InterfacePath => Path.Combine(Root, "interface.ini");
     public static string CardAPath => Path.Combine(SaveDir, "carda.sav");
@@ -50,6 +51,7 @@ public static class AppPaths
     {
         Directory.CreateDirectory(SaveDir);
         Directory.CreateDirectory(GameDir);
+        Directory.CreateDirectory(LogsDir);
         // mods/ intentionally not created while the Mods menu is disabled
         MigrateLegacySaves();
     }
