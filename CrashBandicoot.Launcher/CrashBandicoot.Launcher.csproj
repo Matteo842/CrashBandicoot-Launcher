@@ -10,7 +10,16 @@
     <AssemblyName>CrashBandicoot</AssemblyName>
     <RootNamespace>CrashBandicoot.Launcher</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <Product>Crash Bandicoot: Recompiled</Product>
+    <AssemblyTitle>Crash Bandicoot: Recompiled</AssemblyTitle>
+    <Description>Unofficial Crash Bandicoot (PS1 NTSC-U) recompilation launcher — not affiliated with Sony, Activision, or Naughty Dog.</Description>
+    <Company>Unofficial fan project</Company>
+    <Authors>CrashBandicoot-Launcher contributors</Authors>
+    <Copyright>Unofficial fan project — Crash Bandicoot belongs to its respective owners</Copyright>
   </PropertyGroup>
 
   <!-- Single-file release (Python-style one-file). User data uses AppPaths.Root = exe folder. -->

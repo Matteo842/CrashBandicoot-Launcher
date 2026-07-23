@@ -174,7 +174,7 @@ def publish(out_dir: Path) -> None:
     print("Test:")
     print(f'  1. Copy/run:  "{exe}"')
     print("  2. Select a valid .cue (+ .bin beside it)")
-    print("  3. Expect next to the exe: settings.json, save\\, game\\, mods\\")
+    print("  3. Expect next to the exe: settings.json, save\\, game\\")
     print("  4. WebView2 Runtime must be installed on the machine")
 
 

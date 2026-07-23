@@ -11,7 +11,7 @@ public sealed record LaunchRequest(string DllPath, string CuePath, string Finger
 
 public sealed class LauncherHost : Form
 {
-    public const string AppVersion = "0.1.0";
+    public const string AppVersion = "1.0.0";
 
     readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     readonly JsonSerializerOptions _json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -75,6 +75,8 @@ public sealed class LauncherHost : Form
                 case "ready":
                 case "getState":
                     PushState();
+                    if (type == "ready" && RecompOne.Runtime.AppPaths.IsOnDesktop)
+                        PostDesktopWarning();
                     break;
                 case "pickDisc":
                     PickDisc();
@@ -87,7 +89,7 @@ public sealed class LauncherHost : Form
                     BeginInvoke(Close);
                     break;
                 case "openMods":
-                    OpenModsFolder();
+                    // Mods menu disabled for 1.0 — ignored on purpose.
                     break;
                 case "saveControls":
                     SaveControls(root);
@@ -338,22 +340,19 @@ public sealed class LauncherHost : Form
         PushState();
     }
 
-    static void OpenModsFolder()
+    void PostDesktopWarning()
     {
-        var modsDir = RecompOne.Runtime.AppPaths.ModsDir;
-        Directory.CreateDirectory(modsDir);
-        try
+        Post(new
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = modsDir,
-                UseShellExecute = true,
-            });
-        }
-        catch
-        {
-            // ignore
-        }
+            type = "desktopWarning",
+            title = "Running from the Desktop",
+            message =
+                "This launcher creates folders next to the exe (save, game, settings). " +
+                "On the Desktop that clutters your workspace and can be slower or messier when Windows syncs Desktop folders.",
+            fix =
+                "Move CrashBandicoot.exe into its own folder (for example Documents\\CrashBandicoot) and run it from there.",
+            path = RecompOne.Runtime.AppPaths.Root,
+        });
     }
 
     void Post(object payload)

@@ -30,12 +30,66 @@ public static class AppPaths
     public static string CardAPath => Path.Combine(SaveDir, "carda.sav");
     public static string CardBPath => Path.Combine(SaveDir, "cardb.sav");
 
+    /// <summary>True when the exe lives on the Desktop (or inside a folder on the Desktop).</summary>
+    public static bool IsOnDesktop
+    {
+        get
+        {
+            var root = Root;
+            foreach (var desk in DesktopRoots())
+            {
+                if (string.IsNullOrWhiteSpace(desk)) continue;
+                if (IsSameOrUnder(root, desk))
+                    return true;
+            }
+            return false;
+        }
+    }
+
     public static void EnsureCreated()
     {
         Directory.CreateDirectory(SaveDir);
         Directory.CreateDirectory(GameDir);
-        Directory.CreateDirectory(ModsDir);
+        // mods/ intentionally not created while the Mods menu is disabled
         MigrateLegacySaves();
+    }
+
+    static IEnumerable<string> DesktopRoots()
+    {
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+
+        string? publicDesk = null;
+        try
+        {
+            publicDesk = Path.GetFullPath(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+                "..", "Desktop"));
+        }
+        catch
+        {
+            // ignore
+        }
+
+        if (!string.IsNullOrWhiteSpace(publicDesk))
+            yield return publicDesk;
+    }
+
+    static bool IsSameOrUnder(string path, string parent)
+    {
+        try
+        {
+            var a = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var b = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (a.Equals(b, StringComparison.OrdinalIgnoreCase))
+                return true;
+            var prefix = b + Path.DirectorySeparatorChar;
+            return a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Move root-level carda/b.sav into save/ once.</summary>

@@ -568,7 +568,6 @@
         <li><button class="primary" id="btnStart" type="button" disabled>Start Game</button></li>
         <li><button id="btnControls" type="button">Controls</button></li>
         <li><button id="btnSettings" type="button">Settings</button></li>
-        <li><button id="btnMods" type="button">Mods</button></li>
         <li><button id="btnExit" type="button">Exit</button></li>
       </ul>
     </nav>
@@ -584,7 +583,7 @@
           </div>
         </div>
       </div>
-      <div class="ver" id="version">v0.1.0</div>
+      <div class="ver" id="version">v1.0.0</div>
     </footer>
   </div>
 
@@ -613,6 +612,24 @@
       <div class="row-actions">
         <button class="btn primary" id="errPick" type="button">Select disc (.cue)</button>
         <button class="btn ghost" data-close="sheetError" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheetDesktopWarn">
+    <div class="card">
+      <h2 id="deskTitle">Running from the Desktop</h2>
+      <div class="err-block">
+        <h3>Why this matters</h3>
+        <p id="deskProblem"></p>
+      </div>
+      <div class="err-block">
+        <h3>What to do</h3>
+        <p id="deskFix"></p>
+      </div>
+      <div class="err-paths" id="deskPath" hidden></div>
+      <div class="row-actions">
+        <button class="btn primary" data-close="sheetDesktopWarn" type="button">Got it</button>
       </div>
     </div>
   </div>
@@ -654,16 +671,6 @@
     </div>
   </div>
 
-  <div class="sheet" id="sheetMods">
-    <div class="card">
-      <h2>Mods</h2>
-      <p>Put mods in a <code>mods</code> folder next to the exe. Active ids live in settings.</p>
-      <ul id="modsList" style="margin:12px 0 0 18px"></ul>
-      <div class="row-actions">
-        <button class="btn primary" id="openMods" type="button">Open mods folder</button>
-        <button class="btn ghost" data-close="sheetMods" type="button">Back</button>
-      </div>
-    </div>
   </div>
 
   <script>
@@ -773,11 +780,6 @@
       post({ type: "getState" });
       document.getElementById("sheetSettings").classList.add("show");
     };
-    document.getElementById("btnMods").onclick = () => {
-      post({ type: "getState" });
-      document.getElementById("sheetMods").classList.add("show");
-    };
-    document.getElementById("openMods").onclick = () => post({ type: "openMods" });
     document.getElementById("saveControls").onclick = () => {
       const keys = {};
       for (const [, id] of keyFields) keys[id] = document.getElementById("key_" + id).value;
@@ -820,22 +822,6 @@
       if (state.masterVolume != null) document.getElementById("vol").value = state.masterVolume;
       if (state.muted != null) document.getElementById("muted").checked = !!state.muted;
       if (state.fullscreen != null) document.getElementById("fullscreen").checked = !!state.fullscreen;
-      if (state.mods) {
-        const ul = document.getElementById("modsList");
-        ul.innerHTML = "";
-        if (!state.mods.length) {
-          const li = document.createElement("li");
-          li.textContent = "(none)";
-          li.style.opacity = "0.6";
-          ul.appendChild(li);
-        } else {
-          for (const m of state.mods) {
-            const li = document.createElement("li");
-            li.textContent = m;
-            ul.appendChild(li);
-          }
-        }
-      }
     };
 
     window.onPrepare = function (p) {
@@ -845,6 +831,21 @@
 
     window.onPrepareDone = function () {
       showPrep(false);
+    };
+
+    window.onDesktopWarning = function (data) {
+      document.getElementById("deskTitle").textContent = data.title || "Running from the Desktop";
+      document.getElementById("deskProblem").textContent = data.message || "";
+      document.getElementById("deskFix").textContent = data.fix || "";
+      const pathEl = document.getElementById("deskPath");
+      if (data.path) {
+        pathEl.innerHTML = "<strong>Current folder</strong> " + escapeHtml(data.path);
+        pathEl.hidden = false;
+      } else {
+        pathEl.innerHTML = "";
+        pathEl.hidden = true;
+      }
+      document.getElementById("sheetDesktopWarn").classList.add("show");
     };
 
     window.onError = function (data) {
@@ -862,6 +863,7 @@
         if (data.type === "state") window.updateState(data.state);
         if (data.type === "prepare") window.onPrepare(data);
         if (data.type === "prepareDone") window.onPrepareDone();
+        if (data.type === "desktopWarning") window.onDesktopWarning(data);
         if (data.type === "error") window.onError(data);
       });
       post({ type: "ready" });
