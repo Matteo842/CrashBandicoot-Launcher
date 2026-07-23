@@ -1,69 +1,122 @@
-# Crash Bandicoot: Recompiled
+# Crash Bandicoot Launcher (unofficial)
 
-Consumer launcher for **Crash Bandicoot** (SCUS-94900, NTSC-U) on [RecompOne](https://github.com/).
+> **Unofficial fan project.** Not affiliated with, endorsed by, or connected to Sony Interactive Entertainment, Activision, Naughty Dog, or any rights holder of *Crash Bandicoot*.  
+> *Crash Bandicoot* and related names/marks belong to their respective owners.
 
-You supply a legal disc dump. The launcher prepares the game **on your PC** the first time, then starts instantly — no CLI, no copying recompiled sources by hand.
+This repository contains **tools and a Windows launcher** that work with a copy of *Crash Bandicoot* you already own (PS1, NTSC-U, **SCUS-94900**). It does **not** include the game, disc images, or a ready-made game binary.
 
-The menu is a **Crash-themed HTML UI** hosted in WebView2 (Wumpa orange / jungle — not a Banjo clone).
+Built on [RecompOne](https://github.com/BlackLabelHQ/RecompOne) (static PS1 recompilation + runtime). Status: **early / experimental**. Expect bugs. Please do not treat this as a finished commercial product.
 
-## Players
+---
 
-1. Download a release (or build from source — see below).
-2. Run `CrashBandicoot.exe`.
-3. **Select Disc** and pick your `Crash Bandicoot.cue` (keep the matching `.bin` beside it).
-4. Click **Start Game**.
-   - First launch: the app recompiles and compiles locally (progress screen). Output stays in `%LocalAppData%\CrashBandicoot-Launcher\recomp\` — never uploaded.
-   - Later launches: start is instant from that cache.
-5. Use **Controls**, **Settings**, and **Mods** from the menu as needed.
+## What this is
 
-You must own a legal copy of the game. This project does **not** distribute disc images or prebuilt game code.
+A small host application that:
 
-### Headless prepare (optional)
+1. Asks you for your own dumped disc (`.cue` + `.bin`).
+2. On first run, **recompiles and compiles on your PC** (output stays in your `%LocalAppData%` — it is not uploaded anywhere by this app).
+3. Afterwards, starts from that local cache.
+
+Think of it as a **convenience shell around tools**, not a redistribution of *Crash Bandicoot*.
+
+## What this is not
+
+| Not this | Meaning |
+|----------|---------|
+| Not the game | We do not ship retail assets, ISOs, or `.bin`/`.cue` files |
+| Not a piracy kit | You need a dump of a disc **you own** |
+| Not an official port | No Sony / Activision involvement |
+| Not “download and play without a disc” | The disc image is still required at runtime |
+| Not finished | UI and compatibility are work in progress |
+
+If someone offers you this project **bundled with a ROM/ISO**, that is not from this repository — don’t use it, don’t upload it here.
+
+---
+
+## Requirements (players)
+
+- Windows 10/11 x64  
+- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge)  
+- A **legal** dump of *Crash Bandicoot* NTSC-U (`SCUS_949.00` / SCUS-94900) as `.cue` + matching `.bin` in the same folder  
+
+We only aim to support that specific version for now.
+
+---
+
+## How to play (when a release exists)
+
+1. Download a **release** build from this GitHub repo (not a random reupload).  
+2. Run `CrashBandicoot.exe`.  
+3. **Select disc** → choose your `.cue`.  
+4. **Start Game**.  
+   - First time: local prepare (can take a bit).  
+   - Next times: should start from cache.  
+
+Optional (advanced):
 
 ```powershell
-CrashBandicoot.exe --prepare "D:\path\to\Crash Bandicoot.cue"
+CrashBandicoot.exe --prepare "D:\path\to\your\game.cue"
 ```
 
-## What ships in this repo / release
+---
 
-| Included | Not included |
-|----------|----------------|
-| `RecompOne.Runtime` (PS1 HLE host) | Retail `.bin` / `.cue` |
-| `RecompOne.Recompiler` + `CrashBandicoot.json` | Generated `main.cs` / game DLL |
-| Launcher UI + Crash post-pass patch | Save files / personal `settings.json` |
+## Building from source (developers)
 
-The post-pass under `CrashBandicoot.Launcher/Recomp/Patches/` applies known SCUS-94900 control-flow fixes after a clean recompile (decompressor merge, Duff / jump-table handling).
-
-## Developers
+Needs [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```powershell
 dotnet build CrashBandicoot.Launcher -c Release
 dotnet run --project CrashBandicoot.Launcher -c Release
 ```
 
-Publish a Windows x64 folder (not single-file — Roslyn compile + mods need real DLL paths):
+Folder publish (preferred for sharing a build — **not** single-file):
 
 ```powershell
 dotnet publish CrashBandicoot.Launcher -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\publish
 ```
 
-Confirm the publish output contains `Recomp\CrashBandicoot.json` and `Recomp\Patches\main.cs.patch`, and does **not** contain generated game sources (`main.cs` / `game.recomp.dll`).
+Before you zip anything for others, check that `publish\` contains tools/UI config only — **no** `.bin`/`.cue`, **no** `main.cs`, **no** `game.recomp.dll`.
 
-### Regenerating the post-pass patch
+### Repo layout
 
-If the recompiler’s clean output changes and the post-pass fails context matching:
+| Path | Role |
+|------|------|
+| `CrashBandicoot.Launcher/` | WebView2 launcher + local recomp pipeline + UI |
+| `RecompOne.Runtime/` | PS1 HLE runtime (from RecompOne) |
+| `RecompOne.Recompiler/` | Recompiler library (from RecompOne) |
+| `CrashBandicoot.Recompiled/` | Placeholder only (gitignored) — not used for consumer builds |
 
-1. Produce a clean regen into a temp folder with RecompOne.
-2. Diff against a known-good hand-fixed `main.cs`.
-3. Update `CrashBandicoot.Launcher/Recomp/Patches/main.cs.patch` (see `tools/make_postpass_patch.py`).
+---
 
-### Layout
+## Privacy / local data
 
-- `CrashBandicoot.Launcher/` — WebView2 host + `Ui/index.html` + local recomp pipeline
-- `RecompOne.Runtime/` — runtime / HLE
-- `RecompOne.Recompiler/` — static MIPS→C# tool (library)
-- `CrashBandicoot.Recompiled/` — local-only; gitignored except README (not used by the consumer pipeline)
+- Disc path and settings: `settings.json` next to the exe (gitignored).  
+- Prepared game cache: `%LocalAppData%\CrashBandicoot-Launcher\recomp\`  
+- This project does not include telemetry in the launcher path described here. Don’t commit those folders or dumps to git.
 
-## Legal
+---
 
-This project distributes **tools and runtime**, not Crash Bandicoot. Do not upload disc dumps or generated recompiled game code to public remotes. Trademark and copyright belong to their respective owners; this is an unofficial fan project.
+## Contributing / issues
+
+Bug reports and PRs that improve **tools, runtime, UI, or docs** are welcome.  
+Please **do not** open issues asking where to download the game, and **do not** attach or link disc images or generated game sources.
+
+---
+
+## Credits
+
+- [RecompOne](https://github.com/BlackLabelHQ/RecompOne) — recompiler & runtime (MIT)  
+- Inspired by the wider static-recompilation community (e.g. N64Recomp-style projects)  
+
+## License
+
+This repository’s original launcher code is under the **MIT License** (see [`LICENSE`](LICENSE)).  
+RecompOne components retain their upstream MIT license and copyright notices.  
+
+The MIT license applies to **our software**. It does **not** grant any rights to *Crash Bandicoot* itself.
+
+---
+
+## Press / summary (IT)
+
+Progetto **non ufficiale**: solo strumenti e launcher Windows. **Non** distribuisce il gioco né dump. Serve una copia legale (PS1 NTSC-U SCUS-94900). La preparazione avviene in locale sul PC dell’utente. Nessun legame con Sony o Activision. Stato sperimentale.
