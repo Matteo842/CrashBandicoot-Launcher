@@ -263,11 +263,17 @@
       color: var(--wumpa);
     }
 
-    .menu button:disabled {
-      opacity: 0.35;
+    .menu button:disabled,
+    .menu button.primary:disabled {
+      color: #7a7568;
+      opacity: 0.5;
       cursor: default;
       transform: none;
       text-shadow: none;
+    }
+
+    .status:empty {
+      display: none;
     }
 
     .foot {
@@ -326,6 +332,72 @@
 
     .status.error { color: #ff8f8f; opacity: 1; }
     .status.ok { color: var(--ok); }
+
+    .err-focus {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 14px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255, 140, 120, 0.45);
+      background: rgba(180, 40, 40, 0.22);
+      color: #ffb4a8;
+    }
+
+    .err-focus[data-focus="cue"] { border-color: rgba(255, 180, 60, 0.5); background: rgba(255, 138, 0, 0.16); color: var(--wumpa); }
+    .err-focus[data-focus="bin"] { border-color: rgba(120, 180, 255, 0.5); background: rgba(40, 90, 180, 0.22); color: #9ec5ff; }
+    .err-focus[data-focus="pair"] { border-color: rgba(255, 180, 60, 0.5); background: rgba(255, 138, 0, 0.16); color: var(--wumpa); }
+    .err-focus[data-focus="game"] { border-color: rgba(180, 255, 140, 0.4); background: rgba(40, 120, 60, 0.22); color: #b8f0a0; }
+
+    .err-block {
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .err-block h3 {
+      margin: 0 0 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.55;
+    }
+
+    .err-block p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.45;
+      opacity: 0.92;
+      word-break: break-word;
+    }
+
+    .err-paths {
+      margin: 0 0 16px;
+      font-size: 12px;
+      line-height: 1.5;
+      opacity: 0.7;
+      word-break: break-all;
+    }
+
+    .err-paths strong {
+      opacity: 0.95;
+      color: var(--sand);
+    }
+
+    .sheet-error .card {
+      width: min(560px, 92vw);
+      border-color: rgba(255, 110, 90, 0.45);
+    }
+
+    .sheet-error .card h2 { color: #ff9a8a; }
 
     .disc-row {
       display: flex;
@@ -493,7 +565,7 @@
 
     <nav class="panel">
       <ul class="menu">
-        <li><button class="primary" id="btnStart" type="button">Start Game</button></li>
+        <li><button class="primary" id="btnStart" type="button" disabled>Start Game</button></li>
         <li><button id="btnControls" type="button">Controls</button></li>
         <li><button id="btnSettings" type="button">Settings</button></li>
         <li><button id="btnMods" type="button">Mods</button></li>
@@ -505,10 +577,10 @@
       <div class="foot-left">
         <button class="info-btn" id="btnInfo" type="button" title="About" aria-label="About">i</button>
         <div class="foot-main">
-          <p class="status" id="status">Loading…</p>
+          <p class="status" id="status"></p>
           <div class="disc-row" style="margin-top:10px">
             <button class="chip" id="btnPick" type="button">Select disc (.cue)</button>
-            <span id="discName" style="opacity:.7;font-size:13px"></span>
+            <span id="discName" style="opacity:.7;font-size:13px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
           </div>
         </div>
       </div>
@@ -521,7 +593,27 @@
       <h2>Preparing game</h2>
       <p id="prepDetail">Working from your disc…</p>
       <div class="bar"><span id="prepBar"></span></div>
-      <p style="opacity:.55;font-size:12px">One-time on this PC. Later starts skip this.</p>
+      <p style="opacity:.55;font-size:12px">One-time recompile on this PC. Your .cue + .bin must still be present to play.</p>
+    </div>
+  </div>
+
+  <div class="sheet sheet-error" id="sheetError">
+    <div class="card">
+      <h2 id="errTitle">Disc problem</h2>
+      <div class="err-focus" id="errFocus" data-focus="other">Issue</div>
+      <div class="err-block">
+        <h3>What went wrong</h3>
+        <p id="errProblem"></p>
+      </div>
+      <div class="err-block">
+        <h3>How to fix it</h3>
+        <p id="errFix"></p>
+      </div>
+      <div class="err-paths" id="errPaths" hidden></div>
+      <div class="row-actions">
+        <button class="btn primary" id="errPick" type="button">Select disc (.cue)</button>
+        <button class="btn ghost" data-close="sheetError" type="button">Close</button>
+      </div>
     </div>
   </div>
 
@@ -529,8 +621,8 @@
     <div class="card">
       <h2>About</h2>
       <p><strong>Unofficial fan project</strong> — not affiliated with Sony, Activision, or Naughty Dog.</p>
-      <p>Unofficial tools for a disc you own. First prepare stays on your PC — then Start uses your local cache.</p>
-      <p style="opacity:.75;font-size:13px">This app does not distribute Crash Bandicoot. You need a legal dump of the NTSC-U disc (SCUS-94900).</p>
+      <p>Unofficial tools for a disc you own. First prepare stays on your PC — later Starts reuse that cache.</p>
+      <p style="opacity:.75;font-size:13px">Cache never replaces your dump: you still need a valid NTSC-U <code>.cue</code> + <code>.bin</code> (SCUS-94900) every time you play.</p>
       <div class="row-actions">
         <button class="btn ghost" data-close="sheetAbout" type="button">Back</button>
       </div>
@@ -582,10 +674,63 @@
       else console.log("host message", msg);
     }
 
+    const focusLabels = {
+      cue: "Problem with the .cue",
+      bin: "Problem with the .bin",
+      pair: ".cue + .bin pair",
+      game: "Wrong game / region",
+      other: "Launcher error"
+    };
+
+    function showErrorDialog(data) {
+      const title = data.title || "Disc problem";
+      const problem = data.message || data.problem || "Something went wrong.";
+      const fix = data.fix || "Select a valid Crash Bandicoot .cue that sits next to its .bin.";
+      const focus = data.focus || "other";
+
+      document.getElementById("errTitle").textContent = title;
+      document.getElementById("errProblem").textContent = problem;
+      document.getElementById("errFix").textContent = fix;
+
+      const focusEl = document.getElementById("errFocus");
+      focusEl.dataset.focus = focus;
+      focusEl.textContent = focusLabels[focus] || focusLabels.other;
+
+      const paths = document.getElementById("errPaths");
+      const bits = [];
+      if (data.cuePath) bits.push("<strong>.cue</strong> " + escapeHtml(data.cuePath));
+      if (data.binPath) bits.push("<strong>.bin</strong> " + escapeHtml(data.binPath));
+      if (bits.length) {
+        paths.innerHTML = bits.join("<br>");
+        paths.hidden = false;
+      } else {
+        paths.innerHTML = "";
+        paths.hidden = true;
+      }
+
+      setStatus("", "");
+      setCanStart(false);
+      showPrep(false);
+      document.getElementById("sheetError").classList.add("show");
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
     function setStatus(text, kind) {
       const el = document.getElementById("status");
       el.textContent = text || "";
       el.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function setCanStart(ok) {
+      const btn = document.getElementById("btnStart");
+      btn.disabled = !ok;
     }
 
     function showPrep(show) {
@@ -613,6 +758,10 @@
     document.getElementById("btnStart").onclick = () => post({ type: "start" });
     document.getElementById("btnPick").onclick = () => post({ type: "pickDisc" });
     document.getElementById("btnExit").onclick = () => post({ type: "exit" });
+    document.getElementById("errPick").onclick = () => {
+      document.getElementById("sheetError").classList.remove("show");
+      post({ type: "pickDisc" });
+    };
     document.getElementById("btnInfo").onclick = () => {
       document.getElementById("sheetAbout").classList.add("show");
     };
@@ -652,8 +801,14 @@
     window.updateState = function (state) {
       if (!state) return;
       if (state.version) document.getElementById("version").textContent = "v" + state.version;
-      if (state.status) setStatus(state.status, state.statusKind || "");
-      if (state.discName !== undefined) document.getElementById("discName").textContent = state.discName || "(none)";
+      if (state.status !== undefined) setStatus(state.status, state.statusKind || "");
+      if (state.canStart !== undefined) setCanStart(!!state.canStart);
+      if (state.discName !== undefined || state.discPath !== undefined) {
+        const full = (state.discPath || "").trim();
+        const el = document.getElementById("discName");
+        el.textContent = full || "(none)";
+        el.title = full || "No disc configured in settings.json";
+      }
       if (state.keys) {
         for (const [, id] of keyFields) {
           const el = document.getElementById("key_" + id);
@@ -690,9 +845,12 @@
       showPrep(false);
     };
 
-    window.onError = function (msg) {
-      showPrep(false);
-      setStatus(msg, "error");
+    window.onError = function (data) {
+      if (typeof data === "string") {
+        showErrorDialog({ title: "Error", message: data, focus: "other" });
+        return;
+      }
+      showErrorDialog(data || { title: "Error", message: "Something went wrong." });
     };
 
     if (host) {
@@ -702,7 +860,7 @@
         if (data.type === "state") window.updateState(data.state);
         if (data.type === "prepare") window.onPrepare(data);
         if (data.type === "prepareDone") window.onPrepareDone();
-        if (data.type === "error") window.onError(data.message || "Something went wrong.");
+        if (data.type === "error") window.onError(data);
       });
       post({ type: "ready" });
     } else {

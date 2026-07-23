@@ -7,7 +7,7 @@ using RecompOne.Runtime.Config;
 
 namespace CrashBandicoot.Launcher;
 
-public sealed record LaunchRequest(string DllPath, string CuePath);
+public sealed record LaunchRequest(string DllPath, string CuePath, string Fingerprint);
 
 public sealed class LauncherHost : Form
 {
@@ -107,32 +107,36 @@ public sealed class LauncherHost : Form
     {
         var cue = ConfigManager.Game.CdPath;
         var discName = string.IsNullOrWhiteSpace(cue) ? "" : Path.GetFileName(cue);
-        string status;
-        string kind;
+        var discPath = string.IsNullOrWhiteSpace(cue) ? "" : cue;
+        string status = "";
+        string kind = "";
+        var canStart = false;
 
-        if (string.IsNullOrWhiteSpace(cue) || !File.Exists(cue))
-        {
-            status = "No disc yet — select your Crash Bandicoot .cue (keep the .bin beside it).";
-            kind = "";
-        }
-        else
+        if (!string.IsNullOrWhiteSpace(cue) && File.Exists(cue))
         {
             var v = DiscValidator.Validate(cue);
             if (!v.Ok)
             {
                 status = v.Message;
                 kind = "error";
-            }
-            else if (GameCache.TryGetValid(v.Fingerprint, out _))
-            {
-                status = "Ready — Start Game launches instantly.";
-                kind = "ok";
+                // Stale / broken path in settings.json — do not keep Start enabled.
+                ClearConfiguredDisc();
+                discName = "";
+                discPath = "";
             }
             else
             {
-                status = "Disc OK — first Start prepares the game on this PC (one-time).";
-                kind = "ok";
+                canStart = true;
+                // Keep footer clean: ready state is the enabled Start button, not a green status line.
             }
+        }
+        else if (!string.IsNullOrWhiteSpace(cue) && !File.Exists(cue))
+        {
+            status = "Configured disc path is missing. Select your .cue again.";
+            kind = "error";
+            ClearConfiguredDisc();
+            discName = "";
+            discPath = "";
         }
 
         var k = ConfigManager.Game.Keys;
@@ -141,7 +145,9 @@ public sealed class LauncherHost : Form
             version = AppVersion,
             status,
             statusKind = kind,
+            canStart,
             discName,
+            discPath,
             masterVolume = ConfigManager.Game.MasterVolume,
             muted = ConfigManager.Game.Muted,
             fullscreen = ConfigManager.View.Fullscreen,
@@ -164,16 +170,27 @@ public sealed class LauncherHost : Form
         Post(new { type = "state", state });
     }
 
+    static void ClearConfiguredDisc()
+    {
+        if (string.IsNullOrWhiteSpace(ConfigManager.Game.CdPath)) return;
+        ConfigManager.Game.CdPath = "";
+        ConfigManager.SaveGame();
+    }
+
     void PickDisc()
     {
         var pick = Dialog.FileOpen("cue");
         if (!pick.IsOk || string.IsNullOrWhiteSpace(pick.Path)) return;
 
         var path = Path.GetFullPath(pick.Path);
+        var previous = ConfigManager.Game.CdPath;
         var v = DiscValidator.Validate(path);
         if (!v.Ok)
         {
-            PostError(v.Message);
+            // Critical: do NOT keep the previous valid path. Otherwise Start silently
+            // relaunches the old dump from settings.json and it looks like the fake .cue worked.
+            ClearConfiguredDisc();
+            PostDiscError(v, string.IsNullOrWhiteSpace(previous) ? null : previous);
             PushState();
             return;
         }
@@ -194,7 +211,12 @@ public sealed class LauncherHost : Form
                 cue = ConfigManager.Game.CdPath;
                 if (string.IsNullOrWhiteSpace(cue) || !File.Exists(cue))
                 {
-                    PostError("Select your Crash Bandicoot .cue first.");
+                    PostError(
+                        "No disc selected",
+                        "Start needs a valid Crash Bandicoot dump.",
+                        "Click Select disc (.cue) and choose the .cue that sits next to its .bin.",
+                        "pair");
+                    PushState();
                     return;
                 }
             }
@@ -202,7 +224,9 @@ public sealed class LauncherHost : Form
             var v = DiscValidator.Validate(cue);
             if (!v.Ok)
             {
-                PostError(v.Message);
+                ClearConfiguredDisc();
+                PostDiscError(v);
+                PushState();
                 return;
             }
 
@@ -210,7 +234,7 @@ public sealed class LauncherHost : Form
             ConfigManager.SaveGame();
 
             string dllPath;
-            if (GameCache.TryGetValid(v.Fingerprint, out var cached) && File.Exists(cached))
+            if (GameCache.TryGetValid(v.Fingerprint, v.CuePath, out var cached) && File.Exists(cached))
             {
                 dllPath = cached;
             }
@@ -240,17 +264,31 @@ public sealed class LauncherHost : Form
 
             if (!File.Exists(dllPath))
             {
-                PostError("Prepared game DLL missing. Try Start again.");
+                PostError(
+                    "Prepared game missing",
+                    "The compiled game DLL was not found after prepare.",
+                    "Press Start again to rebuild from your disc.",
+                    "other");
                 return;
             }
 
-            Launch = new LaunchRequest(dllPath, v.CuePath);
+            // Cache only skips recompile — launch still requires a live, matching dump.
+            var gate = DiscValidator.EnsureDiscPresentForLaunch(v.CuePath, v.Fingerprint);
+            if (!gate.Ok)
+            {
+                ClearConfiguredDisc();
+                PostDiscError(gate);
+                PushState();
+                return;
+            }
+
+            Launch = new LaunchRequest(dllPath, v.CuePath, v.Fingerprint);
             BeginInvoke(Close);
         }
         catch (Exception ex)
         {
             Post(new { type = "prepareDone" });
-            PostError(Unwrap(ex));
+            PostError("Something went wrong", Unwrap(ex), "Try selecting your .cue again, then Start.", "other");
             PushState();
         }
     }
@@ -325,5 +363,36 @@ public sealed class LauncherHost : Form
         _web.CoreWebView2.PostWebMessageAsJson(json);
     }
 
-    void PostError(string message) => Post(new { type = "error", message });
+    void PostDiscError(DiscValidation v, string? clearedPrevious = null)
+    {
+        var fix = v.Fix;
+        if (!string.IsNullOrWhiteSpace(clearedPrevious))
+            fix += " Your previous disc selection was cleared so Start cannot silently use the old dump.";
+
+        Post(new
+        {
+            type = "error",
+            title = string.IsNullOrWhiteSpace(v.Title) ? "Disc problem" : v.Title,
+            message = string.IsNullOrWhiteSpace(v.Problem) ? v.Message : v.Problem,
+            fix = fix,
+            focus = string.IsNullOrWhiteSpace(v.Focus) ? "other" : v.Focus,
+            cuePath = string.IsNullOrWhiteSpace(v.CuePath) ? null : v.CuePath,
+            binPath = string.IsNullOrWhiteSpace(v.BinPath) ? null : v.BinPath,
+        });
+    }
+
+    void PostError(string title, string message, string fix, string focus = "other") =>
+        Post(new
+        {
+            type = "error",
+            title,
+            message,
+            fix,
+            focus,
+            cuePath = (string?)null,
+            binPath = (string?)null,
+        });
+
+    void PostError(string message) =>
+        PostError("Error", message, "Try again, or select your .cue + .bin dump.", "other");
 }

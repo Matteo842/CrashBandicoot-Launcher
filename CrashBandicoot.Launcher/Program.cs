@@ -83,6 +83,24 @@ internal static class Program
 
         try
         {
+            // Final gate: prepared DLL never replaces ownership of a live .cue+.bin dump.
+            var disc = DiscValidator.EnsureDiscPresentForLaunch(launch.CuePath, launch.Fingerprint);
+            if (!disc.Ok)
+            {
+                var text = disc.Title + "\n\n" + disc.Problem + "\n\n" + disc.Fix;
+                if (!string.IsNullOrWhiteSpace(disc.CuePath))
+                    text += "\n\n.cue: " + disc.CuePath;
+                if (!string.IsNullOrWhiteSpace(disc.BinPath))
+                    text += "\n.bin: " + disc.BinPath;
+                Console.Error.WriteLine("[CrashBandicoot] disc check failed: " + disc.Message);
+                MessageBox.Show(
+                    text,
+                    "Crash Bandicoot: Recompiled",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return 1;
+            }
+
             RecompOne.Runtime.Config.ConfigManager.Load();
             RecompOne.Runtime.Config.ConfigManager.Game.CdPath = launch.CuePath;
             RecompOne.Runtime.Config.ConfigManager.SaveGame();
