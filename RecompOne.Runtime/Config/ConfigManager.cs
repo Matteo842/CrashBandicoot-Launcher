@@ -19,8 +19,8 @@ public static class ConfigManager
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
-    const string GameConfigPath = "settings.json";
-    const string InterfaceFile = "interface.ini";
+    static string GameConfigPath => AppPaths.SettingsPath;
+    static string InterfaceFile => AppPaths.InterfacePath;
 
     public static GameConfig Game { get; private set; } = new();
     public static ViewConfig  View { get; private set; } = new();
@@ -29,6 +29,8 @@ public static class ConfigManager
 
     public static void Load()
     {
+        AppPaths.EnsureCreated();
+
         if (File.Exists(GameConfigPath))
         {
             try { Game = JsonSerializer.Deserialize<GameConfig>(File.ReadAllText(GameConfigPath), _opts) ?? new(); }
@@ -70,7 +72,21 @@ public static class ConfigManager
         foreach (var p in panels)
             View.Panels[p.Name] = new PanelState { Open = p.IsOpen };
 
-        var imguiIni = ImGui.SaveIniSettingsToMemory();
+        // Launcher (WebView2) has no ImGui context — calling SaveIniSettingsToMemory
+        // native-crashes. Only touch ImGui when a context exists (in-game host).
+        string imguiIni = "";
+        try
+        {
+            if (ImGui.GetCurrentContext() != IntPtr.Zero)
+                imguiIni = ImGui.SaveIniSettingsToMemory() ?? "";
+            else
+                imguiIni = ReadExistingImGuiSection();
+        }
+        catch
+        {
+            imguiIni = ReadExistingImGuiSection();
+        }
+
         var sb = new StringBuilder();
         sb.AppendLine("[RecompOne]");
         foreach (var (key, value) in View.Values)
@@ -80,6 +96,24 @@ public static class ConfigManager
         sb.AppendLine();
         sb.Append(imguiIni);
         File.WriteAllText(InterfaceFile, sb.ToString());
+    }
+
+    static string ReadExistingImGuiSection()
+    {
+        try
+        {
+            if (!File.Exists(InterfaceFile)) return "";
+            var all = File.ReadAllText(InterfaceFile);
+            // File layout: [RecompOne] … blank line … ImGui ini blob
+            var marker = "\n\n";
+            var idx = all.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return "";
+            return all[(idx + marker.Length)..];
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     public static void ResetView(IReadOnlyList<IPanel> panels)
@@ -93,6 +127,7 @@ public static class ConfigManager
 
     public static void SaveGame()
     {
+        AppPaths.EnsureCreated();
         File.WriteAllText(GameConfigPath, JsonSerializer.Serialize(Game, _opts));
     }
 

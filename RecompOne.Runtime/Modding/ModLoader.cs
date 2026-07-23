@@ -27,7 +27,7 @@ public static class ModLoader
 
     public static void LoadAll(string? root = null)
     {
-        root ??= Path.GetFullPath("mods");
+        root ??= AppPaths.ModsDir;
         Directory.CreateDirectory(root);
 
         var candidates = Discover(root);

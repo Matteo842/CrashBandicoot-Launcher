@@ -234,9 +234,9 @@ public sealed class LauncherHost : Form
             ConfigManager.SaveGame();
 
             string dllPath;
-            if (GameCache.TryGetValid(v.Fingerprint, v.CuePath, out var cached) && File.Exists(cached))
+            if (GameStore.TryGetValid(v.Fingerprint, v.CuePath, out var prepared) && File.Exists(prepared))
             {
-                dllPath = cached;
+                dllPath = prepared;
             }
             else
             {
@@ -272,7 +272,7 @@ public sealed class LauncherHost : Form
                 return;
             }
 
-            // Cache only skips recompile — launch still requires a live, matching dump.
+            // Prepared game only skips recompile — launch still requires a live, matching dump.
             var gate = DiscValidator.EnsureDiscPresentForLaunch(v.CuePath, v.Fingerprint);
             if (!gate.Ok)
             {
@@ -333,14 +333,14 @@ public sealed class LauncherHost : Form
             ConfigManager.View.Fullscreen = fs.GetBoolean();
 
         ConfigManager.SaveGame();
-        try { ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>()); }
-        catch { /* optional */ }
+        // Persist fullscreen etc. Safe without ImGui (launcher has no context).
+        ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
         PushState();
     }
 
     static void OpenModsFolder()
     {
-        var modsDir = Path.Combine(AppContext.BaseDirectory, "mods");
+        var modsDir = RecompOne.Runtime.AppPaths.ModsDir;
         Directory.CreateDirectory(modsDir);
         try
         {

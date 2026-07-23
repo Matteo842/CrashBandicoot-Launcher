@@ -593,7 +593,7 @@
       <h2>Preparing game</h2>
       <p id="prepDetail">Working from your disc…</p>
       <div class="bar"><span id="prepBar"></span></div>
-      <p style="opacity:.55;font-size:12px">One-time recompile on this PC. Your .cue + .bin must still be present to play.</p>
+      <p style="opacity:.55;font-size:12px">First prepare writes into the game folder next to the exe. Your .cue + .bin must still be present to play.</p>
     </div>
   </div>
 
@@ -621,8 +621,8 @@
     <div class="card">
       <h2>About</h2>
       <p><strong>Unofficial fan project</strong> — not affiliated with Sony, Activision, or Naughty Dog.</p>
-      <p>Unofficial tools for a disc you own. First prepare stays on your PC — later Starts reuse that cache.</p>
-      <p style="opacity:.75;font-size:13px">Cache never replaces your dump: you still need a valid NTSC-U <code>.cue</code> + <code>.bin</code> (SCUS-94900) every time you play.</p>
+      <p>Unofficial tools for a disc you own. First prepare writes a <code>game</code> folder next to the exe — later Starts reuse that.</p>
+      <p style="opacity:.75;font-size:13px">Prepared files never replace your dump: you still need a valid NTSC-U <code>.cue</code> + <code>.bin</code> (SCUS-94900) every time you play.</p>
       <div class="row-actions">
         <button class="btn ghost" data-close="sheetAbout" type="button">Back</button>
       </div>
@@ -782,6 +782,7 @@
       const keys = {};
       for (const [, id] of keyFields) keys[id] = document.getElementById("key_" + id).value;
       post({ type: "saveControls", keys });
+      document.getElementById("sheetControls").classList.remove("show");
     };
     document.getElementById("saveSettings").onclick = () => {
       post({
@@ -790,6 +791,7 @@
         muted: document.getElementById("muted").checked,
         fullscreen: document.getElementById("fullscreen").checked
       });
+      document.getElementById("sheetSettings").classList.remove("show");
     };
 
     document.querySelectorAll("[data-close]").forEach(btn => {

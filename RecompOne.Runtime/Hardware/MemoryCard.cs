@@ -22,7 +22,13 @@ public sealed class MemoryCard
         else Format();
     }
 
-    public void Flush() => File.WriteAllBytes(_path, _d);
+    public void Flush()
+    {
+        var dir = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+        File.WriteAllBytes(_path, _d);
+    }
 
     static byte Sum(byte[] d, int o) { byte x = 0; for (int i = 0; i < 0x7F; i++) x ^= d[o + i]; return x; }
     void Fix(int o) => _d[o + 0x7F] = Sum(_d, o);

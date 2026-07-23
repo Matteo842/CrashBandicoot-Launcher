@@ -13,9 +13,12 @@
     <Version>0.1.0</Version>
   </PropertyGroup>
 
+  <!-- Single-file release (Python-style one-file). User data uses AppPaths.Root = exe folder. -->
   <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

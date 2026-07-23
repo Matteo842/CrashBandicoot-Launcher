@@ -10,12 +10,14 @@ internal static class Program
     {
         try
         {
-            Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+            Directory.SetCurrentDirectory(RecompOne.Runtime.AppPaths.Root);
         }
         catch
         {
             // ignore
         }
+
+        RecompOne.Runtime.AppPaths.EnsureCreated();
 
         if (args.Length >= 2 && string.Equals(args[0], "--prepare", StringComparison.OrdinalIgnoreCase))
         {
@@ -63,8 +65,8 @@ internal static class Program
         {
             Console.WriteLine("Crash Bandicoot: Recompiled");
             Console.WriteLine("  (no args)              open the launcher");
-            Console.WriteLine("  --prepare <file.cue>   prepare game cache without UI");
-            Console.WriteLine("  --smoke [file.cue]     load cached game briefly (debug)");
+            Console.WriteLine("  --prepare <file.cue>   prepare game folder without UI");
+            Console.WriteLine("  --smoke [file.cue]     load prepared game briefly (debug)");
             return 0;
         }
 

@@ -24,6 +24,7 @@ obj/
 out/
 publish/
 publish-*/
+publish-single/
 artifacts/
 [Dd]ebug/
 [Rr]elease/
@@ -77,7 +78,7 @@ game.recomp.dll
 **/Recompiled/main.cs
 **/Recompiled/Entry.cs
 **/Recompiled/Stubs.cs
-# LocalAppData cache should never live in-repo; ignore if someone copies it here
+# LocalAppData legacy path (old builds) — never commit if copied here
 recomp/
 **/CrashBandicoot-Launcher/recomp/
 
@@ -86,6 +87,8 @@ settings.json
 interface.ini
 carda.sav
 cardb.sav
+save/
+game/
 *.sav
 *.mcd
 *.mcr

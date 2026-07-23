@@ -14,8 +14,8 @@ Built on [RecompOne](https://github.com/BlackLabelHQ/RecompOne) (static PS1 reco
 A small host application that:
 
 1. Asks you for your own dumped disc (`.cue` + `.bin`).
-2. On first run, **recompiles and compiles on your PC** (output stays in your `%LocalAppData%` — it is not uploaded anywhere by this app).
-3. Afterwards, starts from that local cache.
+2. On first run, **recompiles and compiles on your PC** into a `game\` folder next to the exe (it is not uploaded anywhere by this app).
+3. Afterwards, starts from that prepared game folder.
 
 Think of it as a **convenience shell around tools**, not a redistribution of *Crash Bandicoot*.
 
@@ -45,12 +45,12 @@ We only aim to support that specific version for now.
 
 ## How to play (when a release exists)
 
-1. Download a **release** build from this GitHub repo (not a random reupload).  
+1. Download the **release** `.exe` from this GitHub repo (not a random reupload).  
 2. Run `CrashBandicoot.exe`.  
 3. **Select disc** → choose your `.cue`.  
 4. **Start Game**.  
-   - First time: local prepare (can take a bit).  
-   - Next times: should start from cache.  
+   - First time: local prepare into `game\` next to the exe (can take a bit).  
+   - Next times: reuses that prepared game folder.  
 
 Optional (advanced):
 
@@ -69,13 +69,23 @@ dotnet build CrashBandicoot.Launcher -c Release
 dotnet run --project CrashBandicoot.Launcher -c Release
 ```
 
-Folder publish (preferred for sharing a build — **not** single-file):
+Single-file release (one `CrashBandicoot.exe`, like a Python one-file build):
 
 ```powershell
-dotnet publish CrashBandicoot.Launcher -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\publish
+python publish_release.py
 ```
 
-Before you zip anything for others, check that `publish\` contains tools/UI config only — **no** `.bin`/`.cue`, **no** `main.cs`, **no** `game.recomp.dll`.
+Output: `publish-single\CrashBandicoot.exe`. Options: `python publish_release.py --out my-folder`, `python publish_release.py --clean`.
+
+Equivalent raw command:
+
+```powershell
+dotnet publish CrashBandicoot.Launcher -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true -o .\publish-single
+```
+
+The published `CrashBandicoot.exe` extracts bundled deps at runtime; **user data** (`save\`, `game\`, `settings.json`) is always written next to the real exe (not in the temp extract folder).
+
+Before you upload a release, check that you are shipping tools/UI only — **no** `.bin`/`.cue`, **no** `main.cs`, **no** `game.recomp.dll` / `game\` folder.
 
 ### Repo layout
 
@@ -90,9 +100,14 @@ Before you zip anything for others, check that `publish\` contains tools/UI conf
 
 ## Privacy / local data
 
-- Disc path and settings: `settings.json` next to the exe (gitignored).  
-- Prepared game cache: `%LocalAppData%\CrashBandicoot-Launcher\recomp\`  
-- This project does not include telemetry in the launcher path described here. Don’t commit those folders or dumps to git.
+All next to `CrashBandicoot.exe` (portable; gitignored):
+
+- Config: `settings.json` (+ `interface.ini` for UI layout)  
+- Saves: `save\carda.sav`, `save\cardb.sav`  
+- Prepared game: `game\{fingerprint}\` (DLL + generated sources — persistent until you delete them)  
+- Mods: `mods\`  
+
+This project does not include telemetry in the launcher path described here. Don’t commit those folders or dumps to git.
 
 ---
 
@@ -117,6 +132,6 @@ The MIT license applies to **our software**. It does **not** grant any rights to
 
 ---
 
-## Press / summary (IT)
+## Legal
 
-Progetto **non ufficiale**: solo strumenti e launcher Windows. **Non** distribuisce il gioco né dump. Serve una copia legale (PS1 NTSC-U SCUS-94900). La preparazione avviene in locale sul PC dell’utente. Nessun legame con Sony o Activision. Stato sperimentale.
+This project distributes **tools and runtime**, not Crash Bandicoot. Do not upload disc dumps or generated recompiled game code to public remotes. Trademark and copyright belong to their respective owners; this is an unofficial fan project.
