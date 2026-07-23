@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AssemblyName>RecompOne.Recompiler</AssemblyName>
+        <RootNamespace>RecompOne.Recompiler</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\RecompOne.Runtime\RecompOne.Runtime.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Remove="Program.cs" />
+      <None Include="Program.cs" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="LibObjectFile" Version="2.1.1" />
+      <PackageReference Include="RabbitizerSharp" Version="0.1.0" />
+    </ItemGroup>
+
+</Project>

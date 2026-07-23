@@ -1,0 +1,123 @@
+# =============================================================================
+# Crash Bandicoot Launcher — LEGAL / SAFETY .gitignore
+# If something here looks "useful to commit", it is NOT. Sony/Activision own
+# Crash. We ship TOOLS + RUNTIME only. Never push dumps or game-derived code.
+# When in doubt: do NOT force-add. Ask before `git add -f`.
+# =============================================================================
+
+# --- IDE / OS junk -----------------------------------------------------------
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+Thumbs.db
+Desktop.ini
+.DS_Store
+*~
+
+# --- Build / publish outputs (never the release zip with a dump inside) ------
+bin/
+obj/
+out/
+publish/
+publish-*/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.appx
+*.msix
+*.msi
+*.nupkg
+
+# --- Retail disc dumps & images (THE lawsuit fuel) ---------------------------
+# PS1 / generic optical
+*.bin
+*.cue
+*.iso
+*.img
+*.ecm
+*.mds
+*.mdf
+*.nrg
+*.ccd
+*.sub
+*.img.bak
+*.toc
+*.chd
+*.cso
+*.isz
+*.pbp
+*.cdi
+*.dump
+*.raw
+# Common dump naming (even without extension tricks)
+**/Crash Bandicoot.*
+**/crash*bandicoot*.bin
+**/crash*bandicoot*.cue
+**/SCUS_949.00
+**/SCUS-94900*
+**/SCUS_949*
+
+# --- Recompiled / derived game code (derivative of retail EXE) ---------------
+# Generated C# from the recompiler — create only on the user's machine
+CrashBandicoot.Recompiled/**
+!CrashBandicoot.Recompiled/README.md
+**/_gate_regen/
+**/_test_apply*/
+**/_patch_*main.cs
+game.recomp.dll
+**/game.recomp.dll
+**/game.recomp.pdb
+# Accidental drops of generated sources anywhere in the tree
+**/Recompiled/main.cs
+**/Recompiled/Entry.cs
+**/Recompiled/Stubs.cs
+# LocalAppData cache should never live in-repo; ignore if someone copies it here
+recomp/
+**/CrashBandicoot-Launcher/recomp/
+
+# --- Runtime / player data next to the exe ----------------------------------
+settings.json
+interface.ini
+carda.sav
+cardb.sav
+*.sav
+*.mcd
+*.mcr
+memcard*
+*.srm
+
+# --- Logs / crash dumps / temp -----------------------------------------------
+*.log
+*.tmp
+*.temp
+*.dmp
+*.stackdump
+hs_err_pid*
+
+# --- Secrets / credentials (belt and suspenders) -----------------------------
+.env
+.env.*
+!.env.example
+credentials*.json
+*secret*
+*apikey*
+*.pfx
+*.p12
+*.pem
+*.key
+
+# --- Native / tooling noise --------------------------------------------------
+*.pdb
+crash-*.dmp
+minidump*
+
+# --- Optional: local notes that might contain dump paths ---------------------
+LOCAL.md
+TODO.local.md
+*.local.json

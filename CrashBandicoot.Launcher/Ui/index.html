@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Crash Bandicoot: Recompiled</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@600;800&display=swap");
+
+    :root {
+      --wumpa: #ff8a00;
+      --wumpa-hot: #ffb020;
+      --leaf: #1a5c2e;
+      --jungle: #0b1f14;
+      --night: #061018;
+      --sand: #f4e4bc;
+      --danger: #ff3b3b;
+      --ok: #7dff9a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: "Nunito", system-ui, sans-serif;
+      color: var(--sand);
+      background: var(--night);
+      user-select: none;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background:
+        radial-gradient(ellipse 80% 55% at 20% 80%, rgba(255, 138, 0, 0.22), transparent 55%),
+        radial-gradient(ellipse 60% 40% at 85% 15%, rgba(40, 120, 70, 0.35), transparent 50%),
+        linear-gradient(165deg, #0a2818 0%, #061018 45%, #120a08 100%);
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      grid-template-rows: 1fr auto;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(
+          -18deg,
+          transparent 0 14px,
+          rgba(255, 180, 40, 0.03) 14px 15px
+        );
+      pointer-events: none;
+    }
+
+    .hero {
+      position: relative;
+      z-index: 1;
+      padding: 56px 48px 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 18px;
+    }
+
+    .brand {
+      font-family: "Bungee", Impact, sans-serif;
+      line-height: 0.95;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      filter: drop-shadow(0 6px 0 #5a2200) drop-shadow(0 12px 24px rgba(0,0,0,0.45));
+      animation: brand-in 0.7s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+    }
+
+    .brand .crash {
+      display: block;
+      font-size: clamp(52px, 8vw, 92px);
+      color: var(--wumpa);
+      -webkit-text-stroke: 2px #3a1500;
+    }
+
+    .brand .recomp {
+      display: block;
+      font-size: clamp(22px, 3.4vw, 36px);
+      color: var(--danger);
+      -webkit-text-stroke: 1px #3a0000;
+      margin-top: 4px;
+    }
+
+    .tagline {
+      max-width: 28ch;
+      font-size: 17px;
+      font-weight: 600;
+      opacity: 0.9;
+      animation: fade-up 0.7s 0.15s both;
+    }
+
+    .crate {
+      width: min(280px, 40vw);
+      aspect-ratio: 1;
+      margin-top: 12px;
+      border-radius: 10px;
+      background:
+        linear-gradient(145deg, #c47a2a, #8a4a12 55%, #5c3008);
+      border: 4px solid #3a2008;
+      box-shadow:
+        inset 0 0 0 6px rgba(255, 200, 80, 0.25),
+        0 18px 40px rgba(0,0,0,0.45);
+      display: grid;
+      place-items: center;
+      position: relative;
+      animation: crate-bob 3.2s ease-in-out infinite, fade-up 0.7s 0.25s both;
+    }
+
+    .crate::after {
+      content: "?";
+      font-family: "Bungee", Impact, sans-serif;
+      font-size: 110px;
+      color: #ffe08a;
+      text-shadow: 0 4px 0 #5a3000;
+      line-height: 1;
+    }
+
+    .panel {
+      position: relative;
+      z-index: 1;
+      align-self: center;
+      padding: 40px 48px 40px 24px;
+      animation: fade-up 0.7s 0.2s both;
+    }
+
+    .menu {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .menu button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--sand);
+      font-family: "Bungee", Impact, sans-serif;
+      font-size: 28px;
+      text-align: left;
+      padding: 10px 14px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease;
+    }
+
+    .menu button:hover,
+    .menu button:focus-visible {
+      color: var(--wumpa-hot);
+      transform: translateX(10px) scale(1.04);
+      text-shadow: 0 0 18px rgba(255, 160, 0, 0.55);
+      outline: none;
+    }
+
+    .menu button.primary {
+      color: var(--wumpa);
+    }
+
+    .menu button:disabled {
+      opacity: 0.35;
+      cursor: default;
+      transform: none;
+      text-shadow: none;
+    }
+
+    .foot {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      padding: 18px 40px 22px;
+      border-top: 1px solid rgba(255, 200, 120, 0.12);
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,0.35));
+      position: relative;
+      z-index: 1;
+    }
+
+    .status {
+      font-size: 14px;
+      max-width: 70ch;
+      opacity: 0.85;
+    }
+
+    .status.error { color: #ff8f8f; opacity: 1; }
+    .status.ok { color: var(--ok); }
+
+    .disc-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      border: 1px solid rgba(255, 180, 60, 0.35);
+      background: rgba(255, 138, 0, 0.12);
+      color: var(--sand);
+      font-family: "Nunito", sans-serif;
+      font-weight: 800;
+      font-size: 13px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .chip:hover { background: rgba(255, 138, 0, 0.28); }
+
+    .ver {
+      opacity: 0.45;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      place-items: center;
+      background: rgba(4, 10, 12, 0.72);
+      backdrop-filter: blur(6px);
+    }
+
+    .overlay.show { display: grid; }
+
+    .card {
+      width: min(480px, 90vw);
+      padding: 28px 28px 24px;
+      border-radius: 16px;
+      background: linear-gradient(160deg, #163325, #0c1618);
+      border: 1px solid rgba(255, 160, 40, 0.35);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+    }
+
+    .card h2 {
+      font-family: "Bungee", Impact, sans-serif;
+      color: var(--wumpa);
+      font-size: 22px;
+      margin-bottom: 10px;
+    }
+
+    .card p { opacity: 0.85; margin-bottom: 16px; font-size: 14px; }
+
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--wumpa), var(--wumpa-hot));
+      transition: width 0.2s ease;
+    }
+
+    .sheet {
+      position: absolute;
+      inset: 0;
+      z-index: 15;
+      display: none;
+      place-items: center;
+      background: rgba(4, 10, 12, 0.78);
+    }
+
+    .sheet.show { display: grid; }
+
+    .sheet .card { max-height: 80vh; overflow: auto; width: min(560px, 92vw); }
+
+    .sheet label {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 10px;
+      align-items: center;
+      margin: 8px 0;
+      font-size: 14px;
+    }
+
+    .sheet input[type="text"],
+    .sheet input[type="range"] {
+      width: 100%;
+    }
+
+    .sheet input[type="text"] {
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,180,60,0.3);
+      color: var(--sand);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font: inherit;
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .btn {
+      font-family: "Nunito", sans-serif;
+      font-weight: 800;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+
+    .btn.primary { background: var(--wumpa); color: #2a1200; }
+    .btn.ghost { background: transparent; color: var(--sand); border: 1px solid rgba(255,200,120,0.35); }
+
+    @keyframes brand-in {
+      from { opacity: 0; transform: translateY(18px) scale(0.96); }
+      to { opacity: 1; transform: none; }
+    }
+
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    @keyframes crate-bob {
+      0%, 100% { transform: translateY(0) rotate(-2deg); }
+      50% { transform: translateY(-10px) rotate(2deg); }
+    }
+
+    @media (max-width: 900px) {
+      .stage { grid-template-columns: 1fr; }
+      .crate { display: none; }
+      .panel { padding: 12px 28px 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <section class="hero">
+      <div class="brand">
+        <span class="crash">Crash</span>
+        <span class="recomp">Recompiled</span>
+      </div>
+      <p class="tagline">Your dump. Your PC. Native Crash — first prepare is local, then Start is instant.</p>
+      <div class="crate" aria-hidden="true"></div>
+    </section>
+
+    <nav class="panel">
+      <ul class="menu">
+        <li><button class="primary" id="btnStart" type="button">Start Game</button></li>
+        <li><button id="btnControls" type="button">Controls</button></li>
+        <li><button id="btnSettings" type="button">Settings</button></li>
+        <li><button id="btnMods" type="button">Mods</button></li>
+        <li><button id="btnExit" type="button">Exit</button></li>
+      </ul>
+    </nav>
+
+    <footer class="foot">
+      <div>
+        <p class="status" id="status">Loading…</p>
+        <div class="disc-row" style="margin-top:10px">
+          <button class="chip" id="btnPick" type="button">Select disc (.cue)</button>
+          <span id="discName" style="opacity:.7;font-size:13px"></span>
+        </div>
+      </div>
+      <div class="ver" id="version">v0.1.0</div>
+    </footer>
+  </div>
+
+  <div class="overlay" id="prep">
+    <div class="card">
+      <h2>Preparing game</h2>
+      <p id="prepDetail">Working from your disc…</p>
+      <div class="bar"><span id="prepBar"></span></div>
+      <p style="opacity:.55;font-size:12px">One-time on this PC. Later starts skip this.</p>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheetControls">
+    <div class="card">
+      <h2>Controls</h2>
+      <p>Keyboard bindings (player 1). Saved to settings.json.</p>
+      <div id="controlsForm"></div>
+      <div class="row-actions">
+        <button class="btn primary" id="saveControls" type="button">Save</button>
+        <button class="btn ghost" data-close="sheetControls" type="button">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheetSettings">
+    <div class="card">
+      <h2>Settings</h2>
+      <label>Master volume <input id="vol" type="range" min="0" max="1" step="0.01" /></label>
+      <label>Muted <input id="muted" type="checkbox" /></label>
+      <label>Fullscreen <input id="fullscreen" type="checkbox" /></label>
+      <div class="row-actions">
+        <button class="btn primary" id="saveSettings" type="button">Save</button>
+        <button class="btn ghost" data-close="sheetSettings" type="button">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheetMods">
+    <div class="card">
+      <h2>Mods</h2>
+      <p>Put mods in a <code>mods</code> folder next to the exe. Active ids live in settings.</p>
+      <ul id="modsList" style="margin:12px 0 0 18px"></ul>
+      <div class="row-actions">
+        <button class="btn primary" id="openMods" type="button">Open mods folder</button>
+        <button class="btn ghost" data-close="sheetMods" type="button">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const host = window.chrome?.webview;
+
+    function post(msg) {
+      if (host) host.postMessage(msg);
+      else console.log("host message", msg);
+    }
+
+    function setStatus(text, kind) {
+      const el = document.getElementById("status");
+      el.textContent = text || "";
+      el.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function showPrep(show) {
+      document.getElementById("prep").classList.toggle("show", !!show);
+    }
+
+    function setProgress(fraction, detail) {
+      document.getElementById("prepBar").style.width = Math.round((fraction || 0) * 100) + "%";
+      if (detail) document.getElementById("prepDetail").textContent = detail;
+    }
+
+    const keyFields = [
+      ["Cross", "cross"], ["Circle", "circle"], ["Square", "square"], ["Triangle", "triangle"],
+      ["Start", "start"], ["Select", "select"],
+      ["Up", "up"], ["Down", "down"], ["Left", "left"], ["Right", "right"]
+    ];
+
+    const form = document.getElementById("controlsForm");
+    for (const [label, id] of keyFields) {
+      const wrap = document.createElement("label");
+      wrap.innerHTML = label + ' <input type="text" id="key_' + id + '" maxlength="32" />';
+      form.appendChild(wrap);
+    }
+
+    document.getElementById("btnStart").onclick = () => post({ type: "start" });
+    document.getElementById("btnPick").onclick = () => post({ type: "pickDisc" });
+    document.getElementById("btnExit").onclick = () => post({ type: "exit" });
+    document.getElementById("btnControls").onclick = () => {
+      post({ type: "getState" });
+      document.getElementById("sheetControls").classList.add("show");
+    };
+    document.getElementById("btnSettings").onclick = () => {
+      post({ type: "getState" });
+      document.getElementById("sheetSettings").classList.add("show");
+    };
+    document.getElementById("btnMods").onclick = () => {
+      post({ type: "getState" });
+      document.getElementById("sheetMods").classList.add("show");
+    };
+    document.getElementById("openMods").onclick = () => post({ type: "openMods" });
+    document.getElementById("saveControls").onclick = () => {
+      const keys = {};
+      for (const [, id] of keyFields) keys[id] = document.getElementById("key_" + id).value;
+      post({ type: "saveControls", keys });
+    };
+    document.getElementById("saveSettings").onclick = () => {
+      post({
+        type: "saveSettings",
+        masterVolume: Number(document.getElementById("vol").value),
+        muted: document.getElementById("muted").checked,
+        fullscreen: document.getElementById("fullscreen").checked
+      });
+    };
+
+    document.querySelectorAll("[data-close]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.getElementById(btn.getAttribute("data-close")).classList.remove("show");
+      });
+    });
+
+    window.updateState = function (state) {
+      if (!state) return;
+      if (state.version) document.getElementById("version").textContent = "v" + state.version;
+      if (state.status) setStatus(state.status, state.statusKind || "");
+      if (state.discName !== undefined) document.getElementById("discName").textContent = state.discName || "(none)";
+      if (state.keys) {
+        for (const [, id] of keyFields) {
+          const el = document.getElementById("key_" + id);
+          if (el && state.keys[id] != null) el.value = state.keys[id];
+        }
+      }
+      if (state.masterVolume != null) document.getElementById("vol").value = state.masterVolume;
+      if (state.muted != null) document.getElementById("muted").checked = !!state.muted;
+      if (state.fullscreen != null) document.getElementById("fullscreen").checked = !!state.fullscreen;
+      if (state.mods) {
+        const ul = document.getElementById("modsList");
+        ul.innerHTML = "";
+        if (!state.mods.length) {
+          const li = document.createElement("li");
+          li.textContent = "(none)";
+          li.style.opacity = "0.6";
+          ul.appendChild(li);
+        } else {
+          for (const m of state.mods) {
+            const li = document.createElement("li");
+            li.textContent = m;
+            ul.appendChild(li);
+          }
+        }
+      }
+    };
+
+    window.onPrepare = function (p) {
+      showPrep(true);
+      setProgress(p.fraction, p.detail);
+    };
+
+    window.onPrepareDone = function () {
+      showPrep(false);
+    };
+
+    window.onError = function (msg) {
+      showPrep(false);
+      setStatus(msg, "error");
+    };
+
+    if (host) {
+      host.addEventListener("message", ev => {
+        const data = ev.data;
+        if (!data || typeof data !== "object") return;
+        if (data.type === "state") window.updateState(data.state);
+        if (data.type === "prepare") window.onPrepare(data);
+        if (data.type === "prepareDone") window.onPrepareDone();
+        if (data.type === "error") window.onError(data.message || "Something went wrong.");
+      });
+      post({ type: "ready" });
+    } else {
+      setStatus("Open inside the Crash launcher.", "error");
+    }
+  </script>
+</body>
+</html>

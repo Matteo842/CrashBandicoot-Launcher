@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Include="Bios\Fonts\font1.raw" />
+      <EmbeddedResource Include="Bios\Fonts\font2.raw" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
+      <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.6" />
+      <PackageReference Include="NativeFileDialogSharp" Version="0.5.0" />
+      <PackageReference Include="Silk.NET" Version="2.22.0" />
+      <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
+      <PackageReference Include="Silk.NET.SDL" Version="2.23.0" />
+    </ItemGroup>
+
+</Project>
