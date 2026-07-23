@@ -33,7 +33,7 @@ If someone offers you this project **bundled with a ROM/ISO**, that is not from 
 
 ---
 
-## Requirements (players)
+## Requirements
 
 - Windows 10/11 x64  
 - [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge)  
@@ -43,7 +43,7 @@ We only aim to support that specific version for now.
 
 ---
 
-## How to play (when a release exists)
+## How to play
 
 1. Download the **release** `.exe` from this GitHub repo (not a random reupload).  
 2. Run `CrashBandicoot.exe`.  
