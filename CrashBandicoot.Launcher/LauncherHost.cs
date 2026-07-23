@@ -21,10 +21,11 @@ public sealed class LauncherHost : Form
     public LauncherHost()
     {
         Text = "Crash Bandicoot: Recompiled";
-        Width = 1280;
-        Height = 720;
+        // Fixed size: ~20% narrower than the previous 1280×720 default.
+        ClientSize = new Size(1024, 720);
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(960, 600);
         BackColor = Color.FromArgb(6, 16, 24);
 
         Controls.Add(_web);

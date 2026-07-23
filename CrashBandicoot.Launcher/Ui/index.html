@@ -16,6 +16,9 @@
       --sand: #f4e4bc;
       --danger: #ff3b3b;
       --ok: #7dff9a;
+      --wood: #c47a2a;
+      --wood-dark: #8a4a12;
+      --wood-deep: #5c3008;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,7 +42,7 @@
         radial-gradient(ellipse 60% 40% at 85% 15%, rgba(40, 120, 70, 0.35), transparent 50%),
         linear-gradient(165deg, #0a2818 0%, #061018 45%, #120a08 100%);
       display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
+      grid-template-columns: 0.95fr 1.05fr;
       grid-template-rows: 1fr auto;
     }
 
@@ -56,14 +59,32 @@
       pointer-events: none;
     }
 
+    .map-bg {
+      position: absolute;
+      left: 50%;
+      top: 46%;
+      transform: translate(-50%, -50%);
+      width: min(58vw, 520px);
+      height: auto;
+      max-height: 70%;
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+      z-index: 0;
+      filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.55));
+    }
+
     .hero {
       position: relative;
       z-index: 1;
-      padding: 56px 48px 40px;
+      padding: 40px 28px 24px 40px;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: 18px;
+      align-items: flex-start;
+      gap: 24px;
+      min-height: 0;
+      overflow: visible;
     }
 
     .brand {
@@ -77,58 +98,134 @@
 
     .brand .crash {
       display: block;
-      font-size: clamp(52px, 8vw, 92px);
+      font-size: clamp(40px, 7vw, 72px);
       color: var(--wumpa);
       -webkit-text-stroke: 2px #3a1500;
     }
 
     .brand .recomp {
       display: block;
-      font-size: clamp(22px, 3.4vw, 36px);
+      font-size: clamp(18px, 3vw, 30px);
       color: var(--danger);
       -webkit-text-stroke: 1px #3a0000;
       margin-top: 4px;
     }
 
-    .tagline {
-      max-width: 28ch;
-      font-size: 17px;
-      font-weight: 600;
-      opacity: 0.9;
-      animation: fade-up 0.7s 0.15s both;
+    /* Crash-style crate: planks + raised X + frame + ? */
+    .crate {
+      width: 220px;
+      height: 220px;
+      position: relative;
+      flex-shrink: 0;
+      border-radius: 4px;
+      background: #3a2008;
+      box-shadow: 0 16px 28px rgba(0, 0, 0, 0.5);
+      animation: crate-bob 3.2s ease-in-out infinite, fade-up 0.7s 0.25s both;
+      overflow: hidden;
     }
 
-    .crate {
-      width: min(280px, 40vw);
-      aspect-ratio: 1;
-      margin-top: 12px;
-      border-radius: 10px;
+    .crate-planks {
+      position: absolute;
+      inset: 20px;
       background:
-        linear-gradient(145deg, #c47a2a, #8a4a12 55%, #5c3008);
-      border: 4px solid #3a2008;
+        repeating-linear-gradient(
+          180deg,
+          #d0893a 0 21%,
+          #7a4010 21% 24%,
+          #c47a2a 24% 45%,
+          #7a4010 45% 48%,
+          #d08e3f 48% 69%,
+          #7a4010 69% 72%,
+          #b86f24 72% 100%
+        );
+      box-shadow: inset 0 0 16px rgba(40, 18, 0, 0.4);
+    }
+
+    .crate-x {
+      position: absolute;
+      inset: 24px;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .crate-x::before,
+    .crate-x::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 26px;
+      height: 155%;
+      border-radius: 2px;
+      background:
+        linear-gradient(90deg, #8a4a12 0%, #d0893a 28%, #e0a050 48%, #c47a2a 72%, #6e3810 100%);
       box-shadow:
-        inset 0 0 0 6px rgba(255, 200, 80, 0.25),
-        0 18px 40px rgba(0,0,0,0.45);
+        4px 4px 0 rgba(30, 12, 0, 0.55),
+        inset 1px 0 0 rgba(255, 210, 140, 0.35),
+        inset -1px 0 0 rgba(60, 25, 0, 0.45);
+    }
+
+    .crate-x::before { transform: translate(-50%, -50%) rotate(45deg); z-index: 1; }
+    .crate-x::after { transform: translate(-50%, -50%) rotate(-45deg); z-index: 2; }
+
+    .crate-frame {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+      box-shadow:
+        inset 0 0 0 20px #b86f24,
+        inset 0 0 0 22px #3a2008,
+        inset 3px 3px 0 rgba(255, 200, 120, 0.28),
+        inset -3px -3px 0 rgba(40, 18, 0, 0.45);
+      background:
+        linear-gradient(#d0893a, #8a4a12) top / 100% 20px no-repeat,
+        linear-gradient(#8a4a12, #5c3008) bottom / 100% 20px no-repeat,
+        linear-gradient(90deg, #d0893a, #8a4a12) left / 20px 100% no-repeat,
+        linear-gradient(90deg, #8a4a12, #5c3008) right / 20px 100% no-repeat;
+    }
+
+    .crate-bolt {
+      position: absolute;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 30%, #e8eaec, #8a9098 55%, #3a3e44);
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.4),
+        0 2px 3px rgba(0, 0, 0, 0.6),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+      z-index: 4;
+    }
+
+    .crate-bolt.tl { top: 13px; left: 13px; }
+    .crate-bolt.tr { top: 13px; right: 13px; }
+    .crate-bolt.bl { bottom: 13px; left: 13px; }
+    .crate-bolt.br { bottom: 13px; right: 13px; }
+
+    .crate-mark {
+      position: absolute;
+      inset: 0;
       display: grid;
       place-items: center;
-      position: relative;
-      animation: crate-bob 3.2s ease-in-out infinite, fade-up 0.7s 0.25s both;
-    }
-
-    .crate::after {
-      content: "?";
+      z-index: 5;
       font-family: "Bungee", Impact, sans-serif;
-      font-size: 110px;
-      color: #ffe08a;
-      text-shadow: 0 4px 0 #5a3000;
+      font-size: 112px;
       line-height: 1;
+      color: #ffe14a;
+      -webkit-text-stroke: 7px #e01818;
+      paint-order: stroke fill;
+      text-shadow: 0 3px 0 rgba(80, 0, 0, 0.35);
+      pointer-events: none;
     }
 
     .panel {
       position: relative;
       z-index: 1;
       align-self: center;
-      padding: 40px 48px 40px 24px;
+      justify-self: end;
+      padding: 40px 40px 40px 24px;
       animation: fade-up 0.7s 0.2s both;
     }
 
@@ -145,11 +242,12 @@
       background: transparent;
       color: var(--sand);
       font-family: "Bungee", Impact, sans-serif;
-      font-size: 28px;
+      font-size: clamp(22px, 2.6vw, 28px);
       text-align: left;
       padding: 10px 14px;
       cursor: pointer;
       letter-spacing: 0.04em;
+      text-shadow: 0 2px 0 #1a0a00, 0 0 12px rgba(0, 0, 0, 0.85);
       transition: transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease;
     }
 
@@ -177,13 +275,48 @@
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
-      gap: 24px;
-      padding: 18px 40px 22px;
+      gap: 16px;
+      padding: 14px 28px 18px;
       border-top: 1px solid rgba(255, 200, 120, 0.12);
       background: linear-gradient(180deg, transparent, rgba(0,0,0,0.35));
       position: relative;
       z-index: 1;
     }
+
+    .foot-left {
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .info-btn {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 180, 60, 0.55);
+      background: rgba(255, 138, 0, 0.18);
+      color: var(--wumpa-hot);
+      font-family: "Bungee", Impact, sans-serif;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .info-btn:hover,
+    .info-btn:focus-visible {
+      background: rgba(255, 138, 0, 0.35);
+      box-shadow: 0 0 16px rgba(255, 160, 0, 0.35);
+      transform: scale(1.06);
+      outline: none;
+    }
+
+    .foot-main { min-width: 0; }
 
     .status {
       font-size: 14px;
@@ -333,25 +466,29 @@
 
     @keyframes crate-bob {
       0%, 100% { transform: translateY(0) rotate(-2deg); }
-      50% { transform: translateY(-10px) rotate(2deg); }
-    }
-
-    @media (max-width: 900px) {
-      .stage { grid-template-columns: 1fr; }
-      .crate { display: none; }
-      .panel { padding: 12px 28px 28px; }
+      50% { transform: translateY(-8px) rotate(2deg); }
     }
   </style>
 </head>
 <body>
   <div class="stage">
+    <img class="map-bg" src="world_map.png" alt="" aria-hidden="true" draggable="false" />
+
     <section class="hero">
       <div class="brand">
         <span class="crash">Crash</span>
         <span class="recomp">Recompiled</span>
       </div>
-      <p class="tagline">Unofficial tools for a disc you own. First prepare stays on your PC — then Start uses your local cache.</p>
-      <div class="crate" aria-hidden="true"></div>
+      <div class="crate" aria-hidden="true">
+        <div class="crate-planks"></div>
+        <div class="crate-x"></div>
+        <div class="crate-frame"></div>
+        <span class="crate-bolt tl"></span>
+        <span class="crate-bolt tr"></span>
+        <span class="crate-bolt bl"></span>
+        <span class="crate-bolt br"></span>
+        <span class="crate-mark">?</span>
+      </div>
     </section>
 
     <nav class="panel">
@@ -365,11 +502,14 @@
     </nav>
 
     <footer class="foot">
-      <div>
-        <p class="status" id="status">Loading…</p>
-        <div class="disc-row" style="margin-top:10px">
-          <button class="chip" id="btnPick" type="button">Select disc (.cue)</button>
-          <span id="discName" style="opacity:.7;font-size:13px"></span>
+      <div class="foot-left">
+        <button class="info-btn" id="btnInfo" type="button" title="About" aria-label="About">i</button>
+        <div class="foot-main">
+          <p class="status" id="status">Loading…</p>
+          <div class="disc-row" style="margin-top:10px">
+            <button class="chip" id="btnPick" type="button">Select disc (.cue)</button>
+            <span id="discName" style="opacity:.7;font-size:13px"></span>
+          </div>
         </div>
       </div>
       <div class="ver" id="version">v0.1.0</div>
@@ -382,6 +522,18 @@
       <p id="prepDetail">Working from your disc…</p>
       <div class="bar"><span id="prepBar"></span></div>
       <p style="opacity:.55;font-size:12px">One-time on this PC. Later starts skip this.</p>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheetAbout">
+    <div class="card">
+      <h2>About</h2>
+      <p><strong>Unofficial fan project</strong> — not affiliated with Sony, Activision, or Naughty Dog.</p>
+      <p>Unofficial tools for a disc you own. First prepare stays on your PC — then Start uses your local cache.</p>
+      <p style="opacity:.75;font-size:13px">This app does not distribute Crash Bandicoot. You need a legal dump of the NTSC-U disc (SCUS-94900).</p>
+      <div class="row-actions">
+        <button class="btn ghost" data-close="sheetAbout" type="button">Back</button>
+      </div>
     </div>
   </div>
 
@@ -461,6 +613,9 @@
     document.getElementById("btnStart").onclick = () => post({ type: "start" });
     document.getElementById("btnPick").onclick = () => post({ type: "pickDisc" });
     document.getElementById("btnExit").onclick = () => post({ type: "exit" });
+    document.getElementById("btnInfo").onclick = () => {
+      document.getElementById("sheetAbout").classList.add("show");
+    };
     document.getElementById("btnControls").onclick = () => {
       post({ type: "getState" });
       document.getElementById("sheetControls").classList.add("show");
