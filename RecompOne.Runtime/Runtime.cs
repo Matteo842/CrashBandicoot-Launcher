@@ -33,6 +33,21 @@ public static class Runtime
     /// <summary>Resize an embedded OpenGL child to its host panel.</summary>
     public static void FitEmbeddedWindow() => HostWindow.FitEmbeddedToParent();
 
+    /// <summary>
+    /// Optional host (e.g. WinForms launcher) that owns the outer shell chrome.
+    /// When set, embedded fullscreen is applied here instead of maximizing only.
+    /// </summary>
+    static Action<bool>? _hostFullscreen;
+
+    public static void SetHostFullscreenHandler(Action<bool>? handler) => _hostFullscreen = handler;
+
+    internal static bool TryHostFullscreen(bool on)
+    {
+        if (_hostFullscreen == null) return false;
+        _hostFullscreen(on);
+        return true;
+    }
+
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();

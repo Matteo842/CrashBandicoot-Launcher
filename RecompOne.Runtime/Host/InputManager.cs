@@ -345,6 +345,13 @@ internal static unsafe class InputManager
         if (key == Key.F1)  _topBarToggle = true;
         if (key == Key.F9)  _sessionMarker = true;
         if (key == Key.F11) _fullscreenToggle = true;
+        // Alt+Enter — common fullscreen shortcut (Enter alone stays Start/Cross).
+        if (key is Key.Enter or Key.KeypadEnter
+            && (_keysDown.Contains(Key.AltLeft) || _keysDown.Contains(Key.AltRight)))
+        {
+            _fullscreenToggle = true;
+            _keysDown.Remove(key);
+        }
 
         if (EventBus.HasAnyListeners<KeyboardEvent>())
         {

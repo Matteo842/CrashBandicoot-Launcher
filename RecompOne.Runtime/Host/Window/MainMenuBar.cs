@@ -39,7 +39,7 @@ internal static class MainMenuBar
             }
 
             bool fs = ConfigManager.View.Fullscreen;
-            if (ImGui.MenuItem("Fullscreen", "F11", fs))
+            if (ImGui.MenuItem("Fullscreen", "F11 / Alt+Enter", fs))
             {
                 ConfigManager.View.Fullscreen = !fs;
                 HostWindow.SetFullscreen(!fs);

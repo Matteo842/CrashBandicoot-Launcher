@@ -22,6 +22,9 @@ public sealed class LauncherHost : Form
     readonly JsonSerializerOptions _json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     bool _inGame;
     Size _menuClientSize;
+    bool _shellFullscreen;
+    Rectangle _preFsBounds;
+    FormBorderStyle _preFsBorder = FormBorderStyle.Sizable;
 
     public LauncherHost()
     {
@@ -42,12 +45,17 @@ public sealed class LauncherHost : Form
                 "This WinForms host requires ILauncherUi.AsControl. " +
                 "A top-level Photino host should replace LauncherHost on Linux — see Ui/UI_STRATEGY.md.");
 
+        Runtime.SetHostFullscreenHandler(ApplyShellFullscreen);
         _gameHost.Resize += (_, _) =>
         {
             if (_inGame) Runtime.FitEmbeddedWindow();
         };
         Load += async (_, _) => await InitAsync();
-        FormClosed += (_, _) => _ui.Dispose();
+        FormClosed += (_, _) =>
+        {
+            Runtime.SetHostFullscreenHandler(null);
+            _ui.Dispose();
+        };
         FormClosing += (_, e) =>
         {
             // While the game loop is pumping via DoEvents, allow close to tear down the child HWND.
@@ -381,13 +389,18 @@ public sealed class LauncherHost : Form
         MaximizeBox = true;
         if (ClientSize.Width < 1280 || ClientSize.Height < 720)
             ClientSize = new Size(1280, 720);
+        // Remember windowed placement so F11 can leave borderless fullscreen cleanly.
+        _preFsBounds = Bounds;
+        _preFsBorder = FormBorderStyle.Sizable;
+        _shellFullscreen = false;
         if (ConfigManager.View.Fullscreen)
-            WindowState = FormWindowState.Maximized;
+            ApplyShellFullscreen(true);
     }
 
     void LeaveGameMode()
     {
         _inGame = false;
+        _shellFullscreen = false;
         WindowState = FormWindowState.Normal;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -395,6 +408,50 @@ public sealed class LauncherHost : Form
         _gameHost.Visible = false;
         _ui.Visible = true;
         PushState();
+    }
+
+    /// <summary>
+    /// Borderless cover of the current monitor. Maximize alone is not fullscreen
+    /// (title bar + taskbar remain) — that is what users reported as "broken".
+    /// </summary>
+    void ApplyShellFullscreen(bool on)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => ApplyShellFullscreen(on));
+            return;
+        }
+        if (!_inGame) return;
+
+        if (on)
+        {
+            if (!_shellFullscreen)
+            {
+                if (WindowState == FormWindowState.Normal)
+                    _preFsBounds = Bounds;
+                _preFsBorder = FormBorderStyle == FormBorderStyle.None
+                    ? FormBorderStyle.Sizable
+                    : FormBorderStyle;
+            }
+            _shellFullscreen = true;
+            // Normal + None + screen Bounds is the reliable WinForms borderless pattern.
+            WindowState = FormWindowState.Normal;
+            FormBorderStyle = FormBorderStyle.None;
+            Bounds = Screen.FromControl(this).Bounds;
+        }
+        else if (_shellFullscreen)
+        {
+            _shellFullscreen = false;
+            FormBorderStyle = _preFsBorder == FormBorderStyle.None
+                ? FormBorderStyle.Sizable
+                : _preFsBorder;
+            WindowState = FormWindowState.Normal;
+            if (_preFsBounds.Width > 0 && _preFsBounds.Height > 0)
+                Bounds = _preFsBounds;
+            else
+                ClientSize = new Size(1280, 720);
+        }
     }
 
     static string Unwrap(Exception ex)

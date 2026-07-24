@@ -234,10 +234,14 @@ internal static class HostWindow
         if (_window == null) return;
         if (_embedded && _embedParent != 0)
         {
-            // Maximize the launcher shell instead of exclusive fullscreen on the child.
-            var root = GetAncestor(_embedParent, GaRoot);
-            if (root != 0)
-                ShowWindow(root, on ? SwMaximize : SwRestore);
+            // Child HWND can't take exclusive fullscreen — ask the launcher shell
+            // (borderless cover of the monitor). Fall back to maximize if no host handler.
+            if (!Runtime.TryHostFullscreen(on))
+            {
+                var root = GetAncestor(_embedParent, GaRoot);
+                if (root != 0)
+                    ShowWindow(root, on ? SwMaximize : SwRestore);
+            }
             FitEmbeddedToParent();
             return;
         }
