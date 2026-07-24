@@ -404,10 +404,20 @@ internal static class HostWindow
         _layoutPending = true;
     }
 
+    static void ApplyUiScale()
+    {
+        if (_window == null) return;
+        var fb = _window.FramebufferSize;
+        // 1280×720 baseline; grow on 1440p/4K so popups aren't tiny.
+        float s = Math.Clamp(Math.Min(fb.X / 1280f, fb.Y / 720f), 1f, 2.25f);
+        ImGui.GetIO().FontGlobalScale = s;
+    }
+
     static void OnRender(double dt)
     {
         var gl = _gl!;
         _imgui!.Update((float)dt);
+        ApplyUiScale();
     
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         var fbDef = _window!.FramebufferSize;
@@ -490,7 +500,8 @@ internal static class HostWindow
         // flip DockSpace flags (old code used an invalid 4096 flag when count<=1).
         int contentOpen = PanelManager.Panels.Count(p =>
             p.IsOpen &&
-            p is not AboutPopup and not SettingsPopup and not Modding.ModsPopup and not DiscPickerPopup);
+            p is not AboutPopup and not SettingsPopup and not Modding.ModsPopup
+                and not DiscPickerPopup and not CheatPopup);
         var dockFlags = ImGuiDockNodeFlags.PassthruCentralNode | ImGuiDockNodeFlags.AutoHideTabBar;
         if (contentOpen <= 1)
             dockFlags |= ImGuiDockNodeFlags.NoDockingSplit | ImGuiDockNodeFlags.NoUndocking;

@@ -8,15 +8,34 @@ namespace RecompOne.Runtime.Host.Window;
 internal sealed class CheatPopup : IPanel
 {
     public string Name => "Cheat";
-    public bool IsOpen { get; set; }
+
+    bool _open;
+    bool _focusOnce;
+
+    public bool IsOpen
+    {
+        get => _open;
+        set
+        {
+            if (_open == value) return;
+            _open = value;
+            _focusOnce = false;
+        }
+    }
 
     public void Draw()
     {
         var vp = ImGui.GetMainViewport();
-        ImGui.SetNextWindowSize(new Vector2(360, 260), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(vp.GetCenter(), ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
+        float ui = Math.Clamp(ImGui.GetIO().FontGlobalScale, 1f, 2.5f);
+        ImGui.SetNextWindowSize(new Vector2(420 * ui, 300 * ui), ImGuiCond.Appearing);
+        ImGui.SetNextWindowPos(vp.GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        if (!_focusOnce)
+        {
+            ImGui.SetNextWindowFocus();
+            _focusOnce = true;
+        }
 
-        bool open = IsOpen;
+        bool open = _open;
         if (!ImGui.Begin(Name, ref open,
                 ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoSavedSettings))
         {
@@ -36,6 +55,7 @@ internal sealed class CheatPopup : IPanel
             CheatConfig.InfiniteLives = infinite;
             CheatConfig.Save();
         }
+        ImGuiEx.TextDisabled("Keeps map lives at 99 and freezes the active level lives counter.");
 
         bool levelSelect = CheatConfig.LevelSelect;
         if (ImGui.Checkbox("Level Select", ref levelSelect))
@@ -53,9 +73,6 @@ internal sealed class CheatPopup : IPanel
 
         if (ImGui.Button("Instant Save Menu", new Vector2(-1, 0)))
             CheatManager.OpenInstantSaveMenu();
-
-        ImGui.Spacing();
-        ImGuiEx.TextDisabled("Freezes apply while the game is running.");
 
         IsOpen = open;
         ImGui.End();

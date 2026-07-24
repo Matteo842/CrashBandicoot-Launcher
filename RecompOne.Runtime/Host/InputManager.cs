@@ -35,14 +35,23 @@ internal static unsafe class InputManager
     static bool _topBarToggle;
     static bool _fullscreenToggle;
     static bool _sessionMarker;
-    static bool _cheatMenuToggle;
+    static bool _cheatMenuHeld;
     static readonly HashSet<Key> _keysDown = [];
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
-    public static bool ConsumeCheatMenuToggle() { var v = _cheatMenuToggle; _cheatMenuToggle = false; return v; }
+
+    /// <summary>One edge per physical press. Reconciles sticky _keysDown when KeyUp is lost (ImGui focus).</summary>
+    public static bool ConsumeCheatMenuToggle()
+    {
+        var key = ResolveCheatMenuKey();
+        bool down = IsKeyDownReconciled(key);
+        bool pressed = down && !_cheatMenuHeld;
+        _cheatMenuHeld = down;
+        return pressed;
+    }
 
     public static void Initialize(IInputContext input)
     {
@@ -78,7 +87,26 @@ internal static unsafe class InputManager
     public static bool IsPadConnected(int pad) => pad == 0 ? _pad0 != null : _pad1 != null;
 
     // Prefer our own edge-tracked set: IsKeyPressed is unreliable with a manual DoEvents pump.
-    public static bool IsKeyDown(Key k) => _keysDown.Contains(k) || (_keyboard?.IsKeyPressed(k) ?? false);
+    public static bool IsKeyDown(Key k) => IsKeyDownReconciled(k);
+
+    static bool IsKeyDownReconciled(Key k)
+    {
+        if (_keyboard != null)
+        {
+            try
+            {
+                bool hw = _keyboard.IsKeyPressed(k);
+                if (!hw) _keysDown.Remove(k);
+                else _keysDown.Add(k);
+                return hw;
+            }
+            catch
+            {
+                // fall through to tracked set
+            }
+        }
+        return _keysDown.Contains(k);
+    }
 
     public static void Poll()
     {
@@ -317,7 +345,6 @@ internal static unsafe class InputManager
         if (key == Key.F1)  _topBarToggle = true;
         if (key == Key.F9)  _sessionMarker = true;
         if (key == Key.F11) _fullscreenToggle = true;
-        if (IsCheatMenuKey(key)) _cheatMenuToggle = true;
 
         if (EventBus.HasAnyListeners<KeyboardEvent>())
         {
@@ -340,11 +367,11 @@ internal static unsafe class InputManager
         }
     }
 
-    static bool IsCheatMenuKey(Key key)
+    static Key ResolveCheatMenuKey()
     {
         var name = ConfigManager.View.CheatMenuKey;
-        if (string.IsNullOrWhiteSpace(name)) name = "F3";
-        return Enum.TryParse<Key>(name, ignoreCase: true, out var bound) && key == bound;
+        if (string.IsNullOrWhiteSpace(name)) return Key.F3;
+        return Enum.TryParse<Key>(name.Trim(), ignoreCase: true, out var bound) ? bound : Key.F3;
     }
 
     static void OnMouseMove(IMouse mouse, Vector2 position)
