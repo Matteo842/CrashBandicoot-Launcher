@@ -499,10 +499,13 @@ public sealed class GlBackend : IGpuBackend
                 if (src == null || rt.LastDrawFrame > src.LastDrawFrame) src = rt;
             }
 
-        int w1x = src != null ? w + src.Margin * 2 : w;
+        // Only show side margins while FOV expand is filling them. Otherwise present the
+        // 4:3 core alone (clean black pillars) — avoids flickering stale gutter pixels on
+        // intro / title / menu before gameplay.
+        bool showWide = src is { Margin: > 0 } && GpuHle.WideFovActive;
+        int w1x = showWide ? w + src!.Margin * 2 : w;
         int h1x = h;
-        float aspect = src is { Margin: > 0 } ? GpuHle.WideAspect : GpuHle.OutputAspect;
-
+        float aspect = showWide ? GpuHle.WideAspect : GpuHle.OutputAspect;
 
         int presentScale = GpuHle.NativeResolution ? 1 : GlVram.Scale;
         int fbW = w1x * presentScale;
@@ -527,12 +530,30 @@ public sealed class GlBackend : IGpuBackend
         }
         else if (src != null)
         {
-            // Wide RT: present full width including side margins (extra FOV), not just the 4:3 core.
-            int ox = src.Margin > 0 ? 0 : dispX - src.X;
-            int ow = src.Margin > 0 ? src.Wide1x : w;
+            int ox, ow, texW;
+            if (showWide)
+            {
+                // Full wide RT including side margins (extra FOV).
+                ox = 0;
+                ow = src.Wide1x;
+                texW = src.Wide1x;
+            }
+            else if (src.Margin > 0)
+            {
+                // Wide RT exists but cinema/menu: crop to 4:3 core only.
+                ox = src.Margin + dispX - src.X;
+                ow = w;
+                texW = src.Wide1x;
+            }
+            else
+            {
+                ox = dispX - src.X;
+                ow = w;
+                texW = src.W;
+            }
             _gl.Uniform2(_uPresentOrigin, (float)ox, dispY - src.Y);
             _gl.Uniform2(_uPresentSize, (float)ow, h1x);
-            _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
+            _gl.Uniform2(_uPresentTexSize, (float)texW, src.H);
         }
         else
         {

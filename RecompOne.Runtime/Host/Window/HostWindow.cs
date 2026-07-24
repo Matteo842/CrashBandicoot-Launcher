@@ -240,9 +240,13 @@ internal static class HostWindow
 
     /// <summary>
     /// Enable 16:9 horizontal FOV expansion (side margins). Off keeps classic 4:3 without stretch.
+    /// Cinema levels (Crash 1 Intro/Ending) keep 4:3 framing with black pillars while widescreen is on.
     /// </summary>
     public static void ApplyWidescreen(bool on)
-        => Hle.GpuHle.WideAspect = on ? 16f / 9f : 0f;
+    {
+        Hle.GpuHle.WideAspect = on ? 16f / 9f : 0f;
+        Hle.GpuHle.RefreshWideFov();
+    }
 
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
 

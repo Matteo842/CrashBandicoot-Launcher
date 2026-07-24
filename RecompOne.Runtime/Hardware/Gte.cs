@@ -183,7 +183,8 @@ public static class Gte
         long xTerm = (long)div * IR1;
         // Widescreen: expand horizontal FOV into side margins (16:9 / 4:3 = 4/3).
         // Paired with GpuHle.WideAspect render targets — not a display stretch.
-        if (Hle.GpuHle.WideAspect > 0f)
+        // WideFovActive is off for Crash 1 Intro/Ending (cinema keeps 4:3 + black bars).
+        if (Hle.GpuHle.WideFovActive)
             xTerm = xTerm * 4 / 3;
         long sx = CheckMac0(xTerm + OFX); MAC0 = (int)sx;
         long sy = CheckMac0((long)div * IR2 + OFY); MAC0 = (int)sy;
