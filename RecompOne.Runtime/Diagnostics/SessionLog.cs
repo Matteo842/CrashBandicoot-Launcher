@@ -9,7 +9,7 @@ namespace RecompOne.Runtime.Diagnostics;
 public static class SessionLog
 {
     // TEMP playtest: leave true. Flip to false before pushing a release build.
-    public static bool Enabled = true;
+    public static bool Enabled = false;
 
     static readonly object Gate = new();
     static StreamWriter? _writer;

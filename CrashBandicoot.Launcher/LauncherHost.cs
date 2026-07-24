@@ -10,7 +10,7 @@ namespace CrashBandicoot.Launcher;
 
 public sealed class LauncherHost : Form
 {
-    public const string AppVersion = "1.0.0";
+    public const string AppVersion = "1.1.0";
 
     readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     readonly Panel _gameHost = new()
@@ -132,7 +132,7 @@ public sealed class LauncherHost : Form
                     BeginInvoke(Close);
                     break;
                 case "openMods":
-                    // Mods menu disabled for 1.0 — ignored on purpose.
+                    // Mods menu disabled for 1.x — ignored on purpose.
                     break;
                 case "saveControls":
                     SaveControls(root);
