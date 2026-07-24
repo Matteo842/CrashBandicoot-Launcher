@@ -440,8 +440,11 @@ public sealed class LauncherHost : Form
             FormBorderStyle = FormBorderStyle.None;
             Bounds = Screen.FromControl(this).Bounds;
         }
-        else if (_shellFullscreen)
+        else
         {
+            // Always leave borderless even if our flag desynced (F11 must exit).
+            if (!_shellFullscreen && FormBorderStyle != FormBorderStyle.None)
+                return;
             _shellFullscreen = false;
             FormBorderStyle = _preFsBorder == FormBorderStyle.None
                 ? FormBorderStyle.Sizable
@@ -452,6 +455,19 @@ public sealed class LauncherHost : Form
             else
                 ClientSize = new Size(1280, 720);
         }
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (_inGame)
+        {
+            if (keyData == Keys.F11 || keyData == (Keys.Alt | Keys.Enter))
+            {
+                Runtime.RequestFullscreenToggle();
+                return true;
+            }
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     static string Unwrap(Exception ex)

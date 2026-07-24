@@ -48,6 +48,12 @@ public static class Runtime
         return true;
     }
 
+    /// <summary>Apply / leave fullscreen (shell + immersive chrome).</summary>
+    public static void SetFullscreen(bool on) => HostWindow.SetFullscreen(on);
+
+    /// <summary>Queue a fullscreen toggle (safe from WinForms key routing).</summary>
+    public static void RequestFullscreenToggle() => Host.InputManager.RequestFullscreenToggle();
+
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();

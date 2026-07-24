@@ -100,6 +100,10 @@ internal static class HostWindow
 
             if (embed)
                 TryEmbedIntoParent(_embedParent);
+
+            // Match shell + hide menu/tab chrome when starting already in fullscreen.
+            if (ConfigManager.View.Fullscreen)
+                SetFullscreen(true);
         }
         catch (Exception e)
         {
@@ -121,6 +125,7 @@ internal static class HostWindow
         _discPicker = null;
         _embedded = false;
         _embedChild = 0;
+        _chromeFsActive = false;
         _ramTask = null;
         _ramReady = false;
         _ramFrame = 0;
@@ -229,9 +234,13 @@ internal static class HostWindow
         catch { /* ImGui may already be torn down */ }
     }
 
+    static bool _chromeFsActive;
+    static bool _savedHideTopBar;
+
     public static void SetFullscreen(bool on)
     {
-        if (_window == null) return;
+        ApplyFullscreenChrome(on);
+
         if (_embedded && _embedParent != 0)
         {
             // Child HWND can't take exclusive fullscreen — ask the launcher shell
@@ -245,7 +254,33 @@ internal static class HostWindow
             FitEmbeddedToParent();
             return;
         }
+
+        if (_window == null) return;
         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
+    }
+
+    /// <summary>
+    /// Immersive mode: hide Settings/Mods/Debug menu. Output tab is hidden separately
+    /// by <see cref="OutputPanel"/> when Fullscreen is on.
+    /// </summary>
+    static void ApplyFullscreenChrome(bool on)
+    {
+        if (on)
+        {
+            if (!_chromeFsActive)
+            {
+                _savedHideTopBar = ConfigManager.View.HideTopBar;
+                _chromeFsActive = true;
+            }
+            ConfigManager.View.HideTopBar = true;
+        }
+        else if (_chromeFsActive)
+        {
+            ConfigManager.View.HideTopBar = _savedHideTopBar;
+            _chromeFsActive = false;
+            // Re-dock Output after immersive ##FullscreenOutput stopped submitting "Output".
+            _layoutPending = true;
+        }
     }
 
     /// <summary>

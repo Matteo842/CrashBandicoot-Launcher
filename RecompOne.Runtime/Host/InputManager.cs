@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Silk.NET.Input;
 using Silk.NET.SDL;
 using RecompOne.Runtime.Config;
@@ -42,6 +43,9 @@ internal static unsafe class InputManager
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
+
+    /// <summary>Host / async-key path can request a toggle without Silk KeyDown.</summary>
+    public static void RequestFullscreenToggle() => _fullscreenToggle = true;
 
     /// <summary>One edge per physical press. Reconciles sticky _keysDown when KeyUp is lost (ImGui focus).</summary>
     public static bool ConsumeCheatMenuToggle()
@@ -110,11 +114,36 @@ internal static unsafe class InputManager
 
     public static void Poll()
     {
+        PollFullscreenHotkeys();
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
         Controller.Connected2 = _pad1 != null || HasAnyKey(ConfigManager.Game.Keys2);
     }
+
+    // Embedded child HWND often doesn't get Silk KeyDown (focus on parent / lost focus).
+    // Edge-detect F11 / Alt+Enter via GetAsyncKeyState so toggle always works.
+    static bool _asyncF11;
+    static bool _asyncAltEnter;
+    const int VkF11 = 0x7A;
+    const int VkMenu = 0x12;   // either Alt
+    const int VkReturn = 0x0D;
+
+    static void PollFullscreenHotkeys()
+    {
+        bool f11 = (GetAsyncKeyState(VkF11) & 0x8000) != 0;
+        if (f11 && !_asyncF11) _fullscreenToggle = true;
+        _asyncF11 = f11;
+
+        bool alt = (GetAsyncKeyState(VkMenu) & 0x8000) != 0;
+        bool enter = (GetAsyncKeyState(VkReturn) & 0x8000) != 0;
+        bool altEnter = alt && enter;
+        if (altEnter && !_asyncAltEnter) _fullscreenToggle = true;
+        _asyncAltEnter = altEnter;
+    }
+
+    [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vKey);
 
     public static int? GetFirstPressedPadButton(int pad = 0)
     {
