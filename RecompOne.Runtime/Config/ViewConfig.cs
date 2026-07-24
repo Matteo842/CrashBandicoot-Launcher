@@ -58,4 +58,18 @@ public class ViewConfig
         get => GetBool("Widescreen");
         set => SetBool("Widescreen", value);
     }
+
+    /// <summary>Host hotkey that opens/closes the Cheat menu (Silk Key name, e.g. F3).</summary>
+    public string CheatMenuKey
+    {
+        get
+        {
+            // Prefer new key; fall back to legacy MiracomandoKey if present.
+            if (Values.TryGetValue("CheatMenuKey", out var v) && !string.IsNullOrWhiteSpace(v))
+                return v;
+            var legacy = GetString("MiracomandoKey", "");
+            return string.IsNullOrWhiteSpace(legacy) ? "F3" : legacy;
+        }
+        set => SetString("CheatMenuKey", string.IsNullOrWhiteSpace(value) ? "F3" : value);
+    }
 }

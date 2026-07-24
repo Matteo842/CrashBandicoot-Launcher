@@ -1,10 +1,10 @@
 using System.Text.Json;
 using CrashBandicoot.Launcher.Recomp;
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.WinForms;
+using CrashBandicoot.Launcher.Ui;
 using NativeFileDialogSharp;
 using RecompOne.Runtime;
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Host.Cheats;
 
 namespace CrashBandicoot.Launcher;
 
@@ -12,7 +12,7 @@ public sealed class LauncherHost : Form
 {
     public const string AppVersion = "1.1.0";
 
-    readonly WebView2 _web = new() { Dock = DockStyle.Fill };
+    readonly ILauncherUi _ui = LauncherUiFactory.Create();
     readonly Panel _gameHost = new()
     {
         Dock = DockStyle.Fill,
@@ -35,12 +35,19 @@ public sealed class LauncherHost : Form
         TryApplyAppIcon();
 
         Controls.Add(_gameHost);
-        Controls.Add(_web);
+        if (_ui.AsControl != null)
+            Controls.Add(_ui.AsControl);
+        else
+            throw new InvalidOperationException(
+                "This WinForms host requires ILauncherUi.AsControl. " +
+                "A top-level Photino host should replace LauncherHost on Linux — see Ui/UI_STRATEGY.md.");
+
         _gameHost.Resize += (_, _) =>
         {
             if (_inGame) Runtime.FitEmbeddedWindow();
         };
         Load += async (_, _) => await InitAsync();
+        FormClosed += (_, _) => _ui.Dispose();
         FormClosing += (_, e) =>
         {
             // While the game loop is pumping via DoEvents, allow close to tear down the child HWND.
@@ -84,32 +91,16 @@ public sealed class LauncherHost : Form
     async Task InitAsync()
     {
         ConfigManager.Load();
-        var env = await CoreWebView2Environment.CreateAsync();
-        await _web.EnsureCoreWebView2Async(env);
-
-        _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-        _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
-        _web.CoreWebView2.Settings.AreDevToolsEnabled = true;
-
-        _web.CoreWebView2.WebMessageReceived += OnWebMessage;
-
+        _ui.MessageReceived += OnUiMessage;
         var uiDir = Path.Combine(AppContext.BaseDirectory, "Ui");
-        var index = Path.Combine(uiDir, "index.html");
-        if (!File.Exists(index))
-            throw new FileNotFoundException("Launcher UI missing: " + index);
-
-        _web.CoreWebView2.SetVirtualHostNameToFolderMapping(
-            "crash.launcher",
-            uiDir,
-            CoreWebView2HostResourceAccessKind.Allow);
-        _web.CoreWebView2.Navigate("https://crash.launcher/index.html");
+        await _ui.InitializeAsync(uiDir);
     }
 
-    void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    void OnUiMessage(object? sender, LauncherUiMessageEventArgs e)
     {
         try
         {
-            using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+            using var doc = JsonDocument.Parse(e.Json);
             var root = doc.RootElement;
             if (!root.TryGetProperty("type", out var typeEl)) return;
             var type = typeEl.GetString() ?? "";
@@ -139,6 +130,9 @@ public sealed class LauncherHost : Form
                     break;
                 case "saveSettings":
                     SaveSettings(root);
+                    break;
+                case "saveCheats":
+                    SaveCheats(root);
                     break;
             }
         }
@@ -197,6 +191,8 @@ public sealed class LauncherHost : Form
             muted = ConfigManager.Game.Muted,
             fullscreen = ConfigManager.View.Fullscreen,
             widescreen = ConfigManager.View.Widescreen,
+            infiniteLives = CheatConfig.InfiniteLives,
+            levelSelect = CheatConfig.LevelSelect,
             mods = ConfigManager.Game.ActiveMods,
             keys = new Dictionary<string, string>
             {
@@ -210,6 +206,7 @@ public sealed class LauncherHost : Form
                 ["down"] = k.Down,
                 ["left"] = k.Left,
                 ["right"] = k.Right,
+                ["cheatMenu"] = ConfigManager.View.CheatMenuKey,
             },
         };
 
@@ -378,7 +375,7 @@ public sealed class LauncherHost : Form
     {
         _inGame = true;
         _menuClientSize = ClientSize;
-        _web.Visible = false;
+        _ui.Visible = false;
         _gameHost.Visible = true;
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
@@ -396,7 +393,7 @@ public sealed class LauncherHost : Form
         MaximizeBox = false;
         ClientSize = _menuClientSize.Width > 0 ? _menuClientSize : new Size(1024, 720);
         _gameHost.Visible = false;
-        _web.Visible = true;
+        _ui.Visible = true;
         PushState();
     }
 
@@ -426,7 +423,25 @@ public sealed class LauncherHost : Form
         k.Down = Get("down", k.Down);
         k.Left = Get("left", k.Left);
         k.Right = Get("right", k.Right);
+        if (keys.TryGetProperty("cheatMenu", out var cheatKeyEl) ||
+            keys.TryGetProperty("miracomando", out cheatKeyEl))
+        {
+            var cheatKey = cheatKeyEl.GetString();
+            if (!string.IsNullOrWhiteSpace(cheatKey))
+                ConfigManager.View.CheatMenuKey = cheatKey;
+        }
         ConfigManager.SaveGame();
+        ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
+        PushState();
+    }
+
+    void SaveCheats(JsonElement root)
+    {
+        if (root.TryGetProperty("infiniteLives", out var lives))
+            CheatConfig.InfiniteLives = lives.GetBoolean();
+        if (root.TryGetProperty("levelSelect", out var ls))
+            CheatConfig.LevelSelect = ls.GetBoolean();
+        ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
         PushState();
     }
 
@@ -466,9 +481,8 @@ public sealed class LauncherHost : Form
 
     void Post(object payload)
     {
-        if (_web.CoreWebView2 == null) return;
         var json = JsonSerializer.Serialize(payload, _json);
-        _web.CoreWebView2.PostWebMessageAsJson(json);
+        _ui.PostJson(json);
     }
 
     void PostDiscError(DiscValidation v, string? clearedPrevious = null)

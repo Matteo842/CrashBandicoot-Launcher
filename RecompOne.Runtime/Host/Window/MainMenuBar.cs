@@ -25,6 +25,10 @@ internal static class MainMenuBar
             if (ImGui.MenuItem("Settings..."))
                 if (PanelManager.Get<SettingsPopup>() is { } popup) popup.IsOpen = true;
 
+            var cheatKey = ConfigManager.View.CheatMenuKey;
+            if (ImGui.MenuItem("Cheat...", cheatKey))
+                if (PanelManager.Get<CheatPopup>() is { } cheat) cheat.IsOpen = true;
+
             ImGui.Separator();
 
             bool showBar = !ConfigManager.View.HideTopBar;

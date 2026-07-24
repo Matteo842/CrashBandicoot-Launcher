@@ -35,12 +35,14 @@ internal static unsafe class InputManager
     static bool _topBarToggle;
     static bool _fullscreenToggle;
     static bool _sessionMarker;
+    static bool _cheatMenuToggle;
     static readonly HashSet<Key> _keysDown = [];
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
+    public static bool ConsumeCheatMenuToggle() { var v = _cheatMenuToggle; _cheatMenuToggle = false; return v; }
 
     public static void Initialize(IInputContext input)
     {
@@ -315,6 +317,7 @@ internal static unsafe class InputManager
         if (key == Key.F1)  _topBarToggle = true;
         if (key == Key.F9)  _sessionMarker = true;
         if (key == Key.F11) _fullscreenToggle = true;
+        if (IsCheatMenuKey(key)) _cheatMenuToggle = true;
 
         if (EventBus.HasAnyListeners<KeyboardEvent>())
         {
@@ -335,6 +338,13 @@ internal static unsafe class InputManager
                 Pressed = false
             });
         }
+    }
+
+    static bool IsCheatMenuKey(Key key)
+    {
+        var name = ConfigManager.View.CheatMenuKey;
+        if (string.IsNullOrWhiteSpace(name)) name = "F3";
+        return Enum.TryParse<Key>(name, ignoreCase: true, out var bound) && key == bound;
     }
 
     static void OnMouseMove(IMouse mouse, Vector2 position)

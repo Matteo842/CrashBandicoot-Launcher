@@ -35,6 +35,7 @@ internal sealed class InputSettingsSection : ISettingsSection
     int _padIndex;
     int _remapRow = -1;
     bool _remapAdd;
+    bool _remapCheatMenu;
 
     public void Draw()
     {
@@ -53,6 +54,12 @@ internal sealed class InputSettingsSection : ISettingsSection
 
         DrawBindings();
 
+        if (!_gamepadMode)
+        {
+            ImGui.Spacing();
+            DrawHostHotkeys();
+        }
+
         ImGui.Spacing();
         if (ImGui.Button("Reset to Defaults"))
         {
@@ -60,6 +67,8 @@ internal sealed class InputSettingsSection : ISettingsSection
             {
                 if (_padIndex == 0) ConfigManager.Game.Keys = new KeyBindings();
                 else ConfigManager.Game.Keys2 = KeyBindings.Empty();
+                ConfigManager.View.CheatMenuKey = "F3";
+                ConfigManager.SaveView(PanelManager.Panels);
             }
             else
             {
@@ -67,6 +76,7 @@ internal sealed class InputSettingsSection : ISettingsSection
                 else ConfigManager.Game.Pad2 = GamepadBindings.Empty();
             }
             _remapRow = -1;
+            _remapCheatMenu = false;
             ConfigManager.SaveGame();
         }
     }
@@ -77,13 +87,13 @@ internal sealed class InputSettingsSection : ISettingsSection
         {
             if (ImGui.BeginTabItem("Keyboard"))
             {
-                if (_gamepadMode) _remapRow = -1;
+                if (_gamepadMode) { _remapRow = -1; _remapCheatMenu = false; }
                 _gamepadMode = false;
                 ImGui.EndTabItem();
             }
             if (ImGui.BeginTabItem("Gamepad"))
             {
-                if (!_gamepadMode) _remapRow = -1;
+                if (!_gamepadMode) { _remapRow = -1; _remapCheatMenu = false; }
                 _gamepadMode = true;
                 ImGui.EndTabItem();
             }
@@ -175,12 +185,53 @@ internal sealed class InputSettingsSection : ISettingsSection
             {
                 var key = getKey(keys);
                 var text = awaiting ? "[press key...]" : $"{(key.Length == 0 ? "unbound" : key)}##k{i}";
-                if (ImGui.Button(text, new Vector2(-1, 0))) _remapRow = i;
+                if (ImGui.Button(text, new Vector2(-1, 0)))
+                {
+                    _remapRow = i;
+                    _remapCheatMenu = false;
+                }
                 if (awaiting)
                 {
                     var p = GetPressedKey();
                     if (p != null) { setKey(keys, p); _remapRow = -1; ConfigManager.SaveGame(); }
                 }
+            }
+        }
+
+        ImGui.EndTable();
+    }
+
+    void DrawHostHotkeys()
+    {
+        ImGui.TextUnformatted("Host hotkeys");
+        if (!ImGui.BeginTable("##host-hotkeys", 2,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+            return;
+
+        ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn("Keyboard", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableHeadersRow();
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.TextUnformatted("Cheat menu");
+        ImGui.TableSetColumnIndex(1);
+
+        var key = ConfigManager.View.CheatMenuKey;
+        var text = _remapCheatMenu ? "[press key...]" : $"{key}##cheatMenu";
+        if (ImGui.Button(text, new Vector2(-1, 0)))
+        {
+            _remapCheatMenu = true;
+            _remapRow = -1;
+        }
+        if (_remapCheatMenu)
+        {
+            var p = GetPressedKey();
+            if (p != null)
+            {
+                ConfigManager.View.CheatMenuKey = p;
+                _remapCheatMenu = false;
+                ConfigManager.SaveView(PanelManager.Panels);
             }
         }
 

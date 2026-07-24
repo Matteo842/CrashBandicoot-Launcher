@@ -595,6 +595,7 @@
         <li><button class="primary" id="btnStart" type="button" disabled>Start Game</button></li>
         <li><button id="btnControls" type="button">Controls</button></li>
         <li><button id="btnSettings" type="button">Settings</button></li>
+        <li><button id="btnCheat" type="button">Cheat</button></li>
         <li><button id="btnExit" type="button">Exit</button></li>
       </ul>
     </nav>
@@ -700,6 +701,20 @@
     </div>
   </div>
 
+  <div class="sheet" id="sheetCheat">
+    <div class="card">
+      <h2>Cheat</h2>
+      <p class="hint">Cheat toggles for NTSC-U. Applied while the game is running (also open in-game with the Cheat menu key).</p>
+      <label>Infinite Lives <input id="cheatInfiniteLives" type="checkbox" /></label>
+      <label>Level Select <input id="cheatLevelSelect" type="checkbox" /></label>
+      <p class="hint">99 Lives (map) and Instant Save Menu are one-shots available in the in-game Cheat menu.</p>
+      <div class="row-actions">
+        <button class="btn primary" id="saveCheats" type="button">Save</button>
+        <button class="btn ghost" data-close="sheetCheat" type="button">Back</button>
+      </div>
+    </div>
+  </div>
+
   </div>
 
   <script>
@@ -781,7 +796,8 @@
     const keyFields = [
       ["Cross", "cross"], ["Circle", "circle"], ["Square", "square"], ["Triangle", "triangle"],
       ["Start", "start"], ["Select", "select"],
-      ["Up", "up"], ["Down", "down"], ["Left", "left"], ["Right", "right"]
+      ["Up", "up"], ["Down", "down"], ["Left", "left"], ["Right", "right"],
+      ["Cheat menu", "cheatMenu"]
     ];
 
     const form = document.getElementById("controlsForm");
@@ -809,6 +825,10 @@
       post({ type: "getState" });
       document.getElementById("sheetSettings").classList.add("show");
     };
+    document.getElementById("btnCheat").onclick = () => {
+      post({ type: "getState" });
+      document.getElementById("sheetCheat").classList.add("show");
+    };
     document.getElementById("saveControls").onclick = () => {
       const keys = {};
       for (const [, id] of keyFields) keys[id] = document.getElementById("key_" + id).value;
@@ -824,6 +844,14 @@
         widescreen: document.getElementById("widescreen").checked
       });
       document.getElementById("sheetSettings").classList.remove("show");
+    };
+    document.getElementById("saveCheats").onclick = () => {
+      post({
+        type: "saveCheats",
+        infiniteLives: document.getElementById("cheatInfiniteLives").checked,
+        levelSelect: document.getElementById("cheatLevelSelect").checked
+      });
+      document.getElementById("sheetCheat").classList.remove("show");
     };
 
     document.querySelectorAll("[data-close]").forEach(btn => {
@@ -853,6 +881,8 @@
       if (state.muted != null) document.getElementById("muted").checked = !!state.muted;
       if (state.fullscreen != null) document.getElementById("fullscreen").checked = !!state.fullscreen;
       if (state.widescreen != null) document.getElementById("widescreen").checked = !!state.widescreen;
+      if (state.infiniteLives != null) document.getElementById("cheatInfiniteLives").checked = !!state.infiniteLives;
+      if (state.levelSelect != null) document.getElementById("cheatLevelSelect").checked = !!state.levelSelect;
     };
 
     window.onPrepare = function (p) {

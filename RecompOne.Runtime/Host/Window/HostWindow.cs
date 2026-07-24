@@ -181,6 +181,12 @@ internal static class HostWindow
         }
         if (InputManager.ConsumeSessionMarker())
             RecompOne.Runtime.Diagnostics.SessionLog.Marker();
+        if (InputManager.ConsumeCheatMenuToggle())
+        {
+            if (PanelManager.Get<CheatPopup>() is { } cheat)
+                cheat.IsOpen = !cheat.IsOpen;
+        }
+        Cheats.CheatManager.Apply();
         _window.DoRender();
     }
 
@@ -367,6 +373,7 @@ internal static class HostWindow
         PanelManager.Register(new OverlayEventsPanel());
         PanelManager.Register(new SettingsPopup());
         PanelManager.Register(new Modding.ModsPopup());
+        PanelManager.Register(new CheatPopup());
         PanelManager.Register(new AboutPopup());
 
         SettingsRegistry.Register(new InputSettingsSection());
