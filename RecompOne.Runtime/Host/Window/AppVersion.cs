@@ -3,5 +3,5 @@ namespace RecompOne.Runtime.Host.Window;
 internal static class AppVersion
 {
     public const string Name = "Crash Bandicoot: Recompiled";
-    public const string Version = "1.1.0";
+    public const string Version = "1.2.0";
 }
