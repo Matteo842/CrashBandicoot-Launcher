@@ -33,11 +33,19 @@ public static class BiosA
 
     static void WriteDirEntry(IMemory m, uint ptr, string name, int size, int block)
     {
-        for (int i = 0; i < 20; i++) m.WriteU8(ptr + (uint)i, i < name.Length ? (byte)name[i] : (byte)0);
-        m.WriteU32(ptr + 0x14u, 0x50u);           // attr: normal memcard file
+        // PsyQ DIRENTRY.name[20]. A full 20-char memcard name has no room for NUL inside
+        // the field — the real BIOS lets the terminator overwrite attr's first byte
+        // (pcsx_rearmed: "nul char of full length name seems to overwrite .attr").
+        // Writing attr=0x50 after a 20-char name made Crash strlen into 'P' and open
+        // "…P" forever → AN ERROR OCCURRED.
+        int n = Math.Min(name.Length, 20);
+        for (int i = 0; i < 20; i++)
+            m.WriteU8(ptr + (uint)i, i < n ? (byte)name[i] : (byte)0);
+        m.WriteU32(ptr + 0x14u, n < 20 ? 0x50u : 0u);
         m.WriteU32(ptr + 0x18u, (uint)size);
         m.WriteU32(ptr + 0x1Cu, 0u);
-        m.WriteU32(ptr + 0x20u, (uint)block);     // first block number (1..15)
+        // head = first sector/frame of the file block (block1 → 0x40), not the block index.
+        m.WriteU32(ptr + 0x20u, (uint)(block * 0x40));
         m.WriteU32(ptr + 0x24u, 0u);
     }
 
