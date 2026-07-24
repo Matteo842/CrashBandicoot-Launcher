@@ -218,6 +218,9 @@ internal static class HostWindow
         _embedParent = 0;
         _embedChild = 0;
         _embedded = false;
+        // Avoid launcher SaveView seeing a dangling ImGui context after the session ends.
+        try { if (ImGui.GetCurrentContext() != IntPtr.Zero) ImGui.SetCurrentContext(IntPtr.Zero); }
+        catch { /* ImGui may already be torn down */ }
     }
 
     public static void SetFullscreen(bool on)
@@ -376,8 +379,11 @@ internal static class HostWindow
         io.ConfigWindowsMoveFromTitleBarOnly = true;
         unsafe { io.NativePtr->IniFilename = null; }
 
-        if (Config.ConfigManager.ApplyImGuiLayout())
-            _layoutPending = false;
+        // Load saved sizes/positions for debug panels, but always re-dock Output
+        // to the center — a bad interface.ini (or launcher SaveView with a stale
+        // ImGui context) used to leave Output as a tiny floating 640×480 window.
+        _ = Config.ConfigManager.ApplyImGuiLayout();
+        _layoutPending = true;
     }
 
     static void OnRender(double dt)
@@ -462,8 +468,14 @@ internal static class HostWindow
         ImGui.Begin("##DockHost", hostFlags);
         ImGui.PopStyleVar(3);
         uint dockId = ImGui.GetID("##MainDock");
-        int openCount = PanelManager.Panels.Count(p => p.IsOpen && p is not AboutPopup);
-        var dockFlags = openCount <= 1 ? (ImGuiDockNodeFlags)4096 : ImGuiDockNodeFlags.None;
+        // Only count real content/debug panels — Settings/Mods popups must not
+        // flip DockSpace flags (old code used an invalid 4096 flag when count<=1).
+        int contentOpen = PanelManager.Panels.Count(p =>
+            p.IsOpen &&
+            p is not AboutPopup and not SettingsPopup and not Modding.ModsPopup and not DiscPickerPopup);
+        var dockFlags = ImGuiDockNodeFlags.PassthruCentralNode | ImGuiDockNodeFlags.AutoHideTabBar;
+        if (contentOpen <= 1)
+            dockFlags |= ImGuiDockNodeFlags.NoDockingSplit | ImGuiDockNodeFlags.NoUndocking;
         ImGui.DockSpace(dockId, Vector2.Zero, dockFlags);
 
         if (_layoutPending)

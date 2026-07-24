@@ -65,6 +65,14 @@ public static class ConfigManager
             if (View.Panels.TryGetValue(p.Name, out var state))
                 p.IsOpen = state.Open;
         }
+
+        // Game display must always be visible — recover from older interface.ini
+        // that saved Panels.Output=False after the user closed the Output window.
+        foreach (var p in panels)
+        {
+            if (p.Name == "Output")
+                p.IsOpen = true;
+        }
     }
 
     public static void SaveView(IReadOnlyList<IPanel> panels)
@@ -72,12 +80,16 @@ public static class ConfigManager
         foreach (var p in panels)
             View.Panels[p.Name] = new PanelState { Open = p.IsOpen };
 
-        // Launcher (WebView2) has no ImGui context — calling SaveIniSettingsToMemory
-        // native-crashes. Only touch ImGui when a context exists (in-game host).
-        string imguiIni = "";
+        // Output is the game framebuffer — never persist it closed.
+        View.Panels["Output"] = new PanelState { Open = true };
+
+        // Launcher (WebView2) has no ImGui context — and after an embedded session a
+        // dangling context pointer can still be non-zero. Only snapshot ImGui ini when
+        // the in-game host is actively saving with live panels.
+        string imguiIni;
         try
         {
-            if (ImGui.GetCurrentContext() != IntPtr.Zero)
+            if (panels.Count > 0 && ImGui.GetCurrentContext() != IntPtr.Zero)
                 imguiIni = ImGui.SaveIniSettingsToMemory() ?? "";
             else
                 imguiIni = ReadExistingImGuiSection();

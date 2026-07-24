@@ -439,7 +439,9 @@ public sealed class LauncherHost : Form
             ConfigManager.View.Fullscreen = fs.GetBoolean();
 
         ConfigManager.SaveGame();
-        // Persist fullscreen etc. Safe without ImGui (launcher has no context).
+        // Persist Fullscreen etc. without touching ImGui layout (empty panel list
+        // + no live host). Previously this could rewrite interface.ini with a
+        // stale ImGui snapshot after an embedded game session.
         ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
         PushState();
     }
