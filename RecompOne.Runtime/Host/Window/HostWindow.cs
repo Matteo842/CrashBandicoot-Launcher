@@ -238,6 +238,12 @@ internal static class HostWindow
         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
     }
 
+    /// <summary>
+    /// Enable 16:9 horizontal FOV expansion (side margins). Off keeps classic 4:3 without stretch.
+    /// </summary>
+    public static void ApplyWidescreen(bool on)
+        => Hle.GpuHle.WideAspect = on ? 16f / 9f : 0f;
+
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
 
     public static void RequestDiscPath() => _discPicker?.Show();
@@ -342,6 +348,7 @@ internal static class HostWindow
         Hle.GpuHle.Active = _glBackend.Ready;
         Hle.GpuHle.Backend = _glBackend;
         Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
+        ApplyWidescreen(ConfigManager.View.Widescreen);
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 

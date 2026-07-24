@@ -19,6 +19,15 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
 
+        bool widescreen = ConfigManager.View.Widescreen;
+        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
+        {
+            ConfigManager.View.Widescreen = widescreen;
+            HostWindow.ApplyWidescreen(widescreen);
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Expands the view — does not stretch");
+
         bool native = ConfigManager.View.NativeResolution;
         if (ImGui.Checkbox("Native resolution", ref native))
         {

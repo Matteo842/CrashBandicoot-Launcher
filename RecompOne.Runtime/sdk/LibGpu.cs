@@ -56,6 +56,8 @@ public static class LibGpu
 
         if (isbg != 0)
         {
+            // Expand clear into widescreen side margins (coords may be negative; GP0 0x60
+            // uses 11-bit signed screen coords + draw offset, not VRAM Fill 0x02).
             int margin = GpuHle.WideMargin(clipW);
             int w = Math.Clamp(clipW + margin * 2, 0, VramShadow.Width - 1);
             int h = Math.Clamp((int)clipH, 0, VramShadow.Height - 1);

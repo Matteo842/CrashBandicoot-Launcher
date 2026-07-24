@@ -196,6 +196,7 @@ public sealed class LauncherHost : Form
             masterVolume = ConfigManager.Game.MasterVolume,
             muted = ConfigManager.Game.Muted,
             fullscreen = ConfigManager.View.Fullscreen,
+            widescreen = ConfigManager.View.Widescreen,
             mods = ConfigManager.Game.ActiveMods,
             keys = new Dictionary<string, string>
             {
@@ -437,6 +438,8 @@ public sealed class LauncherHost : Form
             ConfigManager.Game.Muted = muted.GetBoolean();
         if (root.TryGetProperty("fullscreen", out var fs))
             ConfigManager.View.Fullscreen = fs.GetBoolean();
+        if (root.TryGetProperty("widescreen", out var ws))
+            ConfigManager.View.Widescreen = ws.GetBoolean();
 
         ConfigManager.SaveGame();
         // Persist Fullscreen etc. without touching ImGui layout (empty panel list

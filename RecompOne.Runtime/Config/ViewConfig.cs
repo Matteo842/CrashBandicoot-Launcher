@@ -49,4 +49,13 @@ public class ViewConfig
         get => GetBool("NativeResolution");
         set => SetBool("NativeResolution", value);
     }
+
+    /// <summary>
+    /// Expand horizontal FOV to 16:9 (side margins). Does not stretch the 4:3 image.
+    /// </summary>
+    public bool Widescreen
+    {
+        get => GetBool("Widescreen");
+        set => SetBool("Widescreen", value);
+    }
 }

@@ -514,6 +514,13 @@
       font-size: 14px;
     }
 
+    .sheet .hint {
+      margin: 0 0 8px;
+      font-size: 12px;
+      opacity: 0.7;
+      color: var(--sand);
+    }
+
     .sheet input[type="text"],
     .sheet input[type="range"] {
       width: 100%;
@@ -684,6 +691,8 @@
       <label>Master volume <input id="vol" type="range" min="0" max="1" step="0.01" /></label>
       <label>Muted <input id="muted" type="checkbox" /></label>
       <label>Fullscreen <input id="fullscreen" type="checkbox" /></label>
+      <label>Widescreen 16:9 <input id="widescreen" type="checkbox" /></label>
+      <p class="hint">Expands the field of view — does not stretch the image.</p>
       <div class="row-actions">
         <button class="btn primary" id="saveSettings" type="button">Save</button>
         <button class="btn ghost" data-close="sheetSettings" type="button">Back</button>
@@ -811,7 +820,8 @@
         type: "saveSettings",
         masterVolume: Number(document.getElementById("vol").value),
         muted: document.getElementById("muted").checked,
-        fullscreen: document.getElementById("fullscreen").checked
+        fullscreen: document.getElementById("fullscreen").checked,
+        widescreen: document.getElementById("widescreen").checked
       });
       document.getElementById("sheetSettings").classList.remove("show");
     };
@@ -842,6 +852,7 @@
       if (state.masterVolume != null) document.getElementById("vol").value = state.masterVolume;
       if (state.muted != null) document.getElementById("muted").checked = !!state.muted;
       if (state.fullscreen != null) document.getElementById("fullscreen").checked = !!state.fullscreen;
+      if (state.widescreen != null) document.getElementById("widescreen").checked = !!state.widescreen;
     };
 
     window.onPrepare = function (p) {

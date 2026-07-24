@@ -527,8 +527,11 @@ public sealed class GlBackend : IGpuBackend
         }
         else if (src != null)
         {
-            _gl.Uniform2(_uPresentOrigin, (float)(dispX - src.X), dispY - src.Y);
-            _gl.Uniform2(_uPresentSize, (float)w1x, h1x);
+            // Wide RT: present full width including side margins (extra FOV), not just the 4:3 core.
+            int ox = src.Margin > 0 ? 0 : dispX - src.X;
+            int ow = src.Margin > 0 ? src.Wide1x : w;
+            _gl.Uniform2(_uPresentOrigin, (float)ox, dispY - src.Y);
+            _gl.Uniform2(_uPresentSize, (float)ow, h1x);
             _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
         }
         else

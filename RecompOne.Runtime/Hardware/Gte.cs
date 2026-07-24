@@ -180,7 +180,12 @@ public static class Gte
         SZ[0] = SZ[1]; SZ[1] = SZ[2]; SZ[2] = SZ[3]; SZ[3] = (ushort)sz;
 
         uint div = Divide(H, SZ[3]);
-        long sx = CheckMac0((long)div * IR1 + OFX); MAC0 = (int)sx;
+        long xTerm = (long)div * IR1;
+        // Widescreen: expand horizontal FOV into side margins (16:9 / 4:3 = 4/3).
+        // Paired with GpuHle.WideAspect render targets — not a display stretch.
+        if (Hle.GpuHle.WideAspect > 0f)
+            xTerm = xTerm * 4 / 3;
+        long sx = CheckMac0(xTerm + OFX); MAC0 = (int)sx;
         long sy = CheckMac0((long)div * IR2 + OFY); MAC0 = (int)sy;
         int nx = SatX((int)(sx >> 16));
         int ny = SatY((int)(sy >> 16));
