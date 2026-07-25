@@ -1,58 +1,51 @@
 namespace RecompOne.Runtime;
 
 /// <summary>
-/// Maps truncated GTE screen XY to the pre-truncate subpixel values for dejitter.
-/// Game still reads integer SXY; only the HLE raster uses the floats.
+/// Maps truncated GTE screen XY to pre-truncate subpixel values for dejitter.
+/// Ring of recent RTP results (exact int match, most-recent wins) — avoids hash
+/// collisions that swapped wrong floats onto vertices and made textures swim.
 /// </summary>
 static class GteScreenCache
 {
-    const int Size = 2048;
+    const int Size = 256;
     const int Mask = Size - 1;
 
     static readonly short[] _ix = new short[Size];
     static readonly short[] _iy = new short[Size];
     static readonly float[] _fx = new float[Size];
     static readonly float[] _fy = new float[Size];
-    static readonly byte[] _live = new byte[Size];
-
-    static int Hash(int x, int y) => ((x * 73856093) ^ (y * 19349663)) & Mask;
+    static int _head;
+    static int _count;
 
     public static void Store(int ix, int iy, float fx, float fy)
     {
-        int i = Hash(ix, iy);
-        for (int p = 0; p < 4; p++)
-        {
-            int s = (i + p) & Mask;
-            if (_live[s] == 0 || (_ix[s] == ix && _iy[s] == iy))
-            {
-                _ix[s] = (short)ix;
-                _iy[s] = (short)iy;
-                _fx[s] = fx;
-                _fy[s] = fy;
-                _live[s] = 1;
-                return;
-            }
-        }
-        // Collision: overwrite primary slot.
+        // Only keep values that are the same pixel as the truncated screen XY.
+        if (MathF.Abs(fx - ix) >= 1.01f || MathF.Abs(fy - iy) >= 1.01f)
+            return;
+
+        int i = _head;
         _ix[i] = (short)ix;
         _iy[i] = (short)iy;
         _fx[i] = fx;
         _fy[i] = fy;
-        _live[i] = 1;
+        _head = (i + 1) & Mask;
+        if (_count < Size) _count++;
     }
 
     public static bool TryFind(int ix, int iy, out float fx, out float fy)
     {
-        int i = Hash(ix, iy);
-        for (int p = 0; p < 4; p++)
+        // Scan newest → oldest so a reused screen pixel gets the latest projection.
+        int n = _count;
+        int i = (_head - 1) & Mask;
+        for (int k = 0; k < n; k++)
         {
-            int s = (i + p) & Mask;
-            if (_live[s] != 0 && _ix[s] == ix && _iy[s] == iy)
+            if (_ix[i] == ix && _iy[i] == iy)
             {
-                fx = _fx[s];
-                fy = _fy[s];
+                fx = _fx[i];
+                fy = _fy[i];
                 return true;
             }
+            i = (i - 1) & Mask;
         }
         fx = fy = 0f;
         return false;

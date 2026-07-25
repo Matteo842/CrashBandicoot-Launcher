@@ -16,10 +16,10 @@ public sealed partial class Gpu
         SetMask = _setMask, CheckMask = _checkMask, Dither = _dither,
     };
 
-    static HleVertex HV(in Vert v) => new()
+    static HleVertex HV(in Vert v, bool useSubpixel) => new()
     {
-        X = v.Subpixel ? v.Fx : v.X,
-        Y = v.Subpixel ? v.Fy : v.Y,
+        X = useSubpixel ? v.Fx : v.X,
+        Y = useSubpixel ? v.Fy : v.Y,
         R = (byte)v.R, G = (byte)v.G, B = (byte)v.B, U = (short)v.U, V = (short)v.V,
     };
 
@@ -34,9 +34,12 @@ public sealed partial class Gpu
         int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
         if (spanX > 1023 || spanY > 511) return;
 
+        // All-or-nothing: mixed int/float verts warp UVs every frame (texture flicker).
+        bool sub = a.Subpixel && b.Subpixel && c.Subpixel;
+
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
-        be.DrawTri(HV(a), HV(b), HV(c), PrimOf(tex, semi, raw, clut, gouraud));
+        be.DrawTri(HV(a, sub), HV(b, sub), HV(c, sub), PrimOf(tex, semi, raw, clut, gouraud));
     }
 
     void HleRect(int x, int y, int w, int h, int u, int v, int clut, int r, int g, int b, bool tex, bool semi, bool raw)

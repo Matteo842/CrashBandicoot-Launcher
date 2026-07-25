@@ -54,9 +54,14 @@ public sealed partial class Gpu
             v[i].Subpixel = false;
             if (HleOn && Hle.GpuHle.DejitterActive && GteScreenCache.TryFind(gx, gy, out float fx, out float fy))
             {
-                v[i].Fx = _drawOffsetX + fx;
-                v[i].Fy = _drawOffsetY + fy;
-                v[i].Subpixel = true;
+                // Keep fractional offset only — reject stale/wrong cache hits.
+                float dx = fx - gx, dy = fy - gy;
+                if (dx > -1.01f && dx < 1.01f && dy > -1.01f && dy < 1.01f)
+                {
+                    v[i].Fx = _drawOffsetX + fx;
+                    v[i].Fy = _drawOffsetY + fy;
+                    v[i].Subpixel = true;
+                }
             }
 
             if (tex)
