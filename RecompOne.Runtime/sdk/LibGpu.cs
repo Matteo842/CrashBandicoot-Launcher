@@ -26,6 +26,9 @@ public static class LibGpu
             if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
             addr = next & 0x1FFFFCu;
         }
+
+        // Next RTP batch belongs to a new frame (or pass) — allow cache regen.
+        GteScreenCache.EndFrame();
     }
 
     public static void DrawSync(CpuContext c, IMemory m) => c.V0 = 0;

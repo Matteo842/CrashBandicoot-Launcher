@@ -118,6 +118,8 @@ public sealed class Dma
     {
         uint count = bcr & 0xFFFFu;
         if (count == 0) return;
+        // New OT build ⇒ drop previous frame's GTE screen cache (keep all RTP hits this frame).
+        GteScreenCache.BeginFrame();
         uint addr = madr;
         for (uint i = 0; i < count - 1; i++)
         {
