@@ -36,26 +36,20 @@ internal static unsafe class InputManager
     static bool _topBarToggle;
     static bool _fullscreenToggle;
     static bool _sessionMarker;
-    static bool _cheatMenuHeld;
+    static bool _cheatMenuToggle;
     static readonly HashSet<Key> _keysDown = [];
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
+    public static bool ConsumeCheatMenuToggle() { var v = _cheatMenuToggle; _cheatMenuToggle = false; return v; }
 
     /// <summary>Host / async-key path can request a toggle without Silk KeyDown.</summary>
     public static void RequestFullscreenToggle() => _fullscreenToggle = true;
 
-    /// <summary>One edge per physical press. Reconciles sticky _keysDown when KeyUp is lost (ImGui focus).</summary>
-    public static bool ConsumeCheatMenuToggle()
-    {
-        var key = ResolveCheatMenuKey();
-        bool down = IsKeyDownReconciled(key);
-        bool pressed = down && !_cheatMenuHeld;
-        _cheatMenuHeld = down;
-        return pressed;
-    }
+    /// <summary>Host / async-key path can request a cheat-menu toggle without Silk KeyDown.</summary>
+    public static void RequestCheatMenuToggle() => _cheatMenuToggle = true;
 
     public static void Initialize(IInputContext input)
     {
@@ -115,6 +109,7 @@ internal static unsafe class InputManager
     public static void Poll()
     {
         PollFullscreenHotkeys();
+        PollCheatMenuHotkey();
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
@@ -122,9 +117,10 @@ internal static unsafe class InputManager
     }
 
     // Embedded child HWND often doesn't get Silk KeyDown (focus on parent / lost focus).
-    // Edge-detect F11 / Alt+Enter via GetAsyncKeyState so toggle always works.
+    // Edge-detect F11 / Alt+Enter / cheat menu via GetAsyncKeyState so toggles always work.
     static bool _asyncF11;
     static bool _asyncAltEnter;
+    static bool _asyncCheatMenu;
     const int VkF11 = 0x7A;
     const int VkMenu = 0x12;   // either Alt
     const int VkReturn = 0x0D;
@@ -140,6 +136,14 @@ internal static unsafe class InputManager
         bool altEnter = alt && enter;
         if (altEnter && !_asyncAltEnter) _fullscreenToggle = true;
         _asyncAltEnter = altEnter;
+    }
+
+    static void PollCheatMenuHotkey()
+    {
+        if (SilkKeyToVk(ResolveCheatMenuKey()) is not int vk) return;
+        bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
+        if (down && !_asyncCheatMenu) _cheatMenuToggle = true;
+        _asyncCheatMenu = down;
     }
 
     [DllImport("user32.dll")]
@@ -374,6 +378,7 @@ internal static unsafe class InputManager
         if (key == Key.F1)  _topBarToggle = true;
         if (key == Key.F9)  _sessionMarker = true;
         if (key == Key.F11) _fullscreenToggle = true;
+        if (key == ResolveCheatMenuKey()) _cheatMenuToggle = true;
         // Alt+Enter — common fullscreen shortcut (Enter alone stays Start/Cross).
         if (key is Key.Enter or Key.KeypadEnter
             && (_keysDown.Contains(Key.AltLeft) || _keysDown.Contains(Key.AltRight)))
@@ -409,6 +414,31 @@ internal static unsafe class InputManager
         if (string.IsNullOrWhiteSpace(name)) return Key.F3;
         return Enum.TryParse<Key>(name.Trim(), ignoreCase: true, out var bound) ? bound : Key.F3;
     }
+
+    /// <summary>Win32 VK for host hotkeys; null if we have no async-key fallback for that Silk key.</summary>
+    static int? SilkKeyToVk(Key key) => key switch
+    {
+        Key.F1 => 0x70, Key.F2 => 0x71, Key.F3 => 0x72, Key.F4 => 0x73,
+        Key.F5 => 0x74, Key.F6 => 0x75, Key.F7 => 0x76, Key.F8 => 0x77,
+        Key.F9 => 0x78, Key.F10 => 0x79, Key.F11 => 0x7A, Key.F12 => 0x7B,
+        Key.A => 0x41, Key.B => 0x42, Key.C => 0x43, Key.D => 0x44,
+        Key.E => 0x45, Key.F => 0x46, Key.G => 0x47, Key.H => 0x48,
+        Key.I => 0x49, Key.J => 0x4A, Key.K => 0x4B, Key.L => 0x4C,
+        Key.M => 0x4D, Key.N => 0x4E, Key.O => 0x4F, Key.P => 0x50,
+        Key.Q => 0x51, Key.R => 0x52, Key.S => 0x53, Key.T => 0x54,
+        Key.U => 0x55, Key.V => 0x56, Key.W => 0x57, Key.X => 0x58,
+        Key.Y => 0x59, Key.Z => 0x5A,
+        Key.Number0 => 0x30, Key.Number1 => 0x31, Key.Number2 => 0x32,
+        Key.Number3 => 0x33, Key.Number4 => 0x34, Key.Number5 => 0x35,
+        Key.Number6 => 0x36, Key.Number7 => 0x37, Key.Number8 => 0x38,
+        Key.Number9 => 0x39,
+        Key.Space => 0x20, Key.Escape => 0x1B, Key.Tab => 0x09,
+        Key.Enter => 0x0D, Key.Backspace => 0x08, Key.Insert => 0x2D,
+        Key.Delete => 0x2E, Key.Home => 0x24, Key.End => 0x23,
+        Key.PageUp => 0x21, Key.PageDown => 0x22,
+        Key.Up => 0x26, Key.Down => 0x28, Key.Left => 0x25, Key.Right => 0x27,
+        _ => null,
+    };
 
     static void OnMouseMove(IMouse mouse, Vector2 position)
     {

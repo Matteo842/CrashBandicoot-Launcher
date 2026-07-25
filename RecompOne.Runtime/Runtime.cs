@@ -54,6 +54,9 @@ public static class Runtime
     /// <summary>Queue a fullscreen toggle (safe from WinForms key routing).</summary>
     public static void RequestFullscreenToggle() => Host.InputManager.RequestFullscreenToggle();
 
+    /// <summary>Queue a cheat-menu toggle (safe from WinForms key routing).</summary>
+    public static void RequestCheatMenuToggle() => Host.InputManager.RequestCheatMenuToggle();
+
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();

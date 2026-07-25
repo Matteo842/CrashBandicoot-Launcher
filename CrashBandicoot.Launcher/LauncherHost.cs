@@ -10,7 +10,7 @@ namespace CrashBandicoot.Launcher;
 
 public sealed class LauncherHost : Form
 {
-    public const string AppVersion = "1.2.0";
+    public const string AppVersion = "1.3.0";
 
     readonly ILauncherUi _ui = LauncherUiFactory.Create();
     readonly Panel _gameHost = new()
@@ -469,6 +469,16 @@ public sealed class LauncherHost : Form
             if (keyData == Keys.F11 || keyData == (Keys.Alt | Keys.Enter))
             {
                 Runtime.RequestFullscreenToggle();
+                return true;
+            }
+
+            // Embedded OpenGL child often keeps focus off Silk; route cheat hotkey like F11.
+            var cheatName = ConfigManager.View.CheatMenuKey;
+            if (string.IsNullOrWhiteSpace(cheatName)) cheatName = "F3";
+            if (Enum.TryParse<Keys>(cheatName.Trim(), ignoreCase: true, out var cheatKey)
+                && keyData == cheatKey)
+            {
+                Runtime.RequestCheatMenuToggle();
                 return true;
             }
         }
