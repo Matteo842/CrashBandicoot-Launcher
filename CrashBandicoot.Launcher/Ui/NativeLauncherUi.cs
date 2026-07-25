@@ -837,8 +837,6 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck MakeCheck(string text) => new(text)
     {
         Font = NativeTheme.MakeNunito(17),
-        ForeColor = NativeTheme.Sand,
-        AutoSize = true,
     };
 
     static void CenterChild(Control host, Control child)
@@ -1331,26 +1329,85 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     readonly record struct MenuHit(string Label, Rectangle Bounds, int Index);
     sealed record Kv(int Value, string Text);
 
-    sealed class ThemeCheck : Control
+    /// <summary>Checkbox row: small square + transparent label (no black slab behind text).</summary>
+    sealed class ThemeCheck : Panel
     {
-        const int Box = 22;
-        const int Gap = 10;
+        readonly CheckSquare _square;
+        readonly Label _label;
+
+        public ThemeCheck(string text)
+        {
+            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            AutoSize = true;
+            Cursor = Cursors.Hand;
+
+            _square = new CheckSquare
+            {
+                Location = new Point(0, 2),
+                Size = new Size(26, 26),
+            };
+            _label = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                ForeColor = NativeTheme.Sand,
+                Location = new Point(34, 3),
+                Cursor = Cursors.Hand,
+            };
+            _label.Click += (_, _) => Checked = !Checked;
+            Controls.Add(_square);
+            Controls.Add(_label);
+            Height = 30;
+            Width = 34 + _label.PreferredWidth + 4;
+        }
+
+        protected override void OnFontChanged(EventArgs e)
+        {
+            base.OnFontChanged(e);
+            _label.Font = Font;
+            Width = 34 + _label.PreferredWidth + 4;
+            Height = Math.Max(30, _label.PreferredHeight + 6);
+            _square.Top = Math.Max(0, (Height - _square.Height) / 2);
+            _label.Top = Math.Max(0, (Height - _label.PreferredHeight) / 2);
+        }
+
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public bool Checked
+        {
+            get => _square.Checked;
+            set => _square.Checked = value;
+        }
+
+        public event EventHandler? CheckedChanged
+        {
+            add => _square.CheckedChanged += value;
+            remove => _square.CheckedChanged -= value;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && !_square.Bounds.Contains(e.Location))
+                Checked = !Checked;
+            base.OnMouseDown(e);
+        }
+    }
+
+    sealed class CheckSquare : Control
+    {
         bool _checked;
         bool _hot;
-        readonly string _label;
 
-        public ThemeCheck(string label)
+        public CheckSquare()
         {
-            _label = label;
-            // No transparent BackColor — it ghosts sibling controls (e.g. "Back") into the label.
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
                      ControlStyles.Selectable | ControlStyles.UserMouse, true);
-            BackColor = NativeTheme.CardBottom;
-            ForeColor = NativeTheme.Sand;
+            BackColor = NativeTheme.CardTop;
             Cursor = Cursors.Hand;
             TabStop = true;
-            Height = 30;
+            Size = new Size(26, 26);
         }
 
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -1368,48 +1425,18 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         public event EventHandler? CheckedChanged;
 
-        public override bool AutoSize
-        {
-            get => base.AutoSize;
-            set
-            {
-                base.AutoSize = value;
-                if (value) RecalcSize();
-            }
-        }
-
-        protected override void OnFontChanged(EventArgs e)
-        {
-            base.OnFontChanged(e);
-            if (AutoSize) RecalcSize();
-        }
-
-        void RecalcSize()
-        {
-            var sz = TextRenderer.MeasureText(_label, Font);
-            Width = Box + Gap + sz.Width + 8;
-            Height = Math.Max(30, sz.Height + 6);
-        }
-
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             g.Clear(BackColor);
-            g.SmoothingMode = SmoothingMode.None;
-
-            var box = new Rectangle(2, (Height - Box) / 2, Box, Box);
+            var box = new Rectangle(1, 1, Width - 3, Height - 3);
             var inner = Rectangle.Inflate(box, -3, -3);
 
-            // Off = black; On = green.
             using (var fill = new SolidBrush(_checked ? Color.FromArgb(255, 70, 200, 90) : Color.Black))
                 g.FillRectangle(fill, inner);
 
-            using (var border = new Pen(_hot ? NativeTheme.WumpaHot : Color.FromArgb(220, 255, 200, 120), 2f))
-                g.DrawRectangle(border, box);
-
-            var textRect = new Rectangle(Box + Gap, 0, Math.Max(0, Width - Box - Gap), Height);
-            TextRenderer.DrawText(g, _label, Font, textRect, ForeColor,
-                TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            using var border = new Pen(_hot ? NativeTheme.WumpaHot : Color.FromArgb(220, 255, 200, 120), 2f);
+            g.DrawRectangle(border, box);
         }
 
         protected override void OnMouseEnter(EventArgs e)
