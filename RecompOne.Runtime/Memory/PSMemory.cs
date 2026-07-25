@@ -65,23 +65,115 @@ public sealed class PSMemory : IMemory
             Runtime.RamLog.RecordRead(phys % (uint)_ram.Length, size);
     }
 
+    // Crash SCUS-94900: .sbss global pointer. Geom jump-table stubs temporarily load
+    // $gp with AND masks (0x00FFFFFF / 0x0000FFFF); a recompiler `return` instead of
+    // `jr` can leave that mask in place, so later `lw ..., 4($gp)` hits 0x01000003.
+    const uint CrashBandicootGp = 0x800563FCu;
+
     private Span<byte> Resolve(uint address, int size)
+    {
+        if (TryMap(address, size, out var span))
+            return span;
+
+        // Only heal when the access is already unmapped — do not touch $gp while geom
+        // code still legitimately uses it as an AND mask for register ops.
+        if (TryHealClobberedGpAddress(ref address) && TryMap(address, size, out span))
+            return span;
+
+        uint phys = MemoryMap.ToPhysical(address);
+        throw new InvalidOperationException(FormatUnmapped(address, phys, size));
+    }
+
+    private bool TryMap(uint address, int size, out Span<byte> span)
     {
         uint phys = MemoryMap.ToPhysical(address);
 
         if (phys < MemoryMap.RamWindow)
-            return _ram.AsSpan((int)(phys % (uint)_ram.Length), size);
+        {
+            span = _ram.AsSpan((int)(phys % (uint)_ram.Length), size);
+            return true;
+        }
 
         if (phys >= MemoryMap.ScratchpadBase && phys < MemoryMap.ScratchpadBase + MemoryMap.ScratchpadSize)
-            return _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
+        {
+            span = _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
+            return true;
+        }
 
         if (phys >= MemoryMap.HwRegsBase && phys < MemoryMap.HwRegsBase + MemoryMap.HwRegsSize)
-            return _hwregs.AsSpan((int)(phys - MemoryMap.HwRegsBase), size);
+        {
+            span = _hwregs.AsSpan((int)(phys - MemoryMap.HwRegsBase), size);
+            return true;
+        }
 
         if (phys >= MemoryMap.BiosBase && phys < MemoryMap.BiosBase + MemoryMap.BiosSize)
-            return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
+        {
+            span = _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
+            return true;
+        }
 
-        throw new InvalidOperationException($"unmapped address: 0x{address:X8}");
+        span = default;
+        return false;
+    }
+
+    /// <summary>
+    /// If $gp is stuck as a geom AND mask and <paramref name="address"/> looks like a
+    /// GP-relative access from that mask, restore the real GP and retarget the address.
+    /// </summary>
+    private static bool TryHealClobberedGpAddress(ref uint address)
+    {
+        var c = Runtime.Cpu;
+        if (c is null) return false;
+        if (c.GP is not (0x00FFFFFFu or 0x0000FFFFu)) return false;
+
+        uint badGp = c.GP;
+        int delta = unchecked((int)(address - badGp));
+        // Typical MIPS gp-relative imm16 range.
+        if (delta is < -0x8000 or >= 0x8000) return false;
+
+        c.GP = CrashBandicootGp;
+        address = unchecked(CrashBandicootGp + (uint)delta);
+        return true;
+    }
+
+    static string FormatUnmapped(uint address, uint phys, int size)
+    {
+        var c = Runtime.Cpu;
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"unmapped address: 0x{address:X8} (phys=0x{phys:X8}, size={size})");
+        if (c != null)
+        {
+            sb.Append($" RA=0x{c.RA:X8} SP=0x{c.SP:X8} GP=0x{c.GP:X8}");
+            sb.Append($" A0=0x{c.A0:X8} A1=0x{c.A1:X8} A2=0x{c.A2:X8} A3=0x{c.A3:X8}");
+            sb.Append($" S0=0x{c.S0:X8} S1=0x{c.S1:X8}");
+        }
+        if ((address & 1u) != 0)
+            sb.Append(" [odd — possible unresolved CID/EID]");
+        try
+        {
+            // Direct RAM peek — do not re-enter Resolve.
+            if (Runtime.Mem is PSMemory psm && psm.Ram.Length > 0x56714)
+            {
+                var ram = psm.Ram;
+                uint level = (uint)(ram[0x56710] | (ram[0x56711] << 8) | (ram[0x56712] << 16) | (ram[0x56713] << 24));
+                sb.Append($" level=0x{level:X}");
+            }
+        }
+        catch { /* ignore nested faults */ }
+
+        // Keep the MessageBox readable: only recompiled / runtime frames.
+        var frames = Environment.StackTrace.Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.Contains("Recompiled.", StringComparison.Ordinal)
+                        || l.Contains("RecompOne.", StringComparison.Ordinal)
+                        || l.Contains("func_", StringComparison.Ordinal))
+            .Take(12);
+        foreach (var f in frames)
+            sb.Append("\n  ").Append(f);
+
+        var msg = sb.ToString();
+        try { Diagnostics.SessionLog.Error(msg); } catch { /* ignore */ }
+        return msg;
     }
 
     private static bool IsCd(uint phys) => phys >= 0x1F801800u && phys <= 0x1F801803u;

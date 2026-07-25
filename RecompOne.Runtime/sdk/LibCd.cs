@@ -141,7 +141,12 @@ public static class LibCd
     {
         if (_xaThread is { IsAlive: true }) return;
         _xaRun = true;
-        _xaThread = new Thread(XaLoop) { IsBackground = true, Name = "CdXa" };
+        _xaThread = new Thread(XaLoop)
+        {
+            IsBackground = true,
+            Name = "CdXa",
+            Priority = ThreadPriority.AboveNormal,
+        };
         _xaThread.Start();
     }
 
@@ -149,19 +154,22 @@ public static class LibCd
     {
         while (_xaRun)
         {
+            bool pumped = false;
             if (_readActive && (_mode & 0x40) != 0 && Runtime.Cd != null)
-                PumpXa();
-            Thread.Sleep(2);
+                pumped = PumpXa();
+            // Keep the XA ring warm during long menu idle; wake faster when below target.
+            Thread.Sleep(pumped ? 1 : 4);
         }
     }
 
-    static void PumpXa()
+    static bool PumpXa()
     {
-        if (Runtime.Cd == null) return;
-        const int MinBuffer = 4096;
-        const int MaxScan = 32;
+        if (Runtime.Cd == null) return false;
+        const int MinBuffer = 8192;
+        const int MaxScan = 64;
         bool useFilter = (_mode & 0x08) != 0;
         int scanned = 0;
+        bool decoded = false;
 
         while (_readActive && XaAudio.BufferedSamples < MinBuffer && scanned < MaxScan)
         {
@@ -174,7 +182,9 @@ public static class LibCd
             if ((sec[2] & 0x04) == 0) continue;
             if (useFilter && (sec[0] != _filterFile || sec[1] != _filterChannel)) continue;
             XaAudio.DecodeSector(sec, 8, sec[3]);
+            decoded = true;
         }
+        return decoded;
     }
 
     static void AdvancePos(int n)

@@ -172,6 +172,29 @@ public static class Dispatcher
         if (!_funcMap.TryGetValue(addr, out var fn))
             throw new InvalidOperationException($"unmapped call: 0x{addr:X8}");
         fn(c, m);
+        HealGeomClobberedRegs(c, m);
+    }
+
+    /// <summary>
+    /// Geom stubs save real GP/SP on scratchpad then reuse those regs as temps.
+    /// A recompiler <c>return</c> instead of <c>jr</c> into a clip jump-table
+    /// leaves GP as an AND mask and SP as a small index (often 0) — the next
+    /// prologue then writes RA to SP+0x14 = 0xFFFFFFFC.
+    /// </summary>
+    internal static void HealGeomClobberedRegs(CpuContext c, IMemory m)
+    {
+        if (c.GP is 0x00FFFFFFu or 0x0000FFFFu)
+            c.GP = 0x800563FCu;
+
+        // Real SP lives in KUSEG/KSEG0 RAM; temps are tiny or scratchpad pointers.
+        bool spLooksTemp = c.SP < 0x8000u
+                           || (c.SP >= 0x1F800000u && c.SP < 0x1F800400u)
+                           || c.SP is 0x02000000u or 0xFFFFFFDFu;
+        if (!spLooksTemp) return;
+
+        uint saved = m.ReadU32(0x1F800034u);
+        if (saved >= 0x80000000u && saved < 0x80800000u)
+            c.SP = saved;
     }
 
     static void Rebuild()

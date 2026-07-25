@@ -8,8 +8,8 @@ namespace RecompOne.Runtime.Diagnostics;
 /// </summary>
 public static class SessionLog
 {
-    // TEMP playtest: leave true. Flip to false before pushing a release build.
-    public static bool Enabled = false;
+    // TEMP playtest: leave true while hunting Generator Room / audio bugs.
+    public static bool Enabled = true;
 
     static readonly object Gate = new();
     static StreamWriter? _writer;

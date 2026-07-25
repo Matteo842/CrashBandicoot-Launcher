@@ -7,8 +7,9 @@ public static class XaAudio
 
     const int Capacity = 1 << 18;
     const int Mask = Capacity - 1;
-    const int PrimeFrames = 1024;
-    const int MaxHold = 8192;
+    // Restart sooner after a gap; hold longer so menu XA doesn't chop on/off under GC stalls.
+    const int PrimeFrames = 512;
+    const int MaxHold = 44100; // ~1 s at 44.1 kHz source-step rate before giving up
 
     static readonly int[] _ring = new int[Capacity];
     static int _writeIdx, _readIdx, _count;
