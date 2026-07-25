@@ -61,25 +61,23 @@ internal sealed class SingleInstance : IDisposable
 
     public static void NotifyAlreadyRunning()
     {
-        const string title = "Crash Bandicoot: Recompiled";
         const string message = "Crash Bandicoot: Recompiled is already running.";
 
-        if (OperatingSystem.IsWindows())
+#if WINDOWS
+        try
         {
-            try
-            {
-                MessageBox.Show(
-                    message,
-                    title,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-            catch
-            {
-                // Fall through to stderr (headless / early boot).
-            }
+            MessageBox.Show(
+                message,
+                "Crash Bandicoot: Recompiled",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
         }
+        catch
+        {
+            // Fall through to stderr (headless / early boot).
+        }
+#endif
 
         Console.Error.WriteLine(message);
     }

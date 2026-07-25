@@ -62,8 +62,9 @@ internal static class HostWindow
     static nint _embedChild;
     static bool _embedded;
 
-    /// <summary>Parent HWND for the next game session (0 = standalone window).</summary>
-    public static void SetEmbedParent(nint hwnd) => _embedParent = hwnd;
+    /// <summary>Parent HWND for the next game session (0 = standalone window). Ignored on non-Windows.</summary>
+    public static void SetEmbedParent(nint hwnd) =>
+        _embedParent = OperatingSystem.IsWindows() ? hwnd : 0;
 
     public static bool IsEmbedded => _embedded;
 
@@ -75,6 +76,11 @@ internal static class HostWindow
         try
         {
             var embed = _embedParent != 0;
+            // Shaders are GLSL 330; CopyImageSubData needs GL 4.3+. Request 4.3 Core
+            // (not 4.5) so VMs / Mesa have a slightly better chance. Native segfaults
+            // during context create still cannot be caught in managed code.
+            Console.WriteLine("[Host] creating OpenGL 4.3 Core window…");
+            Console.Out.Flush();
             var options = WindowOptions.Default with
             {
                 Size = new Vector2D<int>(1280, 720),
@@ -86,19 +92,23 @@ internal static class HostWindow
                 FramesPerSecond = 0,
                 WindowBorder = embed ? WindowBorder.Hidden : WindowBorder.Resizable,
                 WindowState = !embed && ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
-                API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 5)),
+                API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 3)),
             };
             _window = Silk.NET.Windowing.Window.Create(options);
+            Console.WriteLine("[Host] window object created, initializing GLFW/GL…");
+            Console.Out.Flush();
             _window.Load += OnLoad;
             _window.Render += OnRender;
             _window.Closing += OnClosing;
             _window.Initialize();
+            Console.WriteLine("[Host] OpenGL window ready");
 
-            // GLFW defaults to a generic icon — use the exe/ApplicationIcon instead.
-            if (_window.Native?.Win32 is { } win32 && win32.Hwnd != 0)
+            // GLFW defaults to a generic icon — use the exe/ApplicationIcon instead (Windows).
+            if (OperatingSystem.IsWindows()
+                && _window.Native?.Win32 is { } win32 && win32.Hwnd != 0)
                 ApplyProcessIcon(win32.Hwnd);
 
-            if (embed)
+            if (embed && OperatingSystem.IsWindows())
                 TryEmbedIntoParent(_embedParent);
 
             // Match shell + hide menu/tab chrome when starting already in fullscreen.
@@ -107,7 +117,10 @@ internal static class HostWindow
         }
         catch (Exception e)
         {
-            Console.Error.WriteLine($"[Host] window unavailable {e.Message}");
+            Console.Error.WriteLine($"[Host] window unavailable: {e.GetType().Name}: {e.Message}");
+            Console.Error.WriteLine(
+                "[Host] Need OpenGL 4.3+. In a VM try: LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot --run <cue>");
+            Console.Error.WriteLine("[Host] Or enable 3D acceleration / use a host with a real GPU.");
             _headless = true;
         }
     }
@@ -133,6 +146,7 @@ internal static class HostWindow
 
     static void TryEmbedIntoParent(nint parent)
     {
+        if (!OperatingSystem.IsWindows()) return;
         if (_window?.Native?.Win32 is not { } win32 || parent == 0)
             return;
 
@@ -154,6 +168,7 @@ internal static class HostWindow
     /// <summary>Keep the OpenGL child sized to the host panel (call on panel resize).</summary>
     public static void FitEmbeddedToParent()
     {
+        if (!OperatingSystem.IsWindows()) return;
         if (!_embedded || _embedChild == 0 || _embedParent == 0) return;
         if (!GetClientRect(_embedParent, out var rc)) return;
         int w = Math.Max(1, rc.Right - rc.Left);
@@ -241,7 +256,7 @@ internal static class HostWindow
     {
         ApplyFullscreenChrome(on);
 
-        if (_embedded && _embedParent != 0)
+        if (OperatingSystem.IsWindows() && _embedded && _embedParent != 0)
         {
             // Child HWND can't take exclusive fullscreen — ask the launcher shell
             // (borderless cover of the monitor). Fall back to maximize if no host handler.
@@ -327,6 +342,7 @@ internal static class HostWindow
 
     static void ApplyProcessIcon(nint hwnd)
     {
+        if (!OperatingSystem.IsWindows()) return;
         try
         {
             var exe = Environment.ProcessPath;

@@ -127,6 +127,10 @@ internal static unsafe class InputManager
 
     static void PollFullscreenHotkeys()
     {
+        // Win32 fallback for embedded HWND (focus often stays on the WinForms parent).
+        // Standalone Silk windows get F11 / Alt+Enter via OnKeyDown.
+        if (!OperatingSystem.IsWindows()) return;
+
         bool f11 = (GetAsyncKeyState(VkF11) & 0x8000) != 0;
         if (f11 && !_asyncF11) _fullscreenToggle = true;
         _asyncF11 = f11;
@@ -140,6 +144,7 @@ internal static unsafe class InputManager
 
     static void PollCheatMenuHotkey()
     {
+        if (!OperatingSystem.IsWindows()) return;
         if (SilkKeyToVk(ResolveCheatMenuKey()) is not int vk) return;
         bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
         if (down && !_asyncCheatMenu) _cheatMenuToggle = true;

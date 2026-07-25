@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Build a single-file CrashBandicoot.exe (self-contained win-x64).
+"""Build a single-file CrashBandicoot binary (self-contained).
 
 Usage (from repo root):
     python publish_release.py
+    python publish_release.py --rid linux-x64
     python publish_release.py --out publish-single
     python publish_release.py --clean
 
 Requires: .NET 10 SDK (`dotnet` on PATH).
-Uses repo-root icon.png (256x256) as the exe ApplicationIcon.
+Windows builds use repo-root icon.png (256x256) as the exe ApplicationIcon.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -24,6 +26,11 @@ PROJECT = ROOT / "CrashBandicoot.Launcher" / "CrashBandicoot.Launcher.csproj"
 ICON_PNG = ROOT / "icon.png"
 ICON_ICO = ROOT / "CrashBandicoot.Launcher" / "app.ico"
 DEFAULT_OUT = ROOT / "publish-single"
+
+RID_FRAMEWORK = {
+    "win-x64": "net10.0-windows",
+    "linux-x64": "net10.0",
+}
 
 FORBIDDEN_GLOBS = (
     "*.bin",
@@ -101,16 +108,61 @@ def ensure_app_icon() -> Path:
     return ICON_ICO
 
 
-def publish(out_dir: Path) -> None:
+def expected_binary(out_dir: Path, rid: str) -> Path:
+    if rid.startswith("win-"):
+        return out_dir / "CrashBandicoot.exe"
+    return out_dir / "CrashBandicoot"
+
+
+def clean_out_dir(out_dir: Path) -> None:
+    """Remove out_dir, or sidestep WinError 32 if Explorer/AV/VM has it locked."""
+    if not out_dir.exists():
+        return
+
+    print(f"[publish] cleaning {out_dir}")
+    last_err: BaseException | None = None
+    for attempt in range(1, 6):
+        try:
+            shutil.rmtree(out_dir)
+            return
+        except OSError as e:
+            last_err = e
+            # WinError 32 = sharing violation (file in use).
+            print(f"[publish] clean attempt {attempt}/5 failed: {e}")
+            time.sleep(0.4 * attempt)
+
+    # Folder still locked — rename aside so publish can write a fresh tree.
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    quarantine = out_dir.with_name(f"{out_dir.name}.old-{stamp}")
+    try:
+        out_dir.rename(quarantine)
+        print(
+            f"[publish] WARNING: could not delete {out_dir.name} "
+            f"(file in use). Moved it to {quarantine.name} instead."
+        )
+        print(
+            "[publish] Close Explorer tabs / terminals in that folder, "
+            "stop copying to the VM, then delete the .old-* folder later."
+        )
+        return
+    except OSError as e:
+        die(
+            f"cannot clean {out_dir}: still locked ({last_err}); "
+            f"rename also failed ({e}). Close anything using that folder and retry."
+        )
+
+
+def publish(out_dir: Path, rid: str) -> None:
     if not PROJECT.is_file():
         die(f"project not found: {PROJECT}")
+    if rid not in RID_FRAMEWORK:
+        die(f"unsupported RID {rid!r}; choose one of: {', '.join(RID_FRAMEWORK)}")
 
-    ico = ensure_app_icon()
+    framework = RID_FRAMEWORK[rid]
+    is_windows = rid.startswith("win-")
 
     out_dir = out_dir.resolve()
-    if out_dir.exists():
-        print(f"[publish] cleaning {out_dir}")
-        shutil.rmtree(out_dir)
+    clean_out_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -119,8 +171,10 @@ def publish(out_dir: Path) -> None:
         str(PROJECT),
         "-c",
         "Release",
+        "-f",
+        framework,
         "-r",
-        "win-x64",
+        rid,
         "--self-contained",
         "true",
         "-p:PublishSingleFile=true",
@@ -129,10 +183,16 @@ def publish(out_dir: Path) -> None:
         "-p:EnableCompressionInSingleFile=true",
         "-p:DebugType=None",
         "-p:DebugSymbols=false",
-        f"-p:ApplicationIcon={ico}",
         "-o",
         str(out_dir),
     ]
+
+    ico: Path | None = None
+    if is_windows:
+        ico = ensure_app_icon()
+        cmd.insert(-2, f"-p:ApplicationIcon={ico}")
+    else:
+        print("[publish] skipping Windows .ico (non-Windows RID)")
 
     print("[publish] running:")
     print("  " + " ".join(cmd))
@@ -142,9 +202,9 @@ def publish(out_dir: Path) -> None:
     if r.returncode != 0:
         die(f"dotnet publish failed (exit {r.returncode})")
 
-    exe = out_dir / "CrashBandicoot.exe"
-    if not exe.is_file():
-        die(f"expected exe missing: {exe}")
+    binary = expected_binary(out_dir, rid)
+    if not binary.is_file():
+        die(f"expected binary missing: {binary}")
 
     for junk in out_dir.glob("*.pdb"):
         junk.unlink(missing_ok=True)
@@ -164,26 +224,43 @@ def publish(out_dir: Path) -> None:
         if len(bad) > 20:
             print(f"  … and {len(bad) - 20} more")
 
-    size_mb = exe.stat().st_size / (1024 * 1024)
+    size_mb = binary.stat().st_size / (1024 * 1024)
     print()
     print("[publish] OK")
-    print(f"  exe : {exe}")
-    print(f"  icon: {ico}")
+    print(f"  rid : {rid}")
+    print(f"  tfm : {framework}")
+    print(f"  bin : {binary}")
+    if ico is not None:
+        print(f"  icon: {ico}")
     print(f"  size: {size_mb:.1f} MB")
     print()
     print("Test:")
-    print(f'  1. Copy/run:  "{exe}"')
-    print("  2. Select a valid .cue (+ .bin beside it)")
-    print("  3. Expect next to the exe: settings.json, save\\, game\\")
+    if is_windows:
+        print(f'  1. Copy/run:  "{binary}"')
+        print("  2. Select a valid .cue (+ .bin beside it)")
+        print("  3. Expect next to the exe: settings.json, save\\, game\\")
+    else:
+        print(f"  1. Copy/run:  {binary} --run /path/to/game.cue")
+        print("  2. Needs OpenGL 4.3+ + system OpenAL Soft (e.g. libopenal1)")
+        print("  3. Expect next to the binary: settings.json, save/, game/")
+        print("  Note: graphical launcher UI is Windows-only; Linux is CLI + game window.")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Publish CrashBandicoot as a single .exe")
+    ap = argparse.ArgumentParser(
+        description="Publish CrashBandicoot as a single-file binary"
+    )
     ap.add_argument(
         "--out",
         type=Path,
         default=DEFAULT_OUT,
         help=f"output folder (default: {DEFAULT_OUT.name})",
+    )
+    ap.add_argument(
+        "--rid",
+        default="win-x64",
+        choices=sorted(RID_FRAMEWORK),
+        help="runtime identifier (default: win-x64)",
     )
     ap.add_argument(
         "--clean",
@@ -203,7 +280,7 @@ def main() -> None:
         return
 
     require_dotnet()
-    publish(out_dir)
+    publish(out_dir, args.rid)
 
 
 if __name__ == "__main__":

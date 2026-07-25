@@ -1,17 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>CrashBandicoot</AssemblyName>
     <RootNamespace>CrashBandicoot.Launcher</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- Generated from ../icon.png by EnsureAppIcon (BeforeBuild). -->
-    <ApplicationIcon>app.ico</ApplicationIcon>
     <Version>1.4.0</Version>
     <AssemblyVersion>1.4.0.0</AssemblyVersion>
     <FileVersion>1.4.0.0</FileVersion>
@@ -22,6 +17,21 @@
     <Company>Unofficial fan project</Company>
     <Authors>CrashBandicoot-Launcher contributors</Authors>
     <Copyright>Unofficial fan project — Crash Bandicoot belongs to its respective owners</Copyright>
+  </PropertyGroup>
+
+  <!-- Windows: native WinForms launcher UI + HWND-embedded game. -->
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Generated from ../icon.png by EnsureAppIcon (BeforeBuild). -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Linux / other: CLI prepare/run + standalone Silk game window. -->
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'">
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <!-- Single-file release (Python-style one-file). User data uses AppPaths.Root = exe folder. -->
@@ -48,8 +58,20 @@
     <None Update="Ui\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Keep app.ico in sync with repo-root icon.png for title-bar / exe icon. -->
-  <Target Name="EnsureAppIcon" BeforeTargets="BeforeBuild;BeforePublish">
+  <!-- WinForms launcher UI is Windows-only; Linux builds keep Recomp + CLI entry. -->
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'">
+    <Compile Remove="LauncherHost.cs" />
+    <Compile Remove="Ui\NativeLauncherUi.cs" />
+    <Compile Remove="Ui\NativeTheme.cs" />
+    <Compile Remove="Ui\ILauncherUi.cs" />
+    <Compile Remove="Ui\LauncherUiFactory.cs" />
+    <Compile Remove="Ui\WebView2LauncherUi.cs" />
+    <Compile Remove="Ui\PhotinoLauncherUi.cs" />
+  </ItemGroup>
+
+  <!-- Keep app.ico in sync with repo-root icon.png for title-bar / exe icon (Windows only). -->
+  <Target Name="EnsureAppIcon" BeforeTargets="BeforeBuild;BeforePublish"
+          Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
     <PropertyGroup>
       <_IconPng>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\icon.png'))</_IconPng>
       <_IconIco>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\app.ico'))</_IconIco>
