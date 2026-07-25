@@ -986,9 +986,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             Minimum = 0,
             Maximum = 100,
+            Step = 5,
             Value = 100,
-            Location = new Point(controlX, y + 4),
-            Size = new Size(310, 24),
+            Location = new Point(controlX, y + 2),
+            Size = new Size(340, 28),
         };
         card.Controls.Add(_vol);
         y += 44;
@@ -1039,9 +1040,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             Minimum = 0,
             Maximum = 100,
+            Step = 5,
             Value = 50,
-            Location = new Point(controlX, y + 4),
-            Size = new Size(310, 24),
+            Location = new Point(controlX, y + 2),
+            Size = new Size(340, 28),
         };
         card.Controls.Add(_filterStrength);
         y += 44;
@@ -1476,33 +1478,44 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     sealed class ThemeSlider : Control
     {
+        const int PercentCol = 52;
         int _min;
         int _max = 100;
         int _value;
+        int _step = 5;
         bool _dragging;
+        Font? _pctFont;
 
         public ThemeSlider()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
-                     ControlStyles.SupportsTransparentBackColor, true);
-            BackColor = Color.Transparent;
+                     ControlStyles.UserMouse, true);
+            BackColor = NativeTheme.CardTop;
             Cursor = Cursors.Hand;
-            Height = 24;
+            Height = 28;
+            _pctFont = NativeTheme.MakeNunito(14, extraBold: true);
         }
 
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int Minimum
         {
             get => _min;
-            set { _min = value; Invalidate(); }
+            set { _min = value; Value = _value; }
         }
 
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public int Maximum
         {
             get => _max;
-            set { _max = Math.Max(value, _min + 1); Invalidate(); }
+            set { _max = Math.Max(value, _min + 1); Value = _value; }
+        }
+
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public int Step
+        {
+            get => _step;
+            set { _step = Math.Max(1, value); Value = _value; }
         }
 
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -1511,7 +1524,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             get => _value;
             set
             {
-                var v = Math.Clamp(value, _min, _max);
+                var v = Snap(Math.Clamp(value, _min, _max));
                 if (v == _value) return;
                 _value = v;
                 Invalidate();
@@ -1521,12 +1534,50 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         public event EventHandler? ValueChanged;
 
+        int Snap(int v)
+        {
+            if (_step <= 1) return v;
+            var snapped = (int)Math.Round(v / (double)_step) * _step;
+            return Math.Clamp(snapped, _min, _max);
+        }
+
+        Rectangle TrackRect
+        {
+            get
+            {
+                var trackY = Height / 2 - 3;
+                return new Rectangle(6, trackY, Math.Max(1, Width - PercentCol - 12), 6);
+            }
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            // Paint the same card gradient under our bounds so there is no black slab.
+            var g = e.Graphics;
+            if (Parent != null)
+            {
+                var state = g.Save();
+                g.TranslateTransform(-Left, -Top);
+                using var br = new LinearGradientBrush(
+                    Parent.ClientRectangle,
+                    NativeTheme.CardTop,
+                    NativeTheme.CardBottom,
+                    160f);
+                g.FillRectangle(br, new Rectangle(Left, Top, Width, Height));
+                g.Restore(state);
+            }
+            else
+            {
+                using var br = new SolidBrush(NativeTheme.CardTop);
+                g.FillRectangle(br, ClientRectangle);
+            }
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            var trackY = Height / 2 - 3;
-            var track = new Rectangle(6, trackY, Math.Max(1, Width - 12), 6);
+            var track = TrackRect;
             using (var bg = new SolidBrush(Color.FromArgb(50, 255, 255, 255)))
             using (var path = RoundRectPath(track, 3))
                 g.FillPath(bg, path);
@@ -1552,11 +1603,16 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 g.FillEllipse(thumbBr, thumb);
             using (var ring = new Pen(NativeTheme.Wumpa, 2f))
                 g.DrawEllipse(ring, thumb);
+
+            var pctRect = new Rectangle(Width - PercentCol, 0, PercentCol - 2, Height);
+            TextRenderer.DrawText(g, $"{_value}%", _pctFont ?? Font, pctRect, NativeTheme.Sand,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPadding);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
+            if (e.X >= Width - PercentCol) return;
             _dragging = true;
             Capture = true;
             SetFromMouse(e.X);
@@ -1578,10 +1634,19 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         void SetFromMouse(int x)
         {
-            var trackLeft = 6;
-            var trackW = Math.Max(1, Width - 12);
-            var t = Math.Clamp((x - trackLeft) / (float)trackW, 0f, 1f);
+            var track = TrackRect;
+            var t = Math.Clamp((x - track.X) / (float)Math.Max(1, track.Width), 0f, 1f);
             Value = _min + (int)Math.Round(t * (_max - _min));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _pctFont?.Dispose();
+                _pctFont = null;
+            }
+            base.Dispose(disposing);
         }
 
         static GraphicsPath RoundRectPath(Rectangle r, int radius)
