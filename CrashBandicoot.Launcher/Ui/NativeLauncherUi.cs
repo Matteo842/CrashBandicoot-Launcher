@@ -74,17 +74,17 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     // Settings / controls / cheats state buffers
     readonly Dictionary<string, TextBox> _keyBoxes = new(StringComparer.Ordinal);
     ThemeSlider? _vol;
-    CheckBox? _muted;
-    CheckBox? _fullscreen;
-    CheckBox? _widescreen;
+    ThemeCheck? _muted;
+    ThemeCheck? _fullscreen;
+    ThemeCheck? _widescreen;
     ComboBox? _internalRes;
     ComboBox? _texFilter;
     ThemeSlider? _filterStrength;
     Label? _filterStrengthLabel;
-    CheckBox? _dedither;
-    CheckBox? _dejitter;
-    CheckBox? _cheatLives;
-    CheckBox? _cheatLevel;
+    ThemeCheck? _dedither;
+    ThemeCheck? _dejitter;
+    ThemeCheck? _cheatLives;
+    ThemeCheck? _cheatLevel;
 
     public NativeLauncherUi()
     {
@@ -252,7 +252,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _stage.Invalidate();
     }
 
-    static void SetCheck(CheckBox? box, JsonElement state, string name)
+    static void SetCheck(ThemeCheck? box, JsonElement state, string name)
     {
         if (box == null || box.IsDisposed || !state.TryGetProperty(name, out var el)) return;
         box.Checked = el.ValueKind == JsonValueKind.True;
@@ -814,25 +814,32 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             Size = new Size(160, 42),
             Cursor = Cursors.Hand,
             ForeColor = primary ? Color.FromArgb(42, 18, 0) : NativeTheme.Sand,
-            BackColor = primary ? NativeTheme.Wumpa : Color.Transparent,
+            BackColor = primary ? NativeTheme.Wumpa : Color.FromArgb(28, 18, 12),
+            UseVisualStyleBackColor = false,
         };
-        btn.FlatAppearance.BorderSize = primary ? 0 : 1;
-        btn.FlatAppearance.BorderColor = Color.FromArgb(90, 255, 200, 120);
+        btn.FlatAppearance.BorderSize = 1;
+        btn.FlatAppearance.BorderColor = primary
+            ? Color.FromArgb(220, 255, 180, 60)
+            : Color.FromArgb(140, 255, 200, 120);
+        if (primary)
+        {
+            btn.FlatAppearance.MouseOverBackColor = NativeTheme.WumpaHot;
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(230, 120, 0);
+        }
+        else
+        {
+            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(48, 32, 20);
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 40, 24);
+        }
         return btn;
     }
 
-    CheckBox MakeCheck(string text)
+    ThemeCheck MakeCheck(string text) => new(text)
     {
-        return new CheckBox
-        {
-            Text = text,
-            ForeColor = NativeTheme.Sand,
-            Font = NativeTheme.MakeNunito(17),
-            AutoSize = true,
-            BackColor = Color.Transparent,
-            FlatStyle = FlatStyle.Flat,
-        };
-    }
+        Font = NativeTheme.MakeNunito(17),
+        ForeColor = NativeTheme.Sand,
+        AutoSize = true,
+    };
 
     static void CenterChild(Control host, Control child)
     {
@@ -1323,6 +1330,122 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     readonly record struct MenuHit(string Label, Rectangle Bounds, int Index);
     sealed record Kv(int Value, string Text);
+
+    sealed class ThemeCheck : Control
+    {
+        const int Box = 22;
+        const int Gap = 10;
+        bool _checked;
+        bool _hot;
+        readonly string _label;
+
+        public ThemeCheck(string label)
+        {
+            _label = label;
+            // No transparent BackColor — it ghosts sibling controls (e.g. "Back") into the label.
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                     ControlStyles.Selectable | ControlStyles.UserMouse, true);
+            BackColor = NativeTheme.CardBottom;
+            ForeColor = NativeTheme.Sand;
+            Cursor = Cursors.Hand;
+            TabStop = true;
+            Height = 30;
+        }
+
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public bool Checked
+        {
+            get => _checked;
+            set
+            {
+                if (_checked == value) return;
+                _checked = value;
+                Invalidate();
+                CheckedChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public event EventHandler? CheckedChanged;
+
+        public override bool AutoSize
+        {
+            get => base.AutoSize;
+            set
+            {
+                base.AutoSize = value;
+                if (value) RecalcSize();
+            }
+        }
+
+        protected override void OnFontChanged(EventArgs e)
+        {
+            base.OnFontChanged(e);
+            if (AutoSize) RecalcSize();
+        }
+
+        void RecalcSize()
+        {
+            var sz = TextRenderer.MeasureText(_label, Font);
+            Width = Box + Gap + sz.Width + 8;
+            Height = Math.Max(30, sz.Height + 6);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            g.SmoothingMode = SmoothingMode.None;
+
+            var box = new Rectangle(2, (Height - Box) / 2, Box, Box);
+            var inner = Rectangle.Inflate(box, -3, -3);
+
+            // Off = black; On = green.
+            using (var fill = new SolidBrush(_checked ? Color.FromArgb(255, 70, 200, 90) : Color.Black))
+                g.FillRectangle(fill, inner);
+
+            using (var border = new Pen(_hot ? NativeTheme.WumpaHot : Color.FromArgb(220, 255, 200, 120), 2f))
+                g.DrawRectangle(border, box);
+
+            var textRect = new Rectangle(Box + Gap, 0, Math.Max(0, Width - Box - Gap), Height);
+            TextRenderer.DrawText(g, _label, Font, textRect, ForeColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hot = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hot = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                Checked = !Checked;
+                Focus();
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode is Keys.Space or Keys.Enter)
+            {
+                Checked = !Checked;
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+    }
 
     sealed class ThemeSlider : Control
     {
