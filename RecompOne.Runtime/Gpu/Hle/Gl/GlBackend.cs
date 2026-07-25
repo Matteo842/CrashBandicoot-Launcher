@@ -6,7 +6,7 @@ namespace RecompOne.Runtime.Hle;
 public sealed class GlBackend : IGpuBackend
 {
     [StructLayout(LayoutKind.Sequential)]
-    struct GlVertex { public float X, Y; public uint Color; public int Clut, Texpage; public float U, V; }
+    struct GlVertex { public float X, Y; public uint Color; public int Clut, Texpage; public float U, V, InvZ; }
 
     const int MaxVerts = 0x40000;
 
@@ -89,6 +89,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.EnableVertexAttribArray(2); _gl.VertexAttribIPointer(2, 1, VertexAttribIType.Int, stride, (void*)12);
         _gl.EnableVertexAttribArray(3); _gl.VertexAttribIPointer(3, 1, VertexAttribIType.Int, stride, (void*)16);
         _gl.EnableVertexAttribArray(4); _gl.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, (void*)20);
+        _gl.EnableVertexAttribArray(5); _gl.VertexAttribPointer(5, 1, VertexAttribPointerType.Float, false, stride, (void*)28);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -273,6 +274,7 @@ public sealed class GlBackend : IGpuBackend
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
         if (dither) tpage |= 0x400;
+        float invZ = v.HasGteZ && v.Z > 0f ? 1f / v.Z : 0f;
         return new GlVertex
         {
             X = v.X, Y = v.Y,
@@ -280,6 +282,7 @@ public sealed class GlBackend : IGpuBackend
             Clut = f.Clut & 0x7FFF,
             Texpage = tpage,
             U = v.U, V = v.V,
+            InvZ = invZ,
         };
     }
 

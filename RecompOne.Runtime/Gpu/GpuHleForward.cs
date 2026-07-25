@@ -16,10 +16,12 @@ public sealed partial class Gpu
         SetMask = _setMask, CheckMask = _checkMask, Dither = _dither,
     };
 
-    static HleVertex HV(in Vert v, bool useSubpixel) => new()
+    static HleVertex HV(in Vert v, bool useSubpixel, bool useZ) => new()
     {
         X = useSubpixel ? v.Fx : v.X,
         Y = useSubpixel ? v.Fy : v.Y,
+        Z = useZ ? v.GteZ : 0f,
+        HasGteZ = useZ,
         R = (byte)v.R, G = (byte)v.G, B = (byte)v.B, U = (short)v.U, V = (short)v.V,
     };
 
@@ -36,10 +38,13 @@ public sealed partial class Gpu
 
         // All-or-nothing: mixed int/float verts warp UVs every frame (texture flicker).
         bool sub = a.Subpixel && b.Subpixel && c.Subpixel;
+        // Perspective-correct UVs were tried via GTE Z, but intermittent cache hits
+        // made distant textures swim even with all filters off — keep affine (PS1).
+        bool persp = false;
 
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
-        be.DrawTri(HV(a, sub), HV(b, sub), HV(c, sub), PrimOf(tex, semi, raw, clut, gouraud));
+        be.DrawTri(HV(a, sub, persp), HV(b, sub, persp), HV(c, sub, persp), PrimOf(tex, semi, raw, clut, gouraud));
     }
 
     void HleRect(int x, int y, int w, int h, int u, int v, int clut, int r, int g, int b, bool tex, bool semi, bool raw)

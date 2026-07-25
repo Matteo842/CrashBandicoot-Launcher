@@ -9,7 +9,9 @@ public sealed partial class Gpu
     {
         public int X, Y, R, G, B, U, V;
         public float Fx, Fy;
+        public float GteZ;
         public bool Subpixel;
+        public bool HasGteZ;
     }
 
     static readonly RenderPrimEvent _primEvent = new();
@@ -52,15 +54,24 @@ public sealed partial class Gpu
             v[i].X = _drawOffsetX + gx;
             v[i].Y = _drawOffsetY + gy;
             v[i].Subpixel = false;
-            if (HleOn && Hle.GpuHle.DejitterActive && GteScreenCache.TryFind(gx, gy, out float fx, out float fy))
+            v[i].HasGteZ = false;
+            v[i].GteZ = 0f;
+            if (HleOn && GteScreenCache.TryFind(gx, gy, out float fx, out float fy, out float gz))
             {
-                // Keep fractional offset only — reject stale/wrong cache hits.
-                float dx = fx - gx, dy = fy - gy;
-                if (dx > -1.01f && dx < 1.01f && dy > -1.01f && dy < 1.01f)
+                if (gz > 0f)
                 {
-                    v[i].Fx = _drawOffsetX + fx;
-                    v[i].Fy = _drawOffsetY + fy;
-                    v[i].Subpixel = true;
+                    v[i].GteZ = gz;
+                    v[i].HasGteZ = true;
+                }
+                if (Hle.GpuHle.DejitterActive)
+                {
+                    float dx = fx - gx, dy = fy - gy;
+                    if (dx > -1.01f && dx < 1.01f && dy > -1.01f && dy < 1.01f)
+                    {
+                        v[i].Fx = _drawOffsetX + fx;
+                        v[i].Fy = _drawOffsetY + fy;
+                        v[i].Subpixel = true;
+                    }
                 }
             }
 

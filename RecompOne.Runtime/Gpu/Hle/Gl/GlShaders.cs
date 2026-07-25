@@ -63,9 +63,11 @@ internal static class GlShaders
         layout(location = 2) in int   inClut;
         layout(location = 3) in int   inTexpage;
         layout(location = 4) in vec2  inUV;
+        layout(location = 5) in float inInvZ;
 
         out vec4 vColor;
         out vec2 vUV;
+        out float vInvZ;
         flat out ivec2 clutBase;
         flat out ivec2 pageBase;
         flat out int   texMode;
@@ -81,6 +83,7 @@ internal static class GlShaders
 
             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
             vDither = (inTexpage >> 10) & 1;
+            vInvZ = inInvZ;
 
             if ((inTexpage & 0x8000) != 0) {
                 texMode = 4;
@@ -97,6 +100,7 @@ internal static class GlShaders
         #version 330 core
         in vec4 vColor;
         in vec2 vUV;
+        in float vInvZ;
         flat in ivec2 clutBase;
         flat in ivec2 pageBase;
         flat in int   texMode;
@@ -131,7 +135,12 @@ internal static class GlShaders
             return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
         }
         vec3 quant5(ivec3 c8) {
-            if (vDither != 0 && uDedither == 0) {
+            // Dedither = true-color: keep 8-bit, no ordered dither.
+            // (Old path skipped dither but still crushed to 5-bit into an RGB555 RT,
+            //  which made edges shimmer when the camera moved.)
+            if (uDedither != 0)
+                return clamp(vec3(c8), 0.0, 255.0) / 255.0;
+            if (vDither != 0) {
                 ivec2 vp = ivec2(floor(gl_FragCoord.xy / float(uScale) - uPosBias));
                 c8 = clamp(c8 + ditherTbl[(vp.y & 3) * 4 + (vp.x & 3)], 0, 255);
             }
@@ -192,34 +201,23 @@ internal static class GlShaders
         }
 
         vec4 sampleSoftSmooth(vec2 uvf) {
-            // 3x3 soft kernel (texture-smoothing style; not full xBR).
-            ivec2 c = ivec2(floor(uvf + 0.5));
-            vec4 acc = vec4(0.0);
-            float wsum = 0.0;
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    vec4 t = sampleNearest(c + ivec2(dx, dy));
-                    if (isTransparent(t)) continue;
-                    float w = (dx == 0 && dy == 0) ? 4.0 : ((dx == 0 || dy == 0) ? 2.0 : 1.0);
-                    acc += t * w;
-                    wsum += w;
-                }
-            }
-            if (wsum < 1e-4) return vec4(0.0);
-            return acc / wsum;
+            // Soften bilinear weights (no 3x3 — that bled across atlas seams = green lines).
+            vec2 f = fract(uvf);
+            f = f * f * (3.0 - 2.0 * f);
+            return sampleBilinearF(uvf, f);
         }
 
-        vec4 applyFilter(vec4 nearest) {
-            if (uFilterMode == 0 || uFilterStrength <= 0.001) return nearest;
+        vec4 applyFilter(vec2 uv, vec4 nearest, float strength) {
+            if (uFilterMode == 0 || strength <= 0.001) return nearest;
             vec4 filtered = nearest;
             if (uFilterMode == 1)
-                filtered = sampleBilinear(vUV);
+                filtered = sampleBilinear(uv);
             else if (uFilterMode == 2)
-                filtered = sampleSharpBilinear(vUV);
+                filtered = sampleSharpBilinear(uv);
             else if (uFilterMode == 3)
-                filtered = sampleSoftSmooth(vUV);
+                filtered = sampleSoftSmooth(uv);
             if (isTransparent(filtered)) return nearest;
-            return mix(nearest, filtered, clamp(uFilterStrength, 0.0, 1.0));
+            return mix(nearest, filtered, clamp(strength, 0.0, 1.0));
         }
 
         void main() {
@@ -231,14 +229,23 @@ internal static class GlShaders
                 return;
             }
 
-            int rawU = dFdx(vUV.x) < 0.0 ? int(ceil(vUV.x - 0.0001)) : int(floor(vUV.x + 0.0001));
-            int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
+            // Affine UVs (PS1). Perspective path disabled — unstable GTE Z matching.
+            vec2 uv = vUV;
+
+            int rawU = dFdx(uv.x) < 0.0 ? int(ceil(uv.x - 0.0001)) : int(floor(uv.x + 0.0001));
+            int rawV = dFdy(uv.y) < 0.0 ? int(ceil(uv.y - 0.0001)) : int(floor(uv.y + 0.0001));
             vec4 nearest = sampleNearest(ivec2(rawU, rawV));
             if (isTransparent(nearest)) discard;
 
-            vec4 texel = applyFilter(nearest);
-            ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
-            ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
+            vec4 texel = applyFilter(uv, nearest, uFilterStrength);
+            ivec3 c8;
+            if (uDedither != 0) {
+                vec3 t8 = texel.rgb * 255.0;
+                c8 = ivec3(t8 * vec3(vColor.rgb * 255.0) / 128.0 + 0.5);
+            } else {
+                ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
+                c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
+            }
             FragColor = vec4(quant5(c8), max(texel.a, uSetMask));
             BlendColor = texel.a >= 0.5 ? uBlend : uBlendOpaque;
         }

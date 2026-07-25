@@ -190,11 +190,13 @@ public static class Gte
         long sy = CheckMac0((long)div * IR2 + OFY); MAC0 = (int)sy;
         int nx = SatX((int)(sx >> 16));
         int ny = SatY((int)(sy >> 16));
-        if (Hle.GpuHle.DejitterActive)
+        // Always cache when HLE is up — needed for perspective-correct UVs even if dejitter is off.
+        if (Hle.GpuHle.Active)
         {
             float fx = Math.Clamp((float)(sx / 65536.0), -1024f, 1023f);
             float fy = Math.Clamp((float)(sy / 65536.0), -1024f, 1023f);
-            GteScreenCache.Store(nx, ny, fx, fy);
+            float z = Math.Max(sz, 1);
+            GteScreenCache.Store(nx, ny, fx, fy, z);
         }
         SX[0] = SX[1]; SX[1] = SX[2]; SX[2] = (short)nx;
         SY[0] = SY[1]; SY[1] = SY[2]; SY[2] = (short)ny;
