@@ -199,6 +199,7 @@ public sealed class LauncherHost : Form
             muted = ConfigManager.Game.Muted,
             fullscreen = ConfigManager.View.Fullscreen,
             widescreen = ConfigManager.View.Widescreen,
+            internalResolution = ConfigManager.View.InternalResolution,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
             mods = ConfigManager.Game.ActiveMods,
@@ -528,6 +529,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.Fullscreen = fs.GetBoolean();
         if (root.TryGetProperty("widescreen", out var ws))
             ConfigManager.View.Widescreen = ws.GetBoolean();
+        if (root.TryGetProperty("internalResolution", out var ir) && ir.TryGetInt32(out var scale))
+            ConfigManager.View.InternalResolution = scale;
 
         ConfigManager.SaveGame();
         // Persist Fullscreen etc. without touching ImGui layout (empty panel list

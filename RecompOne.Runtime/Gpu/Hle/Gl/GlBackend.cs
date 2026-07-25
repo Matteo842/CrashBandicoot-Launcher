@@ -507,10 +507,10 @@ public sealed class GlBackend : IGpuBackend
         int h1x = h;
         float aspect = showWide ? GpuHle.WideAspect : GpuHle.OutputAspect;
 
-        int presentScale = GpuHle.NativeResolution ? 1 : GlVram.Scale;
+        int presentScale = GlVram.Scale;
         int fbW = w1x * presentScale;
         int fbH = h1x * presentScale;
-        EnsurePresentSize(fbW, fbH, GpuHle.NativeResolution);
+        EnsurePresentSize(fbW, fbH, presentScale <= 1);
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         _gl.Viewport(0, 0, (uint)fbW, (uint)fbH);

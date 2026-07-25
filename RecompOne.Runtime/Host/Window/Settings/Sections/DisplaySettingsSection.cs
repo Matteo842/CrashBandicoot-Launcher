@@ -9,6 +9,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
     public string Title => "Display";
     public int Order => 5;
 
+    static readonly string[] ResolutionLabels =
+    [
+        "Native (1x)",
+        "2x",
+        "4x",
+        "8x (4K)",
+    ];
+
     public void Draw()
     {
         bool fullscreen = ConfigManager.View.Fullscreen;
@@ -28,15 +36,26 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Expands the view — does not stretch");
 
-        bool native = ConfigManager.View.NativeResolution;
-        if (ImGui.Checkbox("Native resolution", ref native))
+        int scale = ConfigManager.View.InternalResolution;
+        int idx = IndexOfScale(scale);
+        if (ImGui.Combo("Internal resolution", ref idx, ResolutionLabels, ResolutionLabels.Length))
         {
-            ConfigManager.View.NativeResolution = native;
-            Hle.GpuHle.NativeResolution = native;
+            int next = ViewConfig.InternalResolutionOptions[idx];
+            ConfigManager.View.InternalResolution = next;
+            Hle.GpuHle.NativeResolution = next <= 1;
             ConfigManager.SaveView(PanelManager.Panels);
             NoticePopup.Show("You need to restart the application to apply this configuration");
         }
-        if (ConfigManager.View.NativeResolution != (Hle.GlVram.Scale == 1))
+        ImGui.TextDisabled("Higher scales look sharper on 1440p/4K");
+        if (ConfigManager.View.InternalResolution != Hle.GlVram.Scale)
             ImGui.TextDisabled("restart is required");
+    }
+
+    static int IndexOfScale(int scale)
+    {
+        var opts = ViewConfig.InternalResolutionOptions;
+        for (int i = 0; i < opts.Length; i++)
+            if (opts[i] == scale) return i;
+        return 2; // 4x
     }
 }

@@ -24,7 +24,7 @@ public sealed class GlDisplayRt
     public bool Intersects(int rx, int ry, int rw, int rh)
         => rx < X + W && X < rx + rw && ry < Y + H && Y < ry + rh;
 
-    public void Create(GL gl)
+    public unsafe void Create(GL gl)
     {
         Tex = gl.GenTexture();
         gl.BindTexture(TextureTarget.Texture2D, Tex);
@@ -32,8 +32,8 @@ public sealed class GlDisplayRt
         gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
         gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
         gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
-        gl.TexImage2D<ushort>(TextureTarget.Texture2D, 0, InternalFormat.Rgb5A1, (uint)TexW, (uint)TexH, 0,
-            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, new ushort[TexW * TexH].AsSpan());
+        gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb5A1, (uint)TexW, (uint)TexH, 0,
+            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, null);
 
         Fbo = gl.GenFramebuffer();
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, Fbo);

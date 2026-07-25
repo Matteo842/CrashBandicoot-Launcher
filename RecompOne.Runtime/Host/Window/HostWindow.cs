@@ -391,12 +391,13 @@ internal static class HostWindow
         _vramTex= CreateTexture(_gl);
         _ramTex = CreateTexture(_gl);
 
-        Hle.GlVram.Scale = ConfigManager.View.NativeResolution ? 1 : 4;
+        int internalRes = ConfigManager.View.InternalResolution;
+        Hle.GlVram.Scale = internalRes;
         _glBackend = new Hle.GlBackend(_gl);
         _glBackend.InitGl();
         Hle.GpuHle.Active = _glBackend.Ready;
         Hle.GpuHle.Backend = _glBackend;
-        Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
+        Hle.GpuHle.NativeResolution = internalRes <= 1;
         ApplyWidescreen(ConfigManager.View.Widescreen);
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);

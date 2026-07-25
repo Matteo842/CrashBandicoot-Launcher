@@ -522,17 +522,24 @@
     }
 
     .sheet input[type="text"],
-    .sheet input[type="range"] {
+    .sheet input[type="range"],
+    .sheet select {
       width: 100%;
     }
 
-    .sheet input[type="text"] {
+    .sheet input[type="text"],
+    .sheet select {
       background: rgba(0,0,0,0.35);
       border: 1px solid rgba(255,180,60,0.3);
       color: var(--sand);
       padding: 8px 10px;
       border-radius: 8px;
       font: inherit;
+    }
+
+    .sheet select option {
+      background: #1a1208;
+      color: var(--sand);
     }
 
     .row-actions {
@@ -694,6 +701,15 @@
       <label>Fullscreen <input id="fullscreen" type="checkbox" /></label>
       <label>Widescreen 16:9 <input id="widescreen" type="checkbox" /></label>
       <p class="hint">Expands the field of view — does not stretch the image.</p>
+      <label>Internal resolution
+        <select id="internalResolution">
+          <option value="1">Native (1x)</option>
+          <option value="2">2x</option>
+          <option value="4" selected>4x</option>
+          <option value="8">8x (4K)</option>
+        </select>
+      </label>
+      <p class="hint">Applies on next game start. Use 8x on 4K monitors.</p>
       <div class="row-actions">
         <button class="btn primary" id="saveSettings" type="button">Save</button>
         <button class="btn ghost" data-close="sheetSettings" type="button">Back</button>
@@ -841,7 +857,8 @@
         masterVolume: Number(document.getElementById("vol").value),
         muted: document.getElementById("muted").checked,
         fullscreen: document.getElementById("fullscreen").checked,
-        widescreen: document.getElementById("widescreen").checked
+        widescreen: document.getElementById("widescreen").checked,
+        internalResolution: Number(document.getElementById("internalResolution").value)
       });
       document.getElementById("sheetSettings").classList.remove("show");
     };
@@ -881,6 +898,7 @@
       if (state.muted != null) document.getElementById("muted").checked = !!state.muted;
       if (state.fullscreen != null) document.getElementById("fullscreen").checked = !!state.fullscreen;
       if (state.widescreen != null) document.getElementById("widescreen").checked = !!state.widescreen;
+      if (state.internalResolution != null) document.getElementById("internalResolution").value = String(state.internalResolution);
       if (state.infiniteLives != null) document.getElementById("cheatInfiniteLives").checked = !!state.infiniteLives;
       if (state.levelSelect != null) document.getElementById("cheatLevelSelect").checked = !!state.levelSelect;
     };

@@ -27,7 +27,7 @@ public sealed class GlVram
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
-    uint CreateTex(int w, int h)
+    unsafe uint CreateTex(int w, int h)
     {
         uint t = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, t);
@@ -35,8 +35,9 @@ public sealed class GlVram
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
-        _gl.TexImage2D<ushort>(TextureTarget.Texture2D, 0, InternalFormat.Rgb5A1, (uint)w, (uint)h, 0,
-            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, new ushort[w * h].AsSpan());
+        // null data: allocate GPU storage without a giant CPU zero-fill (matters at 8x / 4K).
+        _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb5A1, (uint)w, (uint)h, 0,
+            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, null);
         return t;
     }
 

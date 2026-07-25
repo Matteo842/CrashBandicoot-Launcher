@@ -44,10 +44,51 @@ public class ViewConfig
         set => SetBool("Fullscreen", value);
     }
 
+    /// <summary>Allowed internal render scales (1 = native PS1, 8 ≈ 4K).</summary>
+    public static readonly int[] InternalResolutionOptions = [1, 2, 4, 8];
+
+    /// <summary>
+    /// GPU internal resolution multiplier. 1 = native, 4 = previous default, 8 ≈ 4K.
+    /// Requires restart (VRAM textures are allocated at init).
+    /// </summary>
+    public int InternalResolution
+    {
+        get
+        {
+            if (Values.TryGetValue("InternalResolution", out var raw) &&
+                int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
+                return SnapInternalResolution(i);
+
+            // Legacy bool: NativeResolution=true → 1x, else previous enhanced default (4x).
+            return GetBool("NativeResolution") ? 1 : 4;
+        }
+        set
+        {
+            int n = SnapInternalResolution(value);
+            SetInt("InternalResolution", n);
+            SetBool("NativeResolution", n <= 1);
+        }
+    }
+
+    /// <summary>True when rendering at native 1x (legacy key kept in sync).</summary>
     public bool NativeResolution
     {
-        get => GetBool("NativeResolution");
-        set => SetBool("NativeResolution", value);
+        get => InternalResolution <= 1;
+        set
+        {
+            if (value)
+                InternalResolution = 1;
+            else if (InternalResolution <= 1)
+                InternalResolution = 4;
+        }
+    }
+
+    public static int SnapInternalResolution(int value)
+    {
+        if (value <= 1) return 1;
+        if (value <= 2) return 2;
+        if (value <= 4) return 4;
+        return 8;
     }
 
     /// <summary>
