@@ -127,3 +127,4 @@ minidump*
 LOCAL.md
 TODO.local.md
 *.local.json
+run.bat

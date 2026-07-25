@@ -73,13 +73,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     // Settings / controls / cheats state buffers
     readonly Dictionary<string, TextBox> _keyBoxes = new(StringComparer.Ordinal);
-    TrackBar? _vol;
+    ThemeSlider? _vol;
     CheckBox? _muted;
     CheckBox? _fullscreen;
     CheckBox? _widescreen;
     ComboBox? _internalRes;
     ComboBox? _texFilter;
-    TrackBar? _filterStrength;
+    ThemeSlider? _filterStrength;
     Label? _filterStrengthLabel;
     CheckBox? _dedither;
     CheckBox? _dejitter;
@@ -129,11 +129,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         _fontCrash = NativeTheme.MakeBungee(64);
         _fontRecomp = NativeTheme.MakeBungee(28);
-        _fontMenu = NativeTheme.MakeBungee(26);
-        _fontMenuHot = NativeTheme.MakeBungee(26);
-        _fontChip = NativeTheme.MakeNunito(13, extraBold: true);
-        _fontFooter = NativeTheme.MakeNunito(13);
-        _fontVer = NativeTheme.MakeNunito(12);
+        _fontMenu = NativeTheme.MakeBungee(38);
+        _fontMenuHot = NativeTheme.MakeBungee(38);
+        _fontChip = NativeTheme.MakeNunito(15, extraBold: true);
+        _fontFooter = NativeTheme.MakeNunito(15);
+        _fontVer = NativeTheme.MakeNunito(13);
         _fontInfo = NativeTheme.MakeBungee(18);
         _fontMark = NativeTheme.MakeBungee(112);
 
@@ -258,7 +258,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         box.Checked = el.ValueKind == JsonValueKind.True;
     }
 
-    static void SetFloat(TrackBar? bar, JsonElement state, string name, int min, int max, Func<float, int> map)
+    static void SetFloat(ThemeSlider? bar, JsonElement state, string name, int min, int max, Func<float, int> map)
     {
         if (bar == null || bar.IsDisposed || !state.TryGetProperty(name, out var el) || !el.TryGetSingle(out var v)) return;
         bar.Value = Math.Clamp(map(v), min, max);
@@ -296,20 +296,21 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         const int crate = 220;
         _crateRect = new Rectangle(brandX, brandY + 120, crate, crate);
 
-        // Menu right
+        // Menu right — larger Bungee needs more width/row height
         _menuHits.Clear();
         var menuLabels = new[] { "START GAME", "CONTROLS", "SETTINGS", "CHEAT", "EXIT" };
-        var menuX = w - 280;
-        var menuY = contentH / 2 - 110;
+        var menuX = w - 340;
+        var menuY = contentH / 2 - 170;
+        const int menuRow = 70;
         for (var i = 0; i < menuLabels.Length; i++)
         {
-            _menuHits.Add(new MenuHit(menuLabels[i], new Rectangle(menuX, menuY + i * 48, 240, 42), i));
+            _menuHits.Add(new MenuHit(menuLabels[i], new Rectangle(menuX, menuY + i * menuRow, 300, 56), i));
         }
 
         // Footer
-        var footY = h - footH + 18;
+        var footY = h - footH + 16;
         _infoRect = new Rectangle(28, footY, 36, 36);
-        _chipRect = new Rectangle(76, footY + 2, 150, 32);
+        _chipRect = new Rectangle(76, footY + 1, 168, 34);
     }
 
     void OnStageMouseMove(object? sender, MouseEventArgs e)
@@ -634,7 +635,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         using (var pen = new Pen(Color.FromArgb(30, 255, 200, 120)))
             g.DrawLine(pen, 0, footTop, bounds.Width, footTop);
 
-        // Info button
+        // Info button — center glyph via path bounds (Bungee metrics are off with TextRenderer)
         var infoBack = _hoverInfo
             ? Color.FromArgb(90, 255, 138, 0)
             : Color.FromArgb(45, 255, 138, 0);
@@ -642,14 +643,25 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             g.FillEllipse(br, _infoRect);
         using (var pen = new Pen(Color.FromArgb(140, 255, 180, 60), 2f))
             g.DrawEllipse(pen, _infoRect);
-        TextRenderer.DrawText(g, "i", _fontInfo, _infoRect, NativeTheme.WumpaHot,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        using (var infoPath = new GraphicsPath())
+        {
+            infoPath.AddString("i", _fontInfo.FontFamily, (int)_fontInfo.Style, _fontInfo.Size,
+                Point.Empty, StringFormat.GenericTypographic);
+            var gb = infoPath.GetBounds();
+            var dx = _infoRect.X + _infoRect.Width / 2f - (gb.X + gb.Width / 2f);
+            var dy = _infoRect.Y + _infoRect.Height / 2f - (gb.Y + gb.Height / 2f);
+            using var mx = new Matrix();
+            mx.Translate(dx, dy);
+            infoPath.Transform(mx);
+            using var fill = new SolidBrush(NativeTheme.WumpaHot);
+            g.FillPath(fill, infoPath);
+        }
 
         // Chip
         var chipFill = _hoverChip
             ? Color.FromArgb(70, 255, 138, 0)
             : Color.FromArgb(30, 255, 138, 0);
-        using (var path = RoundRect(_chipRect, 16))
+        using (var path = RoundRect(_chipRect, 17))
         using (var br = new SolidBrush(chipFill))
         using (var pen = new Pen(Color.FromArgb(90, 255, 180, 60)))
         {
@@ -668,13 +680,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 : _statusKind == "ok" ? NativeTheme.Ok
                 : Color.FromArgb(200, NativeTheme.Sand);
             TextRenderer.DrawText(g, _status, _fontFooter,
-                new Rectangle(textX, footTop + 8, textW, 20), sc,
+                new Rectangle(textX, footTop + 6, textW, 22), sc,
                 TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
 
         var pathText = string.IsNullOrEmpty(_discPath) ? "(none)" : _discPath;
         TextRenderer.DrawText(g, pathText, _fontFooter,
-            new Rectangle(textX, _chipRect.Y + 6, textW, 22),
+            new Rectangle(textX, _chipRect.Y + 5, textW, 24),
             Color.FromArgb(160, NativeTheme.Sand),
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
 
@@ -702,21 +714,21 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     {
         _prepOverlay = MakeDimHost();
         var prepCard = MakeCard(480, 180);
-        prepCard.Controls.Add(MakeTitle("Preparing game", new Point(28, 24)));
+        prepCard.Controls.Add(MakeTitle("Preparing game"));
         _prepDetail = new Label
         {
             Text = "Working from your disc…",
             ForeColor = Color.FromArgb(210, NativeTheme.Sand),
-            Font = NativeTheme.MakeNunito(14),
-            Location = new Point(28, 58),
-            Size = new Size(420, 24),
+            Font = NativeTheme.MakeNunito(15),
+            Location = new Point(36, 110),
+            Size = new Size(480, 24),
             BackColor = Color.Transparent,
         };
         prepCard.Controls.Add(_prepDetail);
         var barBg = new Panel
         {
-            Location = new Point(28, 96),
-            Size = new Size(420, 12),
+            Location = new Point(36, 148),
+            Size = new Size(480, 12),
             BackColor = Color.FromArgb(20, 255, 255, 255),
         };
         _prepBarFill = new Panel
@@ -731,9 +743,9 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             Text = "First prepare writes into the game folder next to the exe. Your .cue + .bin must still be present to play.",
             ForeColor = Color.FromArgb(140, NativeTheme.Sand),
-            Font = NativeTheme.MakeNunito(12),
-            Location = new Point(28, 122),
-            Size = new Size(420, 40),
+            Font = NativeTheme.MakeNunito(13),
+            Location = new Point(36, 176),
+            Size = new Size(480, 40),
             BackColor = Color.Transparent,
         });
         _prepOverlay.Controls.Add(prepCard);
@@ -760,6 +772,9 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     Panel MakeCard(int width, int height)
     {
+        // ~15% larger than the old HTML sheet footprint
+        width = (int)(width * 1.15f);
+        height = (int)(height * 1.15f);
         var card = new DoubleBufferedPanel
         {
             Size = new Size(width, height),
@@ -776,12 +791,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         return card;
     }
 
-    Label MakeTitle(string text, Point loc) => new()
+    Label MakeTitle(string text, Point? loc = null) => new()
     {
         Text = text,
-        Font = NativeTheme.MakeBungee(22),
+        Font = NativeTheme.MakeBungee(31),
         ForeColor = NativeTheme.Wumpa,
-        Location = loc,
+        Location = loc ?? new Point(36, 28),
         AutoSize = true,
         BackColor = Color.Transparent,
     };
@@ -794,9 +809,9 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         var btn = new Button
         {
             Text = text,
-            Font = NativeTheme.MakeNunito(14, extraBold: true),
+            Font = NativeTheme.MakeNunito(17, extraBold: true),
             FlatStyle = FlatStyle.Flat,
-            Size = new Size(150, 38),
+            Size = new Size(160, 42),
             Cursor = Cursors.Hand,
             ForeColor = primary ? Color.FromArgb(42, 18, 0) : NativeTheme.Sand,
             BackColor = primary ? NativeTheme.Wumpa : Color.Transparent,
@@ -812,7 +827,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             Text = text,
             ForeColor = NativeTheme.Sand,
-            Font = NativeTheme.MakeNunito(14),
+            Font = NativeTheme.MakeNunito(17),
             AutoSize = true,
             BackColor = Color.Transparent,
             FlatStyle = FlatStyle.Flat,
@@ -836,7 +851,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     void SetPrepProgress(float fraction, string? detail)
     {
         if (_prepBarFill != null)
-            _prepBarFill.Width = (int)(Math.Clamp(fraction, 0f, 1f) * 420);
+            _prepBarFill.Width = (int)(Math.Clamp(fraction, 0f, 1f) * 480);
         if (detail != null && _prepDetail != null)
             _prepDetail.Text = detail;
     }
@@ -870,15 +885,15 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void ShowAbout()
     {
-        var card = MakeCard(520, 280);
-        card.Controls.Add(MakeTitle("About", new Point(28, 22)));
+        var card = MakeCard(520, 360);
+        card.Controls.Add(MakeTitle("About"));
         card.Controls.Add(BodyLabel(
             "Unofficial fan project — not affiliated with Sony, Activision, or Naughty Dog.\n\n" +
             "Unofficial tools for a disc you own. First prepare writes a game folder next to the exe — later Starts reuse that.\n\n" +
             "Prepared files never replace your dump: you still need a valid NTSC-U .cue + .bin (SCUS-94900) every time you play.",
-            new Point(28, 60), 460, 150));
+            new Point(36, 110), 520, 170));
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(28, 220);
+        back.Location = new Point(36, 295);
         back.Click += (_, _) => CloseSheet();
         card.Controls.Add(back);
         OpenSheet(card);
@@ -888,39 +903,39 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     {
         var card = MakeCard(560, 520);
         card.AutoScroll = true;
-        card.Controls.Add(MakeTitle("Controls", new Point(28, 22)));
-        card.Controls.Add(BodyLabel("Keyboard bindings (player 1). Saved to settings.json.", new Point(28, 56), 500, 24));
+        card.Controls.Add(MakeTitle("Controls"));
+        card.Controls.Add(BodyLabel("Keyboard bindings (player 1). Saved to settings.json.", new Point(36, 110), 520, 28));
 
         _keyBoxes.Clear();
-        var y = 90;
+        var y = 150;
         foreach (var (label, id) in KeyFields)
         {
             card.Controls.Add(new Label
             {
                 Text = label,
                 ForeColor = NativeTheme.Sand,
-                Font = NativeTheme.MakeNunito(14),
-                Location = new Point(28, y + 4),
-                Size = new Size(140, 24),
+                Font = NativeTheme.MakeNunito(17),
+                Location = new Point(36, y + 4),
+                Size = new Size(160, 28),
                 BackColor = Color.Transparent,
             });
             var box = new TextBox
             {
-                Location = new Point(180, y),
-                Size = new Size(320, 28),
+                Location = new Point(210, y),
+                Size = new Size(340, 30),
                 MaxLength = 32,
                 BackColor = Color.FromArgb(30, 20, 12),
                 ForeColor = NativeTheme.Sand,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = NativeTheme.MakeNunito(14),
+                Font = NativeTheme.MakeNunito(16),
             };
             _keyBoxes[id] = box;
             card.Controls.Add(box);
-            y += 36;
+            y += 40;
         }
 
         var save = MakePrimaryBtn("Save");
-        save.Location = new Point(28, y + 12);
+        save.Location = new Point(36, y + 16);
         save.Click += (_, _) =>
         {
             var keys = new Dictionary<string, string>();
@@ -930,11 +945,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(190, y + 12);
+        back.Location = new Point(210, y + 16);
         back.Click += (_, _) => CloseSheet();
         card.Controls.Add(save);
         card.Controls.Add(back);
-        card.Height = Math.Min(560, y + 70);
+        card.Height = Math.Min(640, y + 90);
         OpenSheet(card);
         Emit(new { type = "getState" });
     }
@@ -943,8 +958,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     {
         var card = MakeCard(560, 560);
         card.AutoScroll = true;
-        card.Controls.Add(MakeTitle("Settings", new Point(28, 22)));
-        var y = 64;
+        card.Controls.Add(MakeTitle("Settings"));
+        var y = 110;
+        const int labelW = 200;
+        const int controlX = 250;
 
         void AddLabel(string t)
         {
@@ -952,93 +969,90 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             {
                 Text = t,
                 ForeColor = NativeTheme.Sand,
-                Font = NativeTheme.MakeNunito(14),
-                Location = new Point(28, y + 4),
-                Size = new Size(160, 24),
+                Font = NativeTheme.MakeNunito(17),
+                Location = new Point(36, y + 2),
+                Size = new Size(labelW, 28),
                 BackColor = Color.Transparent,
             });
         }
 
         AddLabel("Master volume");
-        _vol = new TrackBar
+        _vol = new ThemeSlider
         {
             Minimum = 0,
             Maximum = 100,
-            TickStyle = TickStyle.None,
-            Location = new Point(190, y),
-            Size = new Size(300, 30),
-            BackColor = NativeTheme.CardBottom,
+            Value = 100,
+            Location = new Point(controlX, y + 4),
+            Size = new Size(310, 24),
         };
         card.Controls.Add(_vol);
-        y += 40;
+        y += 44;
 
         _muted = MakeCheck("Muted");
-        _muted.Location = new Point(28, y);
+        _muted.Location = new Point(36, y);
         card.Controls.Add(_muted);
-        y += 32;
+        y += 36;
 
         _fullscreen = MakeCheck("Fullscreen");
-        _fullscreen.Location = new Point(28, y);
+        _fullscreen.Location = new Point(36, y);
         card.Controls.Add(_fullscreen);
-        y += 32;
+        y += 36;
 
         _widescreen = MakeCheck("Widescreen 16:9");
-        _widescreen.Location = new Point(28, y);
+        _widescreen.Location = new Point(36, y);
         card.Controls.Add(_widescreen);
-        y += 28;
+        y += 32;
         card.Controls.Add(Hint("Expands the field of view — does not stretch the image.", ref y));
 
         AddLabel("Internal resolution");
-        _internalRes = MakeCombo(new Point(190, y), [
+        _internalRes = MakeCombo(new Point(controlX, y), [
             (1, "Native (1x)"), (2, "2x"), (4, "4x"), (8, "8x (4K)"),
         ]);
         card.Controls.Add(_internalRes);
-        y += 36;
+        y += 42;
         card.Controls.Add(Hint("Applies on next game start. Use 8x on 4K monitors.", ref y));
 
         AddLabel("Texture filter");
-        _texFilter = MakeCombo(new Point(190, y), [
+        _texFilter = MakeCombo(new Point(controlX, y), [
             (0, "Off"), (1, "Bilinear"), (2, "Sharp bilinear"), (3, "Soft smooth"),
         ]);
         _texFilter.SelectedIndexChanged += (_, _) => SyncFilterStrengthRow();
         card.Controls.Add(_texFilter);
-        y += 36;
+        y += 42;
 
         _filterStrengthLabel = new Label
         {
             Text = "Filter strength",
             ForeColor = NativeTheme.Sand,
-            Font = NativeTheme.MakeNunito(14),
-            Location = new Point(28, y + 4),
-            Size = new Size(160, 24),
+            Font = NativeTheme.MakeNunito(17),
+            Location = new Point(36, y + 2),
+            Size = new Size(labelW, 28),
             BackColor = Color.Transparent,
         };
         card.Controls.Add(_filterStrengthLabel);
-        _filterStrength = new TrackBar
+        _filterStrength = new ThemeSlider
         {
             Minimum = 0,
             Maximum = 100,
             Value = 50,
-            TickStyle = TickStyle.None,
-            Location = new Point(190, y),
-            Size = new Size(300, 30),
-            BackColor = NativeTheme.CardBottom,
+            Location = new Point(controlX, y + 4),
+            Size = new Size(310, 24),
         };
         card.Controls.Add(_filterStrength);
-        y += 40;
+        y += 44;
 
         _dedither = MakeCheck("Dedither");
-        _dedither.Location = new Point(28, y);
+        _dedither.Location = new Point(36, y);
         card.Controls.Add(_dedither);
-        y += 28;
+        y += 34;
         _dejitter = MakeCheck("Dejitter");
-        _dejitter.Location = new Point(28, y);
+        _dejitter.Location = new Point(36, y);
         card.Controls.Add(_dejitter);
-        y += 28;
+        y += 34;
         card.Controls.Add(Hint("Texture filters, dedither & dejitter auto-off on menus & cutscenes.", ref y));
 
         var save = MakePrimaryBtn("Save");
-        save.Location = new Point(28, y + 8);
+        save.Location = new Point(36, y + 10);
         save.Click += (_, _) =>
         {
             Emit(new
@@ -1048,8 +1062,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 muted = _muted?.Checked ?? false,
                 fullscreen = _fullscreen?.Checked ?? false,
                 widescreen = _widescreen?.Checked ?? false,
-                internalResolution = _internalRes?.SelectedValue is int ir ? ir : 4,
-                textureFilter = _texFilter?.SelectedValue is int tf ? tf : 0,
+                internalResolution = _internalRes?.SelectedItem is Kv irKv ? irKv.Value : 4,
+                textureFilter = _texFilter?.SelectedItem is Kv tfKv ? tfKv.Value : 0,
                 textureFilterStrength = (_filterStrength?.Value ?? 50) / 100.0,
                 dedither = _dedither?.Checked ?? false,
                 dejitter = _dejitter?.Checked ?? false,
@@ -1057,11 +1071,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(190, y + 8);
+        back.Location = new Point(210, y + 10);
         back.Click += (_, _) => CloseSheet();
         card.Controls.Add(save);
         card.Controls.Add(back);
-        card.Height = Math.Min(620, y + 70);
+        card.Height = Math.Min(720, y + 80);
         OpenSheet(card);
         SyncFilterStrengthRow();
         Emit(new { type = "getState" });
@@ -1069,22 +1083,22 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void ShowCheat()
     {
-        var card = MakeCard(520, 260);
-        card.Controls.Add(MakeTitle("Cheat", new Point(28, 22)));
-        var y = 60;
+        var card = MakeCard(520, 340);
+        card.Controls.Add(MakeTitle("Cheat"));
+        var y = 110;
         card.Controls.Add(Hint("Cheat toggles for NTSC-U. Applied while the game is running (also open in-game with the Cheat menu key).", ref y));
         _cheatLives = MakeCheck("Infinite Lives");
-        _cheatLives.Location = new Point(28, y);
+        _cheatLives.Location = new Point(36, y);
         card.Controls.Add(_cheatLives);
-        y += 32;
+        y += 40;
         _cheatLevel = MakeCheck("Level Select");
-        _cheatLevel.Location = new Point(28, y);
+        _cheatLevel.Location = new Point(36, y);
         card.Controls.Add(_cheatLevel);
-        y += 32;
+        y += 40;
         card.Controls.Add(Hint("99 Lives (map) and Instant Save Menu are one-shots available in the in-game Cheat menu.", ref y));
 
         var save = MakePrimaryBtn("Save");
-        save.Location = new Point(28, y + 8);
+        save.Location = new Point(36, y + 12);
         save.Click += (_, _) =>
         {
             Emit(new
@@ -1096,10 +1110,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(190, y + 8);
+        back.Location = new Point(210, y + 12);
         back.Click += (_, _) => CloseSheet();
         card.Controls.Add(save);
         card.Controls.Add(back);
+        card.Height = Math.Max(card.Height, y + 80);
         OpenSheet(card);
         Emit(new { type = "getState" });
     }
@@ -1120,20 +1135,20 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         FocusLabels.TryGetValue(focus, out var focusLabel);
         focusLabel ??= FocusLabels["other"];
 
-        var card = MakeCard(560, 360);
-        card.Controls.Add(MakeTitle(title, new Point(28, 22)));
+        var card = MakeCard(560, 380);
+        card.Controls.Add(MakeTitle(title));
         card.Controls.Add(new Label
         {
             Text = focusLabel,
             ForeColor = NativeTheme.Wumpa,
-            Font = NativeTheme.MakeNunito(12, extraBold: true),
-            Location = new Point(28, 58),
+            Font = NativeTheme.MakeNunito(13, extraBold: true),
+            Location = new Point(36, 108),
             AutoSize = true,
             BackColor = Color.FromArgb(40, 255, 138, 0),
             Padding = new Padding(10, 4, 10, 4),
         });
-        card.Controls.Add(Section("What went wrong", problem ?? "", new Point(28, 96), 500));
-        card.Controls.Add(Section("How to fix it", fix ?? "", new Point(28, 170), 500));
+        card.Controls.Add(Section("What went wrong", problem ?? "", new Point(36, 148), 540));
+        card.Controls.Add(Section("How to fix it", fix ?? "", new Point(36, 228), 540));
 
         var paths = new List<string>();
         if (data.TryGetProperty("cuePath", out var cp) && cp.GetString() is { Length: > 0 } cue)
@@ -1154,15 +1169,15 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         }
 
         var pick = MakePrimaryBtn("Select disc (.cue)");
-        pick.Size = new Size(170, 38);
-        pick.Location = new Point(28, 300);
+        pick.Size = new Size(180, 42);
+        pick.Location = new Point(36, 310);
         pick.Click += (_, _) =>
         {
             CloseSheet();
             Emit(new { type = "pickDisc" });
         };
         var close = MakeGhostBtn("Close");
-        close.Location = new Point(210, 300);
+        close.Location = new Point(230, 310);
         close.Click += (_, _) => CloseSheet();
         card.Controls.Add(pick);
         card.Controls.Add(close);
@@ -1176,24 +1191,24 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         var fix = data.TryGetProperty("fix", out var f) ? f.GetString() ?? "" : "";
         var path = data.TryGetProperty("path", out var p) ? p.GetString() : null;
 
-        var card = MakeCard(560, 320);
-        card.Controls.Add(MakeTitle(title, new Point(28, 22)));
-        card.Controls.Add(Section("Why this matters", message, new Point(28, 70), 500));
-        card.Controls.Add(Section("What to do", fix, new Point(28, 150), 500));
+        var card = MakeCard(560, 340);
+        card.Controls.Add(MakeTitle(title));
+        card.Controls.Add(Section("Why this matters", message, new Point(36, 110), 540));
+        card.Controls.Add(Section("What to do", fix, new Point(36, 195), 540));
         if (!string.IsNullOrEmpty(path))
         {
             card.Controls.Add(new Label
             {
                 Text = "Current folder  " + path,
                 ForeColor = Color.FromArgb(180, NativeTheme.Sand),
-                Font = NativeTheme.MakeNunito(11),
-                Location = new Point(28, 230),
-                Size = new Size(500, 30),
+                Font = NativeTheme.MakeNunito(13),
+                Location = new Point(36, 250),
+                Size = new Size(540, 30),
                 BackColor = Color.Transparent,
             });
         }
         var got = MakePrimaryBtn("Got it");
-        got.Location = new Point(28, 265);
+        got.Location = new Point(36, 285);
         got.Click += (_, _) => CloseSheet();
         card.Controls.Add(got);
         OpenSheet(card);
@@ -1203,7 +1218,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     {
         Text = text,
         ForeColor = Color.FromArgb(210, NativeTheme.Sand),
-        Font = NativeTheme.MakeNunito(14),
+        Font = NativeTheme.MakeNunito(16),
         Location = loc,
         Size = new Size(w, h),
         BackColor = Color.Transparent,
@@ -1215,12 +1230,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             Text = text,
             ForeColor = Color.FromArgb(160, NativeTheme.Sand),
-            Font = NativeTheme.MakeNunito(12),
-            Location = new Point(28, y),
-            Size = new Size(500, 36),
+            Font = NativeTheme.MakeNunito(14),
+            Location = new Point(36, y),
+            Size = new Size(540, 40),
             BackColor = Color.Transparent,
         };
-        y += 40;
+        y += 44;
         return lbl;
     }
 
@@ -1259,8 +1274,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Location = loc,
-            Size = new Size(300, 28),
-            Font = NativeTheme.MakeNunito(14),
+            Size = new Size(310, 32),
+            Font = NativeTheme.MakeNunito(16),
             BackColor = Color.FromArgb(30, 20, 12),
             ForeColor = NativeTheme.Sand,
             FlatStyle = FlatStyle.Flat,
@@ -1308,6 +1323,129 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     readonly record struct MenuHit(string Label, Rectangle Bounds, int Index);
     sealed record Kv(int Value, string Text);
+
+    sealed class ThemeSlider : Control
+    {
+        int _min;
+        int _max = 100;
+        int _value;
+        bool _dragging;
+
+        public ThemeSlider()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                     ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+            Height = 24;
+        }
+
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public int Minimum
+        {
+            get => _min;
+            set { _min = value; Invalidate(); }
+        }
+
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public int Maximum
+        {
+            get => _max;
+            set { _max = Math.Max(value, _min + 1); Invalidate(); }
+        }
+
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public int Value
+        {
+            get => _value;
+            set
+            {
+                var v = Math.Clamp(value, _min, _max);
+                if (v == _value) return;
+                _value = v;
+                Invalidate();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public event EventHandler? ValueChanged;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var trackY = Height / 2 - 3;
+            var track = new Rectangle(6, trackY, Math.Max(1, Width - 12), 6);
+            using (var bg = new SolidBrush(Color.FromArgb(50, 255, 255, 255)))
+            using (var path = RoundRectPath(track, 3))
+                g.FillPath(bg, path);
+
+            var t = _max == _min ? 0f : (_value - _min) / (float)(_max - _min);
+            var fillW = (int)(track.Width * t);
+            if (fillW > 0)
+            {
+                var fill = new Rectangle(track.X, track.Y, Math.Max(fillW, 1), track.Height);
+                using var orange = new LinearGradientBrush(fill, NativeTheme.Wumpa, NativeTheme.WumpaHot, 0f);
+                if (fillW < 8)
+                    g.FillRectangle(orange, fill);
+                else
+                {
+                    using var path = RoundRectPath(fill, 3);
+                    g.FillPath(orange, path);
+                }
+            }
+
+            var thumbX = track.X + fillW;
+            var thumb = new Rectangle(thumbX - 8, Height / 2 - 8, 16, 16);
+            using (var thumbBr = new SolidBrush(NativeTheme.Sand))
+                g.FillEllipse(thumbBr, thumb);
+            using (var ring = new Pen(NativeTheme.Wumpa, 2f))
+                g.DrawEllipse(ring, thumb);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            _dragging = true;
+            Capture = true;
+            SetFromMouse(e.X);
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            if (_dragging) SetFromMouse(e.X);
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            _dragging = false;
+            Capture = false;
+            base.OnMouseUp(e);
+        }
+
+        void SetFromMouse(int x)
+        {
+            var trackLeft = 6;
+            var trackW = Math.Max(1, Width - 12);
+            var t = Math.Clamp((x - trackLeft) / (float)trackW, 0f, 1f);
+            Value = _min + (int)Math.Round(t * (_max - _min));
+        }
+
+        static GraphicsPath RoundRectPath(Rectangle r, int radius)
+        {
+            var path = new GraphicsPath();
+            var d = radius * 2;
+            path.AddArc(r.X, r.Y, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+    }
 
     sealed class DoubleBufferedPanel : Panel
     {
