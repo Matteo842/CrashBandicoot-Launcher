@@ -115,6 +115,7 @@ internal static class GlShaders
         uniform int   uScale;
         uniform int   uFilterMode;
         uniform float uFilterStrength;
+        uniform int   uDedither;
         uniform vec2  uPosBias;
 
         const int ditherTbl[16] = int[16](
@@ -130,7 +131,7 @@ internal static class GlShaders
             return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
         }
         vec3 quant5(ivec3 c8) {
-            if (vDither != 0) {
+            if (vDither != 0 && uDedither == 0) {
                 ivec2 vp = ivec2(floor(gl_FragCoord.xy / float(uScale) - uPosBias));
                 c8 = clamp(c8 + ditherTbl[(vp.y & 3) * 4 + (vp.x & 3)], 0, 255);
             }
@@ -161,9 +162,8 @@ internal static class GlShaders
             return fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
         }
 
-        vec4 sampleBilinear(vec2 uvf) {
+        vec4 sampleBilinearF(vec2 uvf, vec2 f) {
             ivec2 i00 = ivec2(floor(uvf));
-            vec2 f = fract(uvf);
             vec4 c00 = sampleNearest(i00);
             vec4 c10 = sampleNearest(i00 + ivec2(1, 0));
             vec4 c01 = sampleNearest(i00 + ivec2(0, 1));
@@ -180,11 +180,44 @@ internal static class GlShaders
             return (c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11) / wsum;
         }
 
+        vec4 sampleBilinear(vec2 uvf) {
+            return sampleBilinearF(uvf, fract(uvf));
+        }
+
+        vec4 sampleSharpBilinear(vec2 uvf) {
+            // Pull weights toward texel centers — less soap than plain bilinear.
+            vec2 f = fract(uvf);
+            f = clamp((f - 0.5) * 2.0 + 0.5, 0.0, 1.0);
+            return sampleBilinearF(uvf, f);
+        }
+
+        vec4 sampleSoftSmooth(vec2 uvf) {
+            // 3x3 soft kernel (texture-smoothing style; not full xBR).
+            ivec2 c = ivec2(floor(uvf + 0.5));
+            vec4 acc = vec4(0.0);
+            float wsum = 0.0;
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    vec4 t = sampleNearest(c + ivec2(dx, dy));
+                    if (isTransparent(t)) continue;
+                    float w = (dx == 0 && dy == 0) ? 4.0 : ((dx == 0 || dy == 0) ? 2.0 : 1.0);
+                    acc += t * w;
+                    wsum += w;
+                }
+            }
+            if (wsum < 1e-4) return vec4(0.0);
+            return acc / wsum;
+        }
+
         vec4 applyFilter(vec4 nearest) {
             if (uFilterMode == 0 || uFilterStrength <= 0.001) return nearest;
             vec4 filtered = nearest;
             if (uFilterMode == 1)
                 filtered = sampleBilinear(vUV);
+            else if (uFilterMode == 2)
+                filtered = sampleSharpBilinear(vUV);
+            else if (uFilterMode == 3)
+                filtered = sampleSoftSmooth(vUV);
             if (isTransparent(filtered)) return nearest;
             return mix(nearest, filtered, clamp(uFilterStrength, 0.0, 1.0));
         }

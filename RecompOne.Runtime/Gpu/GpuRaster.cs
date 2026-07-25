@@ -5,7 +5,12 @@ namespace RecompOne.Runtime;
 //old soft raster
 public sealed partial class Gpu
 {
-    struct Vert { public int X, Y, R, G, B, U, V; }
+    struct Vert
+    {
+        public int X, Y, R, G, B, U, V;
+        public float Fx, Fy;
+        public bool Subpixel;
+    }
 
     static readonly RenderPrimEvent _primEvent = new();
 
@@ -42,8 +47,17 @@ public sealed partial class Gpu
             v[i].R = cr; v[i].G = cg; v[i].B = cb;
 
             uint vw = _fifo[idx++];
-            v[i].X = _drawOffsetX + CoordX(vw);
-            v[i].Y = _drawOffsetY + CoordY(vw);
+            int gx = CoordX(vw);
+            int gy = CoordY(vw);
+            v[i].X = _drawOffsetX + gx;
+            v[i].Y = _drawOffsetY + gy;
+            v[i].Subpixel = false;
+            if (HleOn && Hle.GpuHle.DejitterActive && GteScreenCache.TryFind(gx, gy, out float fx, out float fy))
+            {
+                v[i].Fx = _drawOffsetX + fx;
+                v[i].Fy = _drawOffsetY + fy;
+                v[i].Subpixel = true;
+            }
 
             if (tex)
             {

@@ -92,13 +92,21 @@ public class ViewConfig
     }
 
     /// <summary>Texture filter modes shown in settings (index = mode id).</summary>
-    public static readonly string[] TextureFilterLabels = ["Off", "Bilinear"];
+    public static readonly string[] TextureFilterLabels =
+    [
+        "Off",
+        "Bilinear",
+        "Sharp bilinear",
+        "Soft smooth",
+    ];
 
     public const int TextureFilterOff = 0;
     public const int TextureFilterBilinear = 1;
+    public const int TextureFilterSharpBilinear = 2;
+    public const int TextureFilterSoftSmooth = 3;
 
     /// <summary>
-    /// Active texture filter. 0 = Off, 1 = Bilinear. Live — no restart.
+    /// Active texture filter. Live — no restart.
     /// Auto-disabled on title/menu/map and cinema levels.
     /// </summary>
     public int TextureFilter
@@ -135,8 +143,22 @@ public class ViewConfig
     public static int SnapTextureFilter(int value)
     {
         if (value < 0) return TextureFilterOff;
-        if (value >= TextureFilterLabels.Length) return TextureFilterBilinear;
+        if (value >= TextureFilterLabels.Length) return TextureFilterLabels.Length - 1;
         return value;
+    }
+
+    /// <summary>Remove PS1 dither noise (true-color style). Off on menus &amp; cutscenes.</summary>
+    public bool Dedither
+    {
+        get => GetBool("Dedither");
+        set => SetBool("Dedither", value);
+    }
+
+    /// <summary>Keep GTE subpixel screen coords to reduce polygon wobble. Off on menus &amp; cutscenes.</summary>
+    public bool Dejitter
+    {
+        get => GetBool("Dejitter");
+        set => SetBool("Dejitter", value);
     }
 
     /// <summary>

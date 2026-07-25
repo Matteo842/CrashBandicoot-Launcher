@@ -202,6 +202,8 @@ public sealed class LauncherHost : Form
             internalResolution = ConfigManager.View.InternalResolution,
             textureFilter = ConfigManager.View.TextureFilter,
             textureFilterStrength = ConfigManager.View.TextureFilterStrength,
+            dedither = ConfigManager.View.Dedither,
+            dejitter = ConfigManager.View.Dejitter,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
             mods = ConfigManager.Game.ActiveMods,
@@ -539,6 +541,10 @@ public sealed class LauncherHost : Form
             ConfigManager.View.TextureFilter = bf.GetBoolean() ? ViewConfig.TextureFilterBilinear : ViewConfig.TextureFilterOff;
         if (root.TryGetProperty("textureFilterStrength", out var tfs) && tfs.TryGetSingle(out var strength))
             ConfigManager.View.TextureFilterStrength = strength;
+        if (root.TryGetProperty("dedither", out var dd))
+            ConfigManager.View.Dedither = dd.GetBoolean();
+        if (root.TryGetProperty("dejitter", out var dj))
+            ConfigManager.View.Dejitter = dj.GetBoolean();
 
         ConfigManager.SaveGame();
         // Persist Fullscreen etc. without touching ImGui layout (empty panel list

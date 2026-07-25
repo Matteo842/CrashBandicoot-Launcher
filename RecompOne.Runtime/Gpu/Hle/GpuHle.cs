@@ -17,6 +17,9 @@ public static class GpuHle
     /// <summary>0..1 blend strength for the active texture filter.</summary>
     public static float TextureFilterStrength { get; set; } = 0.5f;
 
+    public static bool Dedither { get; set; }
+    public static bool Dejitter { get; set; }
+
     /// <summary>
     /// When widescreen is on, expand GTE horizontal FOV into side margins and present them.
     /// Off for Crash 1 non-gameplay levels (title/menu/map, intro, ending, completion):
@@ -29,6 +32,12 @@ public static class GpuHle
     /// scenes break badly under bilinear (grid artifacts on the main menu).
     /// </summary>
     public static bool TextureFiltersActive { get; private set; }
+
+    /// <summary>Same gate as texture filters — menus/cinemas keep original dither.</summary>
+    public static bool DeditherActive { get; private set; }
+
+    /// <summary>Same gate — 2D UI is not GTE-projected; skip cache lookups there.</summary>
+    public static bool DejitterActive { get; private set; }
 
     // SCUS-94900: current level ID (cbhacks Memory Map).
     const uint Crash1LevelIdAddr = 0x80056710u;
@@ -51,8 +60,10 @@ public static class GpuHle
 
         WideFovActive = WideAspect > 0f && !uiOrCinema;
 
-        // All texture filters share this gate — menus/cinemas always render nearest.
+        // All visual filters share this gate — menus/cinemas stay original.
         TextureFiltersActive = TextureFilter > 0 && !uiOrCinema;
+        DeditherActive = Dedither && !uiOrCinema;
+        DejitterActive = Dejitter && !uiOrCinema;
     }
 
     /// <summary>Effective filter mode for the GPU (0 when gated off).</summary>

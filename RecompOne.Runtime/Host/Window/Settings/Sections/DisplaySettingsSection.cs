@@ -68,8 +68,27 @@ internal sealed class DisplaySettingsSection : ISettingsSection
                 Hle.GpuHle.TextureFilterStrength = strength;
                 ConfigManager.SaveView(PanelManager.Panels);
             }
-            ImGui.TextDisabled("Off on menus & cutscenes");
         }
+
+        bool dedither = ConfigManager.View.Dedither;
+        if (ImGui.Checkbox("Dedither", ref dedither))
+        {
+            ConfigManager.View.Dedither = dedither;
+            Hle.GpuHle.Dedither = dedither;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Removes PS1 dither noise");
+
+        bool dejitter = ConfigManager.View.Dejitter;
+        if (ImGui.Checkbox("Dejitter", ref dejitter))
+        {
+            ConfigManager.View.Dejitter = dejitter;
+            Hle.GpuHle.Dejitter = dejitter;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Reduces polygon wobble (GTE subpixel)");
+
+        ImGui.TextDisabled("Filters auto-off on menus & cutscenes");
     }
 
     static int IndexOfScale(int scale)

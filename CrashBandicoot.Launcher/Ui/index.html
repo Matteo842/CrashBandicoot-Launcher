@@ -714,10 +714,14 @@
         <select id="textureFilter">
           <option value="0">Off</option>
           <option value="1">Bilinear</option>
+          <option value="2">Sharp bilinear</option>
+          <option value="3">Soft smooth</option>
         </select>
       </label>
       <label id="filterStrengthRow">Filter strength <input id="textureFilterStrength" type="range" min="0" max="100" step="1" value="50" /></label>
-      <p class="hint">Softens textures in gameplay. Auto-off on menus &amp; cutscenes.</p>
+      <label>Dedither <input id="dedither" type="checkbox" /></label>
+      <label>Dejitter <input id="dejitter" type="checkbox" /></label>
+      <p class="hint">Texture filters, dedither &amp; dejitter auto-off on menus &amp; cutscenes.</p>
       <div class="row-actions">
         <button class="btn primary" id="saveSettings" type="button">Save</button>
         <button class="btn ghost" data-close="sheetSettings" type="button">Back</button>
@@ -869,7 +873,9 @@
         widescreen: document.getElementById("widescreen").checked,
         internalResolution: Number(document.getElementById("internalResolution").value),
         textureFilter: Number(document.getElementById("textureFilter").value),
-        textureFilterStrength: Number(document.getElementById("textureFilterStrength").value) / 100
+        textureFilterStrength: Number(document.getElementById("textureFilterStrength").value) / 100,
+        dedither: document.getElementById("dedither").checked,
+        dejitter: document.getElementById("dejitter").checked
       });
       document.getElementById("sheetSettings").classList.remove("show");
     };
@@ -923,6 +929,8 @@
       }
       if (state.textureFilterStrength != null)
         document.getElementById("textureFilterStrength").value = String(Math.round(Number(state.textureFilterStrength) * 100));
+      if (state.dedither != null) document.getElementById("dedither").checked = !!state.dedither;
+      if (state.dejitter != null) document.getElementById("dejitter").checked = !!state.dejitter;
       if (state.infiniteLives != null) document.getElementById("cheatInfiniteLives").checked = !!state.infiniteLives;
       if (state.levelSelect != null) document.getElementById("cheatLevelSelect").checked = !!state.levelSelect;
     };

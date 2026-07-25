@@ -400,6 +400,8 @@ internal static class HostWindow
         Hle.GpuHle.NativeResolution = internalRes <= 1;
         Hle.GpuHle.TextureFilter = ConfigManager.View.TextureFilter;
         Hle.GpuHle.TextureFilterStrength = ConfigManager.View.TextureFilterStrength;
+        Hle.GpuHle.Dedither = ConfigManager.View.Dedither;
+        Hle.GpuHle.Dejitter = ConfigManager.View.Dejitter;
         ApplyWidescreen(ConfigManager.View.Widescreen);
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
