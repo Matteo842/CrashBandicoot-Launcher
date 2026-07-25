@@ -113,6 +113,8 @@ internal static class GlShaders
         uniform float uSetMask;
         uniform int   uCheckMask;
         uniform int   uScale;
+        uniform int   uFilterMode;
+        uniform float uFilterStrength;
         uniform vec2  uPosBias;
 
         const int ditherTbl[16] = int[16](
@@ -135,6 +137,58 @@ internal static class GlShaders
             return vec3(min(c8 >> 3, 31)) / 31.0;
         }
 
+        ivec2 wrapUv(ivec2 uv) {
+            uv = (uv & uTexWindow.xy) | uTexWindow.zw;
+            return uv & ivec2(0xff);
+        }
+
+        bool isTransparent(vec4 t) {
+            return t.rgb == vec3(0.0) && t.a < 0.5;
+        }
+
+        vec4 sampleNearest(ivec2 uv) {
+            uv = wrapUv(uv);
+            if (texMode == 0) {
+                int s = fetch16(ivec2(pageBase.x + (uv.x >> 2), pageBase.y + uv.y));
+                int idx = (s >> ((uv.x & 3) << 2)) & 0xf;
+                return fetch(ivec2(clutBase.x + idx, clutBase.y));
+            }
+            if (texMode == 1) {
+                int s = fetch16(ivec2(pageBase.x + (uv.x >> 1), pageBase.y + uv.y));
+                int idx = (s >> ((uv.x & 1) << 3)) & 0xff;
+                return fetch(ivec2(clutBase.x + idx, clutBase.y));
+            }
+            return fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
+        }
+
+        vec4 sampleBilinear(vec2 uvf) {
+            ivec2 i00 = ivec2(floor(uvf));
+            vec2 f = fract(uvf);
+            vec4 c00 = sampleNearest(i00);
+            vec4 c10 = sampleNearest(i00 + ivec2(1, 0));
+            vec4 c01 = sampleNearest(i00 + ivec2(0, 1));
+            vec4 c11 = sampleNearest(i00 + ivec2(1, 1));
+
+            // Skip transparent PS1 key color so sprite edges don't go muddy.
+            float w00 = (1.0 - f.x) * (1.0 - f.y) * (isTransparent(c00) ? 0.0 : 1.0);
+            float w10 = f.x * (1.0 - f.y) * (isTransparent(c10) ? 0.0 : 1.0);
+            float w01 = (1.0 - f.x) * f.y * (isTransparent(c01) ? 0.0 : 1.0);
+            float w11 = f.x * f.y * (isTransparent(c11) ? 0.0 : 1.0);
+            float wsum = w00 + w10 + w01 + w11;
+            if (wsum < 1e-4) return vec4(0.0);
+
+            return (c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11) / wsum;
+        }
+
+        vec4 applyFilter(vec4 nearest) {
+            if (uFilterMode == 0 || uFilterStrength <= 0.001) return nearest;
+            vec4 filtered = nearest;
+            if (uFilterMode == 1)
+                filtered = sampleBilinear(vUV);
+            if (isTransparent(filtered)) return nearest;
+            return mix(nearest, filtered, clamp(uFilterStrength, 0.0, 1.0));
+        }
+
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
 
@@ -146,23 +200,10 @@ internal static class GlShaders
 
             int rawU = dFdx(vUV.x) < 0.0 ? int(ceil(vUV.x - 0.0001)) : int(floor(vUV.x + 0.0001));
             int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
-            ivec2 uv = (ivec2(rawU, rawV) & uTexWindow.xy) | uTexWindow.zw;
-            uv &= ivec2(0xff);
-            vec4 texel;
+            vec4 nearest = sampleNearest(ivec2(rawU, rawV));
+            if (isTransparent(nearest)) discard;
 
-            if (texMode == 0) {
-                int s = fetch16(ivec2(pageBase.x + (uv.x >> 2), pageBase.y + uv.y));
-                int idx = (s >> ((uv.x & 3) << 2)) & 0xf;
-                texel = fetch(ivec2(clutBase.x + idx, clutBase.y));
-            } else if (texMode == 1) {
-                int s = fetch16(ivec2(pageBase.x + (uv.x >> 1), pageBase.y + uv.y));
-                int idx = (s >> ((uv.x & 1) << 3)) & 0xff;
-                texel = fetch(ivec2(clutBase.x + idx, clutBase.y));
-            } else {
-                texel = fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
-            }
-
-            if (texel.rgb == vec3(0.0) && texel.a < 0.5) discard;
+            vec4 texel = applyFilter(nearest);
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(c8), max(texel.a, uSetMask));

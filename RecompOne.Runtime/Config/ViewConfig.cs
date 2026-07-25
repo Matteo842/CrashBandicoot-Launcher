@@ -91,6 +91,54 @@ public class ViewConfig
         return 8;
     }
 
+    /// <summary>Texture filter modes shown in settings (index = mode id).</summary>
+    public static readonly string[] TextureFilterLabels = ["Off", "Bilinear"];
+
+    public const int TextureFilterOff = 0;
+    public const int TextureFilterBilinear = 1;
+
+    /// <summary>
+    /// Active texture filter. 0 = Off, 1 = Bilinear. Live — no restart.
+    /// Auto-disabled on title/menu/map and cinema levels.
+    /// </summary>
+    public int TextureFilter
+    {
+        get
+        {
+            if (Values.TryGetValue("TextureFilter", out var raw) &&
+                int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
+                return SnapTextureFilter(i);
+
+            // Legacy bool from the first bilinear toggle.
+            return GetBool("BilinearFilter") ? TextureFilterBilinear : TextureFilterOff;
+        }
+        set
+        {
+            int n = SnapTextureFilter(value);
+            SetInt("TextureFilter", n);
+            SetBool("BilinearFilter", n == TextureFilterBilinear);
+        }
+    }
+
+    /// <summary>0..1 blend of filtered vs nearest. Default 0.5 (full was too strong).</summary>
+    public float TextureFilterStrength
+    {
+        get
+        {
+            if (!Values.ContainsKey("TextureFilterStrength"))
+                return 0.5f;
+            return Math.Clamp(GetFloat("TextureFilterStrength", 0.5f), 0f, 1f);
+        }
+        set => SetFloat("TextureFilterStrength", Math.Clamp(value, 0f, 1f));
+    }
+
+    public static int SnapTextureFilter(int value)
+    {
+        if (value < 0) return TextureFilterOff;
+        if (value >= TextureFilterLabels.Length) return TextureFilterBilinear;
+        return value;
+    }
+
     /// <summary>
     /// Expand horizontal FOV to 16:9 (side margins). Does not stretch the 4:3 image.
     /// </summary>

@@ -49,6 +49,27 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         ImGui.TextDisabled("Higher scales look sharper on 1440p/4K");
         if (ConfigManager.View.InternalResolution != Hle.GlVram.Scale)
             ImGui.TextDisabled("restart is required");
+
+        int filter = ConfigManager.View.TextureFilter;
+        if (ImGui.Combo("Texture filter", ref filter, ViewConfig.TextureFilterLabels, ViewConfig.TextureFilterLabels.Length))
+        {
+            ConfigManager.View.TextureFilter = filter;
+            Hle.GpuHle.TextureFilter = filter;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        if (ConfigManager.View.TextureFilter != ViewConfig.TextureFilterOff)
+        {
+            float pct = ConfigManager.View.TextureFilterStrength * 100f;
+            if (ImGui.SliderFloat("Filter strength", ref pct, 0f, 100f, "%.0f%%"))
+            {
+                float strength = Math.Clamp(pct / 100f, 0f, 1f);
+                ConfigManager.View.TextureFilterStrength = strength;
+                Hle.GpuHle.TextureFilterStrength = strength;
+                ConfigManager.SaveView(PanelManager.Panels);
+            }
+            ImGui.TextDisabled("Off on menus & cutscenes");
+        }
     }
 
     static int IndexOfScale(int scale)

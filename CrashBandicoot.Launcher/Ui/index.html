@@ -710,6 +710,14 @@
         </select>
       </label>
       <p class="hint">Applies on next game start. Use 8x on 4K monitors.</p>
+      <label>Texture filter
+        <select id="textureFilter">
+          <option value="0">Off</option>
+          <option value="1">Bilinear</option>
+        </select>
+      </label>
+      <label id="filterStrengthRow">Filter strength <input id="textureFilterStrength" type="range" min="0" max="100" step="1" value="50" /></label>
+      <p class="hint">Softens textures in gameplay. Auto-off on menus &amp; cutscenes.</p>
       <div class="row-actions">
         <button class="btn primary" id="saveSettings" type="button">Save</button>
         <button class="btn ghost" data-close="sheetSettings" type="button">Back</button>
@@ -839,6 +847,7 @@
     };
     document.getElementById("btnSettings").onclick = () => {
       post({ type: "getState" });
+      syncFilterStrengthRow();
       document.getElementById("sheetSettings").classList.add("show");
     };
     document.getElementById("btnCheat").onclick = () => {
@@ -858,7 +867,9 @@
         muted: document.getElementById("muted").checked,
         fullscreen: document.getElementById("fullscreen").checked,
         widescreen: document.getElementById("widescreen").checked,
-        internalResolution: Number(document.getElementById("internalResolution").value)
+        internalResolution: Number(document.getElementById("internalResolution").value),
+        textureFilter: Number(document.getElementById("textureFilter").value),
+        textureFilterStrength: Number(document.getElementById("textureFilterStrength").value) / 100
       });
       document.getElementById("sheetSettings").classList.remove("show");
     };
@@ -870,6 +881,13 @@
       });
       document.getElementById("sheetCheat").classList.remove("show");
     };
+
+    function syncFilterStrengthRow() {
+      const on = Number(document.getElementById("textureFilter").value) !== 0;
+      document.getElementById("filterStrengthRow").style.display = on ? "" : "none";
+    }
+    document.getElementById("textureFilter").addEventListener("change", syncFilterStrengthRow);
+    syncFilterStrengthRow();
 
     document.querySelectorAll("[data-close]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -899,6 +917,12 @@
       if (state.fullscreen != null) document.getElementById("fullscreen").checked = !!state.fullscreen;
       if (state.widescreen != null) document.getElementById("widescreen").checked = !!state.widescreen;
       if (state.internalResolution != null) document.getElementById("internalResolution").value = String(state.internalResolution);
+      if (state.textureFilter != null) {
+        document.getElementById("textureFilter").value = String(state.textureFilter);
+        syncFilterStrengthRow();
+      }
+      if (state.textureFilterStrength != null)
+        document.getElementById("textureFilterStrength").value = String(Math.round(Number(state.textureFilterStrength) * 100));
       if (state.infiniteLives != null) document.getElementById("cheatInfiniteLives").checked = !!state.infiniteLives;
       if (state.levelSelect != null) document.getElementById("cheatLevelSelect").checked = !!state.levelSelect;
     };

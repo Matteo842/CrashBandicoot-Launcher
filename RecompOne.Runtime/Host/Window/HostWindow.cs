@@ -398,6 +398,8 @@ internal static class HostWindow
         Hle.GpuHle.Active = _glBackend.Ready;
         Hle.GpuHle.Backend = _glBackend;
         Hle.GpuHle.NativeResolution = internalRes <= 1;
+        Hle.GpuHle.TextureFilter = ConfigManager.View.TextureFilter;
+        Hle.GpuHle.TextureFilterStrength = ConfigManager.View.TextureFilterStrength;
         ApplyWidescreen(ConfigManager.View.Widescreen);
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
