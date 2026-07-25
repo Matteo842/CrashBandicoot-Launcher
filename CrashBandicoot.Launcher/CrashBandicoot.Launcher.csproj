@@ -39,16 +39,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3485.44" />
     <PackageReference Include="NativeFileDialogSharp" Version="0.5.0" />
   </ItemGroup>
-
-  <!-- WinForms host only — drop WPF WebView2 assembly (WindowsBase conflict noise). -->
-  <Target Name="RemoveWebView2Wpf" AfterTargets="ResolveAssemblyReferences">
-    <ItemGroup>
-      <ReferencePath Remove="@(ReferencePath)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
-    </ItemGroup>
-  </Target>
 
   <ItemGroup>
     <None Update="Recomp\CrashBandicoot.json" CopyToOutputDirectory="PreserveNewest" />

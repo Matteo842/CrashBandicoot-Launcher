@@ -96,7 +96,7 @@ internal static class Program
             return 0;
         }
 
-        // WebView2 / WinForms require STA ([STAThread] above). Do not flip apartment mode here.
+        // WinForms requires STA ([STAThread] above). Do not flip apartment mode here.
         ApplicationConfiguration.Initialize();
         Application.Run(new LauncherHost());
         return 0;

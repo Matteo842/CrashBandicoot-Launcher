@@ -83,7 +83,7 @@ public static class ConfigManager
         // Output is the game framebuffer — never persist it closed.
         View.Panels["Output"] = new PanelState { Open = true };
 
-        // Launcher (WebView2) has no ImGui context — and after an embedded session a
+        // Launcher has no ImGui context — and after an embedded session a
         // dangling context pointer can still be non-zero. Only snapshot ImGui ini when
         // the in-game host is actively saving with live panels.
         string imguiIni;

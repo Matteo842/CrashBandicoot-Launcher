@@ -36,7 +36,6 @@ If someone offers you this project **bundled with a ROM/ISO**, that is not from 
 ## Requirements
 
 - Windows 10/11 x64  
-- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually already installed with Edge)  
 - A **legal** dump of *Crash Bandicoot* NTSC-U (`SCUS_949.00` / SCUS-94900) as `.cue` + matching `.bin` in the same folder  
 
 We only aim to support that specific version for now.
@@ -91,7 +90,7 @@ Before you upload a release, check that you are shipping tools/UI only — **no*
 
 | Path | Role |
 |------|------|
-| `CrashBandicoot.Launcher/` | WebView2 launcher + local recomp pipeline + UI |
+| `CrashBandicoot.Launcher/` | Native WinForms launcher + local recomp pipeline + UI |
 | `RecompOne.Runtime/` | PS1 HLE runtime (from RecompOne) |
 | `RecompOne.Recompiler/` | Recompiler library (from RecompOne) |
 | `CrashBandicoot.Recompiled/` | Placeholder only (gitignored) — not used for consumer builds |

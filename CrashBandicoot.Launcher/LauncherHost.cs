@@ -42,8 +42,7 @@ public sealed class LauncherHost : Form
             Controls.Add(_ui.AsControl);
         else
             throw new InvalidOperationException(
-                "This WinForms host requires ILauncherUi.AsControl. " +
-                "A top-level Photino host should replace LauncherHost on Linux — see Ui/UI_STRATEGY.md.");
+                "This WinForms host requires ILauncherUi.AsControl.");
 
         Runtime.SetHostFullscreenHandler(ApplyShellFullscreen);
         _gameHost.Resize += (_, _) =>
