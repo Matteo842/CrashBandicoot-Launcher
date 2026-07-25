@@ -61,7 +61,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     string _status = "";
     string _statusKind = "";
     string _discPath = "";
-    string _version = "v1.3.0";
+    string _version = "v1.4.0";
     bool _disposed;
 
     // Sheets / overlays
@@ -133,7 +133,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _fontMenuHot = NativeTheme.MakeBungee(38);
         _fontChip = NativeTheme.MakeNunito(15, extraBold: true);
         _fontFooter = NativeTheme.MakeNunito(15);
-        _fontVer = NativeTheme.MakeNunito(13);
+        _fontVer = NativeTheme.MakeNunito(26);
         _fontInfo = NativeTheme.MakeBungee(18);
         _fontMark = NativeTheme.MakeBungee(112);
 
@@ -673,7 +673,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         // Status + path
         var textX = _chipRect.Right + 14;
-        var textW = bounds.Width - textX - 80;
+        var textW = bounds.Width - textX - 100;
         if (!string.IsNullOrEmpty(_status))
         {
             var sc = _statusKind == "error" ? Color.FromArgb(255, 143, 143)
@@ -691,9 +691,9 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
 
         TextRenderer.DrawText(g, _version, _fontVer,
-            new Rectangle(bounds.Width - 70, bounds.Height - 36, 58, 20),
+            new Rectangle(bounds.Width - 110, bounds.Height - 44, 96, 32),
             Color.FromArgb(115, NativeTheme.Sand),
-            TextFormatFlags.Right | TextFormatFlags.NoPadding);
+            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
     static GraphicsPath RoundRect(Rectangle r, int radius)
