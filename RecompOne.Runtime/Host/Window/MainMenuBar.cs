@@ -26,8 +26,8 @@ internal static class MainMenuBar
                 if (PanelManager.Get<SettingsPopup>() is { } popup) popup.IsOpen = true;
 
             var cheatKey = ConfigManager.View.CheatMenuKey;
-            if (ImGui.MenuItem("Cheat...", cheatKey))
-                if (PanelManager.Get<CheatPopup>() is { } cheat) cheat.IsOpen = true;
+            if (ImGui.MenuItem("Developer Menu...", cheatKey))
+                if (PanelManager.Get<DevMenuPopup>() is { } dev) dev.OpenTo("cheats");
 
             ImGui.Separator();
 
@@ -98,6 +98,10 @@ internal static class MainMenuBar
         }
 
         ImGui.Separator();
+
+        var cheatKey = ConfigManager.View.CheatMenuKey;
+        if (ImGui.MenuItem("Developer Menu...", cheatKey))
+            if (PanelManager.Get<DevMenuPopup>() is { } dev) dev.IsOpen = true;
 
         if (ImGui.MenuItem("Reset View")) ConfigManager.ResetView(PanelManager.Panels);
         

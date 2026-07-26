@@ -170,7 +170,7 @@ public class ViewConfig
         set => SetBool("Widescreen", value);
     }
 
-    /// <summary>Host hotkey that opens/closes the Cheat menu (Silk Key name, e.g. F3).</summary>
+    /// <summary>Host hotkey that opens/closes the Developer Menu (Silk Key name, e.g. F3).</summary>
     public string CheatMenuKey
     {
         get
@@ -182,5 +182,23 @@ public class ViewConfig
             return string.IsNullOrWhiteSpace(legacy) ? "F3" : legacy;
         }
         set => SetString("CheatMenuKey", string.IsNullOrWhiteSpace(value) ? "F3" : value);
+    }
+
+    /// <summary>Last selected Developer Menu section id (default: cheats).</summary>
+    public string DevMenuSection
+    {
+        get
+        {
+            var v = GetString("DevMenuSection", "cheats");
+            return string.IsNullOrWhiteSpace(v) ? "cheats" : v;
+        }
+        set => SetString("DevMenuSection", string.IsNullOrWhiteSpace(value) ? "cheats" : value);
+    }
+
+    /// <summary>Show FPS + Working Set HUD overlay (top-right).</summary>
+    public bool ShowDevHud
+    {
+        get => GetBool("ShowDevHud");
+        set => SetBool("ShowDevHud", value);
     }
 }

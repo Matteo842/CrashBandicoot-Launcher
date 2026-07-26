@@ -6,10 +6,10 @@ namespace RecompOne.Runtime.Memory;
 public sealed class RamLogger
 {
     public const int Width = 2048;
-    public const int Height = 1024; 
+    public const int Height = 1024;
 
-    readonly uint[] _writeTimestamps = new uint[Width * Height];
-    readonly uint[] _readTimestamps = new uint[Width * Height];
+    uint[]? _writeTimestamps;
+    uint[]? _readTimestamps;
     uint _cycle;
 
     public static bool TrackReads;
@@ -20,14 +20,31 @@ public sealed class RamLogger
     public Vector4 ReadColor = new(0.3f, 0.5f, 1f, 0.75f);
     public bool ShowGreyscale = true;
 
+    public bool IsAllocated => _writeTimestamps != null;
+
+    /// <summary>Allocate 16 MB of heat-map timestamps on first use (RAM Map / memory editor).</summary>
+    public void EnsureAllocated()
+    {
+        if (_writeTimestamps != null) return;
+        int n = Width * Height;
+        _writeTimestamps = new uint[n];
+        _readTimestamps = new uint[n];
+    }
+
     public uint Cycle => _cycle;
     public void Tick() => _cycle++;
 
-    public uint GetWriteStamp(int byteIdx) => (uint)byteIdx < (uint)_writeTimestamps.Length ? _writeTimestamps[byteIdx] : 0u;
+    public uint GetWriteStamp(int byteIdx)
+    {
+        var buf = _writeTimestamps;
+        return buf != null && (uint)byteIdx < (uint)buf.Length ? buf[byteIdx] : 0u;
+    }
 
-    
-    public uint GetReadStamp(int byteIdx) =>
-        (uint)byteIdx < (uint)_readTimestamps.Length ? _readTimestamps[byteIdx] : 0u;
+    public uint GetReadStamp(int byteIdx)
+    {
+        var buf = _readTimestamps;
+        return buf != null && (uint)byteIdx < (uint)buf.Length ? buf[byteIdx] : 0u;
+    }
 
     float HeatOf(uint ts)
     {
@@ -44,25 +61,33 @@ public sealed class RamLogger
 
     public void RecordWrite(uint physAddr, int bytes)
     {
+        var buf = _writeTimestamps;
+        if (buf == null) return;
         for (int i = 0; i < bytes; i++)
         {
             int idx = (int)((physAddr + (uint)i) & 0x1FFFFF);
-            if (idx < _writeTimestamps.Length) _writeTimestamps[idx] = _cycle;
+            if (idx < buf.Length) buf[idx] = _cycle;
         }
     }
 
     //rd for show
     public void RecordRead(uint physAddr, int bytes)
     {
+        var buf = _readTimestamps;
+        if (buf == null) return;
         for (int i = 0; i < bytes; i++)
         {
             int idx = (int)((physAddr + (uint)i) & 0x1FFFFF);
-            if (idx < _readTimestamps.Length) _readTimestamps[idx] = _cycle;
+            if (idx < buf.Length) buf[idx] = _cycle;
         }
     }
 
     public void BuildTexture(ReadOnlySpan<byte> ram, byte[] output)
     {
+        EnsureAllocated();
+        var writeTs = _writeTimestamps!;
+        var readTs = _readTimestamps!;
+
         int total = Width * Height;
         float br = BackdropColor.X, bg = BackdropColor.Y, bb = BackdropColor.Z;
         float wr = WriteColor.X, wg = WriteColor.Y, wb = WriteColor.Z, wa = WriteColor.W;
@@ -81,13 +106,13 @@ public sealed class RamLogger
             float r = br * shade, g = bg * shade, bl = bb * shade;
 
             float rHeat = 0f, wHeat = 0f;
-            uint rts = _readTimestamps[i];
+            uint rts = readTs[i];
             if (rts != 0)
             {
                 uint age = cycle - rts;
                 if (age <= cutoff) rHeat = MathF.Exp(age * k);
             }
-            uint wts = _writeTimestamps[i];
+            uint wts = writeTs[i];
             if (wts != 0)
             {
                 uint age = cycle - wts;

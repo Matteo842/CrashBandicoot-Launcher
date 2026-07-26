@@ -214,7 +214,7 @@ internal sealed class InputSettingsSection : ISettingsSection
 
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
-        ImGui.TextUnformatted("Cheat menu");
+        ImGui.TextUnformatted("Developer menu");
         ImGui.TableSetColumnIndex(1);
 
         var key = ConfigManager.View.CheatMenuKey;

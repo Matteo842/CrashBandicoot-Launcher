@@ -30,6 +30,9 @@ artifacts/
 CrashBandicoot.Launcher/app.ico
 [Dd]ebug/
 [Rr]elease/
+# Keep in-game ImGui debug panels (matched by [Dd]ebug/ above)
+!**/Panels/Debug/
+!**/Panels/Debug/**
 x64/
 x86/
 *.appx

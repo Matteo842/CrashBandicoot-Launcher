@@ -1093,7 +1093,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         var card = MakeCard(520, 340);
         card.Controls.Add(MakeTitle("Cheat"));
         var y = 110;
-        card.Controls.Add(Hint("Cheat toggles for NTSC-U. Applied while the game is running (also open in-game with the Cheat menu key).", ref y));
+        card.Controls.Add(Hint("Cheat toggles for NTSC-U. Applied while the game is running (also open in-game Developer Menu with the hotkey).", ref y));
         _cheatLives = MakeCheck("Infinite Lives");
         _cheatLives.Location = new Point(36, y);
         card.Controls.Add(_cheatLives);
@@ -1102,7 +1102,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _cheatLevel.Location = new Point(36, y);
         card.Controls.Add(_cheatLevel);
         y += 40;
-        card.Controls.Add(Hint("99 Lives (map) and Instant Save Menu are one-shots available in the in-game Cheat menu.", ref y));
+        card.Controls.Add(Hint("99 Lives (map) and Instant Save Menu are one-shots available in the in-game Developer Menu.", ref y));
 
         var save = MakePrimaryBtn("Save");
         save.Location = new Point(36, y + 12);

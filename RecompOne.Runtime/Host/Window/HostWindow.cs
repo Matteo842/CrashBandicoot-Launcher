@@ -47,11 +47,14 @@ internal static class HostWindow
 
     static byte[] _rgbDisplay = [];
     static byte[] _rgbVram = [];
-    static byte[] _ramFront = new byte[Memory.RamLogger.Width * Memory.RamLogger.Height * 4];
-    static byte[] _ramBack = new byte[Memory.RamLogger.Width * Memory.RamLogger.Height * 4];
+    static byte[]? _ramFront;
+    static byte[]? _ramBack;
     static Task? _ramTask;
     static volatile bool _ramReady;
     static int _ramFrame;
+
+    /// <summary>True once the 16 MB RAM-map ping-pong buffers have been allocated.</summary>
+    internal static bool RamMapBuffersAllocated => _ramFront != null;
 
     static bool _layoutPending = true;
     static bool _closed;
@@ -203,8 +206,8 @@ internal static class HostWindow
             RecompOne.Runtime.Diagnostics.SessionLog.Marker();
         if (InputManager.ConsumeCheatMenuToggle())
         {
-            if (PanelManager.Get<CheatPopup>() is { } cheat)
-                cheat.IsOpen = !cheat.IsOpen;
+            if (PanelManager.Get<DevMenuPopup>() is { } dev)
+                dev.IsOpen = !dev.IsOpen;
         }
         Cheats.CheatManager.Apply();
         _window.DoRender();
@@ -433,12 +436,18 @@ internal static class HostWindow
         PanelManager.Register(new OverlayEventsPanel());
         PanelManager.Register(new SettingsPopup());
         PanelManager.Register(new Modding.ModsPopup());
-        PanelManager.Register(new CheatPopup());
+        PanelManager.Register(new DevMenuPopup());
         PanelManager.Register(new AboutPopup());
 
         SettingsRegistry.Register(new InputSettingsSection());
         SettingsRegistry.Register(new DisplaySettingsSection());
         SettingsRegistry.Register(new AudioSettingsSection());
+
+        DevMenuRegistry.Register(new CheatsDevMenuSection());
+        DevMenuRegistry.Register(new DisplayDevMenuSection());
+        DevMenuRegistry.Register(new RenderingDevMenuSection());
+        DevMenuRegistry.Register(new DebugDevMenuSection());
+        DevMenuRegistry.Register(new SystemDevMenuSection());
 
         _discPicker = new DiscPickerPopup();
         PanelManager.Register(_discPicker);
@@ -485,10 +494,13 @@ internal static class HostWindow
         gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
         gl.Clear(ClearBufferMask.ColorBufferBit);
 
+        Diagnostics.HostDiagnostics.TickFrame();
         Runtime.RamLog.Tick();
-        Memory.RamLogger.TrackReads =
-            PanelManager.Get<RamMapPanel>()?.IsOpen == true ||
-            PanelManager.Get<MemoryEditorPanel>()?.IsOpen == true;
+        bool ramMapOpen = PanelManager.Get<RamMapPanel>()?.IsOpen == true;
+        bool memEditOpen = PanelManager.Get<MemoryEditorPanel>()?.IsOpen == true;
+        if (ramMapOpen || memEditOpen)
+            Runtime.RamLog.EnsureAllocated();
+        Memory.RamLogger.TrackReads = ramMapOpen || memEditOpen;
 
         var gpu = _gpu;
         if (gpu != null)
@@ -515,7 +527,7 @@ internal static class HostWindow
                 UploadVramTexture(gl, gpu);
         }
 
-        if (PanelManager.Get<RamMapPanel>()?.IsOpen == true)
+        if (ramMapOpen)
         {
             QueueRamConvert();
             if (_ramReady) FlushRamTexture(gl);
@@ -530,6 +542,7 @@ internal static class HostWindow
         Modding.ModLoadingPopup.Draw();
         NoticePopup.Draw();
         if (StartupNotice.NeedsAck) StartupNotice.Draw();
+        DevHudOverlay.Draw();
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
         _imgui.Render();
@@ -561,7 +574,7 @@ internal static class HostWindow
         int contentOpen = PanelManager.Panels.Count(p =>
             p.IsOpen &&
             p is not AboutPopup and not SettingsPopup and not Modding.ModsPopup
-                and not DiscPickerPopup and not CheatPopup);
+                and not DiscPickerPopup and not DevMenuPopup);
         var dockFlags = ImGuiDockNodeFlags.PassthruCentralNode | ImGuiDockNodeFlags.AutoHideTabBar;
         if (contentOpen <= 1)
             dockFlags |= ImGuiDockNodeFlags.NoDockingSplit | ImGuiDockNodeFlags.NoUndocking;
@@ -632,15 +645,25 @@ internal static class HostWindow
         VramViewerPanel.SetTexture(_vramTex, Gpu.VramWidth, Gpu.VramHeight);
     }
 
+    static void EnsureRamMapBuffers()
+    {
+        if (_ramFront != null) return;
+        int n = Memory.RamLogger.Width * Memory.RamLogger.Height * 4;
+        _ramFront = new byte[n];
+        _ramBack = new byte[n];
+    }
+
     static void QueueRamConvert()
     {
+        EnsureRamMapBuffers();
+        Runtime.RamLog.EnsureAllocated();
         if (_ramTask is { IsCompleted: false }) return;
         if (++_ramFrame < 6) return;
         _ramFrame = 0;
         var psMem = Runtime.Mem as Memory.PSMemory;
         if (psMem == null) return;
         var ram = psMem.RamBuffer;
-        var back = _ramBack;
+        var back = _ramBack!;
         _ramTask = Task.Run(() => Runtime.RamLog.BuildTexture(ram, back))
             .ContinueWith(_ =>
             {
@@ -651,6 +674,7 @@ internal static class HostWindow
 
     static void FlushRamTexture(GL gl)
     {
+        if (_ramFront == null) return;
         _ramReady = false;
         gl.BindTexture(TextureTarget.Texture2D, _ramTex);
         gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
