@@ -50,6 +50,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
     <PackageReference Include="NativeFileDialogSharp" Version="0.5.0" />
+    <!-- Launcher menu gamepad navigation (same stack as in-game InputManager). -->
+    <PackageReference Include="Silk.NET.SDL" Version="2.23.0" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -62,6 +64,7 @@
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'">
     <Compile Remove="LauncherHost.cs" />
     <Compile Remove="Ui\NativeLauncherUi.cs" />
+    <Compile Remove="Ui\LauncherGamepad.cs" />
     <Compile Remove="Ui\NativeTheme.cs" />
     <Compile Remove="Ui\ILauncherUi.cs" />
     <Compile Remove="Ui\LauncherUiFactory.cs" />

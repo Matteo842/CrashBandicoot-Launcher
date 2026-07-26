@@ -56,6 +56,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     int _hoverMenu = -1;
     bool _hoverInfo;
     bool _hoverChip;
+    /// <summary>Controller/keyboard focus: 0–4 menu, 5 info, 6 disc chip.</summary>
+    int _focusIndex;
     bool _canStart;
     float _cratePhase;
     string _status = "";
@@ -63,6 +65,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     string _discPath = "";
     string _version = "v1.4.0";
     bool _disposed;
+    readonly LauncherGamepad _pad = new();
 
     // Sheets / overlays
     Panel? _prepOverlay;
@@ -108,13 +111,31 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             _stage.Invalidate();
         };
         _stage.MouseClick += OnStageMouseClick;
+        _stage.TabStop = true;
         Controls.Add(_stage);
+
+        VisibleChanged += (_, _) =>
+        {
+            if (_disposed) return;
+            if (Visible)
+            {
+                _pad.TryEnsureInit();
+                _anim.Start();
+            }
+            else
+            {
+                // Free the SDL pad so the runtime can open it for gameplay.
+                _pad.Release();
+                _anim.Stop();
+            }
+        };
 
         _anim.Tick += (_, _) =>
         {
             _cratePhase += 0.065f;
             if (_cratePhase > MathF.PI * 2) _cratePhase -= MathF.PI * 2;
             _stage.Invalidate(_crateRect.InflateCopy(12, 16));
+            PollController();
         };
     }
 
@@ -146,10 +167,16 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         BuildOverlays();
         LayoutHits();
+        EnsureFocusValid();
+        _pad.TryEnsureInit();
         _anim.Start();
 
         // Defer ready so host has subscribed MessageReceived (InitAsync order).
-        BeginInvoke(() => Emit(new { type = "ready" }));
+        BeginInvoke(() =>
+        {
+            Emit(new { type = "ready" });
+            _stage.Focus();
+        });
         return Task.CompletedTask;
     }
 
@@ -249,6 +276,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_cheatLevel, state, "levelSelect");
 
         LayoutHits();
+        EnsureFocusValid();
         _stage.Invalidate();
     }
 
@@ -318,6 +346,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         var prevMenu = _hoverMenu;
         var prevInfo = _hoverInfo;
         var prevChip = _hoverChip;
+        var prevFocus = _focusIndex;
         _hoverMenu = -1;
         for (var i = 0; i < _menuHits.Count; i++)
         {
@@ -325,13 +354,16 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             {
                 if (i == 0 && !_canStart) break;
                 _hoverMenu = i;
+                _focusIndex = i;
                 break;
             }
         }
         _hoverInfo = _infoRect.Contains(e.Location);
         _hoverChip = _chipRect.Contains(e.Location);
+        if (_hoverInfo) _focusIndex = 5;
+        else if (_hoverChip) _focusIndex = 6;
         _stage.Cursor = (_hoverMenu >= 0 || _hoverInfo || _hoverChip) ? Cursors.Hand : Cursors.Default;
-        if (prevMenu != _hoverMenu || prevInfo != _hoverInfo || prevChip != _hoverChip)
+        if (prevMenu != _hoverMenu || prevInfo != _hoverInfo || prevChip != _hoverChip || prevFocus != _focusIndex)
             _stage.Invalidate();
     }
 
@@ -342,41 +374,288 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         if (_infoRect.Contains(e.Location))
         {
-            ShowAbout();
+            ActivateFocus(5);
             return;
         }
         if (_chipRect.Contains(e.Location))
         {
-            Emit(new { type = "pickDisc" });
+            ActivateFocus(6);
             return;
         }
 
         for (var i = 0; i < _menuHits.Count; i++)
         {
             if (!_menuHits[i].Bounds.Contains(e.Location)) continue;
-            switch (i)
-            {
-                case 0:
-                    if (_canStart) Emit(new { type = "start" });
-                    break;
-                case 1:
-                    Emit(new { type = "getState" });
-                    ShowControls();
-                    break;
-                case 2:
-                    Emit(new { type = "getState" });
-                    ShowSettings();
-                    break;
-                case 3:
-                    Emit(new { type = "getState" });
-                    ShowCheat();
-                    break;
-                case 4:
-                    Emit(new { type = "exit" });
-                    break;
-            }
+            ActivateFocus(i);
             break;
         }
+    }
+
+    void PollController()
+    {
+        if (_disposed || !Visible || _prepOverlay is { Visible: true }) return;
+        if (!_pad.TryEnsureInit()) return;
+
+        var action = _pad.Poll();
+        if (action == LauncherPadAction.None) return;
+
+        if (_sheetHost is { Visible: true })
+        {
+            HandleSheetPad(action);
+            return;
+        }
+
+        HandleMenuPad(action);
+    }
+
+    void HandleMenuPad(LauncherPadAction action)
+    {
+        if (action.HasFlag(LauncherPadAction.Up)) MoveFocus(-1);
+        if (action.HasFlag(LauncherPadAction.Down)) MoveFocus(1);
+        if (action.HasFlag(LauncherPadAction.Left)) MoveFocus(-1);
+        if (action.HasFlag(LauncherPadAction.Right)) MoveFocus(1);
+        if (action.HasFlag(LauncherPadAction.Confirm)) ActivateFocus(_focusIndex);
+        // Cancel on main menu: no-op (nothing to close).
+    }
+
+    void HandleSheetPad(LauncherPadAction action)
+    {
+        if (action.HasFlag(LauncherPadAction.Cancel))
+        {
+            CloseSheet();
+            _stage.Focus();
+            return;
+        }
+
+        var onSlider = IsSliderFocused();
+
+        if (action.HasFlag(LauncherPadAction.Up))
+            CycleSheetFocus(forward: false);
+        if (action.HasFlag(LauncherPadAction.Down))
+            CycleSheetFocus(forward: true);
+
+        if (onSlider)
+        {
+            if (action.HasFlag(LauncherPadAction.Left))
+                NudgeFocusedSlider(increase: false);
+            if (action.HasFlag(LauncherPadAction.Right))
+                NudgeFocusedSlider(increase: true);
+        }
+        else
+        {
+            if (action.HasFlag(LauncherPadAction.Left))
+                CycleSheetFocus(forward: false);
+            if (action.HasFlag(LauncherPadAction.Right))
+                CycleSheetFocus(forward: true);
+        }
+
+        if (action.HasFlag(LauncherPadAction.Confirm))
+            ActivateSheetFocused();
+    }
+
+    bool IsSliderFocused()
+    {
+        var c = FindForm()?.ActiveControl;
+        while (c != null)
+        {
+            if (c is ThemeSlider) return true;
+            c = c.Parent;
+        }
+        return false;
+    }
+
+    void CycleSheetFocus(bool forward)
+    {
+        if (_activeSheet == null) return;
+        var start = _activeSheet.ContainsFocus
+            ? FindForm()?.ActiveControl
+            : null;
+        // Prefer walking controls inside the sheet card.
+        if (!_activeSheet.SelectNextControl(start, forward, tabStopOnly: true, nested: true, wrap: true))
+            _activeSheet.SelectNextControl(null, forward, tabStopOnly: true, nested: true, wrap: true);
+    }
+
+    void NudgeFocusedSlider(bool increase)
+    {
+        var c = FindForm()?.ActiveControl;
+        while (c != null)
+        {
+            if (c is ThemeSlider slider)
+            {
+                slider.Value += increase ? slider.Step : -slider.Step;
+                return;
+            }
+            c = c.Parent;
+        }
+    }
+
+    void ActivateSheetFocused()
+    {
+        var c = FindForm()?.ActiveControl;
+        while (c != null)
+        {
+            switch (c)
+            {
+                case Button btn:
+                    btn.PerformClick();
+                    return;
+                case ThemeCheck check:
+                    check.Checked = !check.Checked;
+                    return;
+                case CheckSquare square:
+                    square.Checked = !square.Checked;
+                    return;
+                case ComboBox combo:
+                    combo.DroppedDown = !combo.DroppedDown;
+                    return;
+            }
+            c = c.Parent;
+        }
+    }
+
+    void MoveFocus(int delta)
+    {
+        if (delta == 0) return;
+        var start = _focusIndex;
+        var next = start;
+        for (var step = 0; step < 8; step++)
+        {
+            next = (next + delta + 7) % 7;
+            if (IsFocusSelectable(next))
+            {
+                if (next != _focusIndex)
+                {
+                    _focusIndex = next;
+                    _hoverMenu = next <= 4 ? next : -1;
+                    _hoverInfo = next == 5;
+                    _hoverChip = next == 6;
+                    _stage.Invalidate();
+                }
+                return;
+            }
+        }
+    }
+
+    bool IsFocusSelectable(int index) => index switch
+    {
+        0 => _canStart,
+        >= 1 and <= 6 => true,
+        _ => false,
+    };
+
+    void EnsureFocusValid()
+    {
+        if (IsFocusSelectable(_focusIndex)) return;
+        for (var i = 0; i < 7; i++)
+        {
+            if (!IsFocusSelectable(i)) continue;
+            _focusIndex = i;
+            return;
+        }
+        _focusIndex = 1;
+    }
+
+    void ActivateFocus(int index)
+    {
+        switch (index)
+        {
+            case 0:
+                if (_canStart) Emit(new { type = "start" });
+                break;
+            case 1:
+                Emit(new { type = "getState" });
+                ShowControls();
+                break;
+            case 2:
+                Emit(new { type = "getState" });
+                ShowSettings();
+                break;
+            case 3:
+                Emit(new { type = "getState" });
+                ShowCheat();
+                break;
+            case 4:
+                Emit(new { type = "exit" });
+                break;
+            case 5:
+                ShowAbout();
+                break;
+            case 6:
+                Emit(new { type = "pickDisc" });
+                break;
+        }
+    }
+
+    bool IsMenuHot(int i) =>
+        (_hoverMenu == i || _focusIndex == i) && !(i == 0 && !_canStart);
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (_disposed || !Visible || _prepOverlay is { Visible: true })
+            return base.ProcessCmdKey(ref msg, keyData);
+
+        // Don't steal typing from key-binding text boxes.
+        if (FindForm()?.ActiveControl is TextBox && _sheetHost is { Visible: true })
+        {
+            if (keyData == Keys.Escape)
+            {
+                CloseSheet();
+                _stage.Focus();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        if (_sheetHost is { Visible: true })
+        {
+            switch (keyData)
+            {
+                case Keys.Escape:
+                    CloseSheet();
+                    _stage.Focus();
+                    return true;
+                case Keys.Up:
+                    CycleSheetFocus(forward: false);
+                    return true;
+                case Keys.Down:
+                    CycleSheetFocus(forward: true);
+                    return true;
+                case Keys.Left when IsSliderFocused():
+                    NudgeFocusedSlider(increase: false);
+                    return true;
+                case Keys.Right when IsSliderFocused():
+                    NudgeFocusedSlider(increase: true);
+                    return true;
+                case Keys.Left:
+                    CycleSheetFocus(forward: false);
+                    return true;
+                case Keys.Right:
+                    CycleSheetFocus(forward: true);
+                    return true;
+                case Keys.Enter:
+                case Keys.Space:
+                    ActivateSheetFocused();
+                    return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        switch (keyData)
+        {
+            case Keys.Up:
+            case Keys.Left:
+                MoveFocus(-1);
+                return true;
+            case Keys.Down:
+            case Keys.Right:
+                MoveFocus(1);
+                return true;
+            case Keys.Enter:
+            case Keys.Space:
+                ActivateFocus(_focusIndex);
+                return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     void OnStagePaint(object? sender, PaintEventArgs e)
@@ -595,7 +874,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             var hit = _menuHits[i];
             var disabled = i == 0 && !_canStart;
-            var hot = _hoverMenu == i && !disabled;
+            var hot = IsMenuHot(i) && !disabled;
             Color color;
             if (disabled) color = Color.FromArgb(128, 122, 117, 104);
             else if (i == 0) color = hot ? NativeTheme.WumpaHot : NativeTheme.Wumpa;
@@ -636,7 +915,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             g.DrawLine(pen, 0, footTop, bounds.Width, footTop);
 
         // Info button — center glyph via path bounds (Bungee metrics are off with TextRenderer)
-        var infoBack = _hoverInfo
+        var infoHot = _hoverInfo || _focusIndex == 5;
+        var infoBack = infoHot
             ? Color.FromArgb(90, 255, 138, 0)
             : Color.FromArgb(45, 255, 138, 0);
         using (var br = new SolidBrush(infoBack))
@@ -658,7 +938,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         }
 
         // Chip
-        var chipFill = _hoverChip
+        var chipHot = _hoverChip || _focusIndex == 6;
+        var chipFill = chipHot
             ? Color.FromArgb(70, 255, 138, 0)
             : Color.FromArgb(30, 255, 138, 0);
         using (var path = RoundRect(_chipRect, 17))
@@ -867,6 +1148,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _sheetHost.Controls.Clear();
         _sheetHost.Visible = false;
         _activeSheet = null;
+        if (Visible) _stage.Focus();
     }
 
     void OpenSheet(Panel card)
@@ -880,6 +1162,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _activeSheet = card;
         _sheetHost.Visible = true;
         _sheetHost.BringToFront();
+        // Focus first interactive control for pad/keyboard navigation.
+        BeginInvoke(() =>
+        {
+            if (_activeSheet == null) return;
+            if (!_activeSheet.SelectNextControl(null, forward: true, tabStopOnly: true, nested: true, wrap: true))
+                _activeSheet.Focus();
+        });
     }
 
     void SheetResize(object? sender, EventArgs e)
@@ -1307,6 +1596,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             _disposed = true;
             _anim.Stop();
             _anim.Dispose();
+            _pad.Dispose();
             _map?.Dispose();
             _fontCrash?.Dispose();
             _fontRecomp?.Dispose();
@@ -1339,10 +1629,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         public ThemeCheck(string text)
         {
-            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.Selectable, true);
             BackColor = Color.Transparent;
             AutoSize = true;
             Cursor = Cursors.Hand;
+            TabStop = true;
 
             _square = new CheckSquare
             {
@@ -1388,6 +1679,28 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             remove => _square.CheckedChanged -= value;
         }
 
+        protected override void OnEnter(EventArgs e)
+        {
+            _square.SetHot(true);
+            base.OnEnter(e);
+        }
+
+        protected override void OnLeave(EventArgs e)
+        {
+            _square.SetHot(false);
+            base.OnLeave(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode is Keys.Space or Keys.Enter)
+            {
+                Checked = !Checked;
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left && !_square.Bounds.Contains(e.Location))
@@ -1408,7 +1721,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                      ControlStyles.Selectable | ControlStyles.UserMouse, true);
             BackColor = NativeTheme.CardTop;
             Cursor = Cursors.Hand;
-            TabStop = true;
+            TabStop = false;
             Size = new Size(26, 26);
         }
 
@@ -1426,6 +1739,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         }
 
         public event EventHandler? CheckedChanged;
+
+        public void SetHot(bool hot)
+        {
+            if (_hot == hot) return;
+            _hot = hot;
+            Invalidate();
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -1490,9 +1810,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
-                     ControlStyles.UserMouse, true);
+                     ControlStyles.UserMouse | ControlStyles.Selectable, true);
             BackColor = NativeTheme.CardTop;
             Cursor = Cursors.Hand;
+            TabStop = true;
             Height = 28;
             _pctFont = NativeTheme.MakeNunito(14, extraBold: true);
         }
@@ -1582,6 +1903,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             using (var path = RoundRectPath(track, 3))
                 g.FillPath(bg, path);
 
+            if (Focused)
+            {
+                using var focusPen = new Pen(NativeTheme.WumpaHot, 1.5f);
+                g.DrawRectangle(focusPen, 0, 0, Width - 1, Height - 1);
+            }
+
             var t = _max == _min ? 0f : (_value - _min) / (float)(_max - _min);
             var fillW = (int)(track.Width * t);
             if (fillW > 0)
@@ -1609,10 +1936,38 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPadding);
         }
 
+        protected override void OnGotFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnGotFocus(e);
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnLostFocus(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode is Keys.Left or Keys.Down)
+            {
+                Value -= Step;
+                e.Handled = true;
+            }
+            else if (e.KeyCode is Keys.Right or Keys.Up)
+            {
+                Value += Step;
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
             if (e.X >= Width - PercentCol) return;
+            Focus();
             _dragging = true;
             Capture = true;
             SetFromMouse(e.X);
