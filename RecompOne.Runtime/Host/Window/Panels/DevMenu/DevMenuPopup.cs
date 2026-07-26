@@ -4,17 +4,21 @@ using RecompOne.Runtime.Config;
 
 namespace RecompOne.Runtime.Host.Window;
 
-/// <summary>Naughty Dog–style categorized developer menu (cheat / display / debug / system).</summary>
+/// <summary>
+/// Naughty Dog–style developer menu: narrow vertical "book" list.
+/// Root = categories; click drills into a section; Back returns to the list.
+/// </summary>
 internal sealed class DevMenuPopup : IPanel
 {
     public string Name => "Developer Menu";
 
-    const float SidebarWidth = 168f;
-    const string DefaultSectionId = "cheats";
+    const float ListWidth = 230f;
+    const float SectionWidth = 300f;
 
     bool _open;
     bool _focusOnce;
-    string _selectedId = "";
+    bool _inSection;
+    string _sectionId = "";
 
     public bool IsOpen
     {
@@ -24,25 +28,36 @@ internal sealed class DevMenuPopup : IPanel
             if (_open == value) return;
             _open = value;
             _focusOnce = false;
-            if (_open && string.IsNullOrEmpty(_selectedId))
-                _selectedId = ConfigManager.View.DevMenuSection;
+            if (_open)
+                _inSection = false; // F3 → category list
         }
     }
 
-    /// <summary>Open the menu focused on a specific section id (e.g. "cheats").</summary>
+    /// <summary>Open drilled into a specific section (e.g. menu bar → Cheats).</summary>
     public void OpenTo(string sectionId)
     {
         if (!string.IsNullOrWhiteSpace(sectionId))
-            _selectedId = sectionId;
-        IsOpen = true;
+        {
+            _sectionId = sectionId;
+            ConfigManager.View.DevMenuSection = sectionId;
+            _inSection = true;
+        }
+        _open = true;
+        _focusOnce = false;
     }
 
     public void Draw()
     {
         var vp = ImGui.GetMainViewport();
         float ui = Math.Clamp(ImGui.GetIO().FontGlobalScale, 1f, 2.5f);
-        ImGui.SetNextWindowSize(new Vector2(720 * ui, 440 * ui), ImGuiCond.Appearing);
-        ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(16 * ui, 48 * ui), ImGuiCond.Appearing);
+        float width = (_inSection ? SectionWidth : ListWidth) * ui;
+
+        // Fixed width; height grows with content (no empty ##selectables — those broke hit-testing).
+        ImGui.SetNextWindowSize(new Vector2(width, 0f), ImGuiCond.Always);
+        ImGui.SetNextWindowSizeConstraints(
+            new Vector2(width, 0f),
+            new Vector2(width, vp.WorkSize.Y * 0.85f));
+        ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(12 * ui, 40 * ui), ImGuiCond.FirstUseEver);
 
         if (!_focusOnce)
         {
@@ -50,103 +65,132 @@ internal sealed class DevMenuPopup : IPanel
             _focusOnce = true;
         }
 
-        // Semi-transparent ND-ish chrome
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.12f, 0.12f, 0.12f, 0.88f));
-        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.55f, 0.55f, 0.55f, 0.55f));
-        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.18f, 0.18f, 0.18f, 0.95f));
-        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.22f, 0.22f, 0.22f, 0.95f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10 * ui, 8 * ui));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.14f, 0.14f, 0.14f, 0.82f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.5f, 0.5f, 0.5f, 0.45f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.16f, 0.16f, 0.16f, 0.9f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.18f, 0.18f, 0.18f, 0.9f));
+        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.28f, 0.28f, 0.28f, 0.55f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.34f, 0.34f, 0.3f, 0.75f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.4f, 0.38f, 0.22f, 0.85f));
 
         bool open = _open;
-        if (!ImGui.Begin(Name, ref open,
-                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoSavedSettings))
+        var flags = ImGuiWindowFlags.NoCollapse
+                    | ImGuiWindowFlags.NoDocking
+                    | ImGuiWindowFlags.NoSavedSettings
+                    | ImGuiWindowFlags.AlwaysAutoResize;
+
+        if (!ImGui.Begin(Name, ref open, flags))
         {
             IsOpen = open;
             ImGui.End();
-            ImGui.PopStyleColor(4);
-            ImGui.PopStyleVar(2);
+            PopChrome();
             return;
         }
 
-        var sections = DevMenuRegistry.Sections;
-        var current = ResolveSelection(sections);
+        if (_inSection && (ImGui.IsKeyPressed(ImGuiKey.Escape) || ImGui.IsKeyPressed(ImGuiKey.Backspace)))
+            _inSection = false;
 
-        DrawSidebar(sections, current, ui);
-        ImGui.SameLine();
-        DrawContent(current);
+        var sections = DevMenuRegistry.Sections;
+        if (!_inSection)
+            DrawRootList(sections);
+        else
+            DrawSectionPage(sections, ui);
 
         IsOpen = open;
         ImGui.End();
-        ImGui.PopStyleColor(4);
-        ImGui.PopStyleVar(2);
+        PopChrome();
     }
 
-    IDevMenuSection? ResolveSelection(IReadOnlyList<IDevMenuSection> sections)
+    static void PopChrome()
     {
-        if (sections.Count == 0) return null;
-        if (string.IsNullOrEmpty(_selectedId))
-            _selectedId = ConfigManager.View.DevMenuSection;
-        foreach (var s in sections)
-            if (s.Id == _selectedId) return s;
-        // Fall back to Cheats, then first section
-        foreach (var s in sections)
-            if (s.Id == DefaultSectionId) { _selectedId = s.Id; return s; }
-        _selectedId = sections[0].Id;
-        return sections[0];
+        ImGui.PopStyleColor(7);
+        ImGui.PopStyleVar(3);
     }
 
-    void DrawSidebar(IReadOnlyList<IDevMenuSection> sections, IDevMenuSection? current, float ui)
+    void DrawRootList(IReadOnlyList<IDevMenuSection> sections)
     {
-        ImGui.BeginChild("##devmenu-sidebar", new Vector2(SidebarWidth * ui, 0), ImGuiChildFlags.Border);
-
         ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
         ImGui.TextUnformatted("DEVELOPER");
         ImGui.PopStyleColor();
         ImGui.Separator();
         ImGui.Spacing();
 
+        if (sections.Count == 0)
+        {
+            ImGuiEx.TextDisabled("No sections.");
+            return;
+        }
+
         foreach (var s in sections)
         {
-            bool selected = current == s;
-            if (selected)
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.92f, 0.45f, 1f));
-
-            string label = selected ? $"> {s.Title}" : $"  {s.Title}";
-            if (ImGui.Selectable($"{label}##sec-{s.Id}", selected))
+            if (BookRow($"{s.Title}...", s.Id))
             {
-                _selectedId = s.Id;
+                _sectionId = s.Id;
                 ConfigManager.View.DevMenuSection = s.Id;
                 ConfigManager.SaveView(PanelManager.Panels);
+                _inSection = true;
             }
-
-            if (selected)
-                ImGui.PopStyleColor();
         }
 
         ImGui.Spacing();
         ImGui.Separator();
         ImGuiEx.TextDisabled($"Toggle: {ConfigManager.View.CheatMenuKey}");
+    }
 
+    void DrawSectionPage(IReadOnlyList<IDevMenuSection> sections, float ui)
+    {
+        if (BookRow("< Back", "back"))
+        {
+            _inSection = false;
+            return;
+        }
+
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        var section = FindSection(sections, _sectionId);
+        if (section == null)
+        {
+            ImGuiEx.TextDisabled("Section not found.");
+            return;
+        }
+
+        ImGui.TextUnformatted(section.Title.ToUpperInvariant());
+        ImGui.Spacing();
+
+        float maxBody = ImGui.GetMainViewport().WorkSize.Y * 0.55f;
+        ImGui.BeginChild("##dev-section-body", new Vector2(0f, maxBody), ImGuiChildFlags.None);
+        section.Draw();
         ImGui.EndChild();
     }
 
-    void DrawContent(IDevMenuSection? current)
+    static IDevMenuSection? FindSection(IReadOnlyList<IDevMenuSection> sections, string id)
     {
-        ImGui.BeginChild("##devmenu-content", Vector2.Zero, ImGuiChildFlags.Border);
+        foreach (var s in sections)
+            if (s.Id == id) return s;
+        return null;
+    }
 
-        if (current == null)
+    /// <summary>
+    /// ND-style row. Label is real Selectable text (defines hitbox + auto-size).
+    /// Yellow ">" is painted in the leading gutter on hover.
+    /// </summary>
+    static bool BookRow(string label, string id)
+    {
+        // Leading spaces reserve room for the cursor glyph.
+        bool clicked = ImGui.Selectable($"  {label}##{id}");
+        if (ImGui.IsItemHovered() || ImGui.IsItemActive())
         {
-            ImGuiEx.TextDisabled("No sections registered.");
+            var min = ImGui.GetItemRectMin();
+            float y = min.Y + (ImGui.GetItemRectSize().Y - ImGui.GetTextLineHeight()) * 0.5f;
+            ImGui.GetWindowDrawList().AddText(
+                new Vector2(min.X, y),
+                ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.92f, 0.4f, 1f)),
+                ">");
         }
-        else
-        {
-            ImGui.TextUnformatted(current.Title.ToUpperInvariant());
-            ImGui.Separator();
-            ImGui.Spacing();
-            current.Draw();
-        }
-
-        ImGui.EndChild();
+        return clicked;
     }
 }
