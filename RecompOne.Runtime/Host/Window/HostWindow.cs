@@ -131,6 +131,8 @@ internal static class HostWindow
     static void ResetSessionState()
     {
         _closed = false;
+        _endSessionRequested = false;
+        _ending = false;
         _layoutPending = true;
         _headless = false;
         _gpu = null;
@@ -189,7 +191,7 @@ internal static class HostWindow
         catch (Exception e) {
             Console.WriteLine(e.Message);
         }
-        if (_window.IsClosing) { EndSession(); return; }
+        if (_window.IsClosing || _endSessionRequested) { EndSession(); return; }
         InputManager.Poll();
         if (InputManager.ConsumeTopBarToggle())
         {
@@ -209,8 +211,26 @@ internal static class HostWindow
             if (PanelManager.Get<DevMenuPopup>() is { } dev)
                 dev.IsOpen = !dev.IsOpen;
         }
+        if (InputManager.ConsumePauseMenuToggle())
+        {
+            if (!ExitToMapInjector.Active)
+            {
+                // Single Esc pipeline: Dev Menu first, otherwise pause overlay.
+                if (PanelManager.Get<DevMenuPopup>() is { IsOpen: true } dev)
+                    dev.HandleEscape();
+                else if (PanelManager.Get<PauseMenuPopup>() is { } pause)
+                    pause.IsOpen = !pause.IsOpen;
+            }
+        }
+        // Mute must survive BiosB.PadRead's late Poll — applied via ApplyOverlay.
+        ExitToMapInjector.MuteGameplay =
+            PanelManager.Get<PauseMenuPopup>()?.IsOpen == true && !ExitToMapInjector.Active;
+        ExitToMapInjector.Tick();
         Cheats.CheatManager.Apply();
         _window.DoRender();
+        // Pause menu may request leave during Draw — end only after ImGui finishes.
+        if (_endSessionRequested || _window.IsClosing)
+            EndSession();
     }
 
     /// <summary>Pump window/input events without presenting a frame (for pad sampling mid-frame).</summary>
@@ -218,26 +238,38 @@ internal static class HostWindow
     {
         if (_headless || _window == null) return;
         try { _window.DoEvents(); } catch { }
-        if (_window.IsClosing) { EndSession(); return; }
+        if (_window.IsClosing || _endSessionRequested) { EndSession(); return; }
         InputManager.Poll();
+        ExitToMapInjector.ApplyOverlay();
     }
 
     internal static void Pump()
     {
         if (_headless || _window == null) return;
         try { _window.DoEvents(); } catch { }
-        if (_window.IsClosing) { EndSession(); return; }
+        if (_window.IsClosing || _endSessionRequested) { EndSession(); return; }
         _window.DoRender();
+        if (_endSessionRequested || _window.IsClosing)
+            EndSession();
     }
 
     static void EndSession()
     {
+        if (_ending) return;
+        _ending = true;
+        _endSessionRequested = false;
         var embedded = _embedded;
         Runtime.Shutdown();
         if (embedded)
             throw new GameSessionEndedException();
         Environment.Exit(0);
     }
+
+    /// <summary>
+    /// Request leaving the game session. Safe to call from ImGui Draw —
+    /// the session ends after the current frame finishes rendering.
+    /// </summary>
+    public static void RequestEndSession() => _endSessionRequested = true;
 
     public static void Shutdown()
     {
@@ -254,6 +286,8 @@ internal static class HostWindow
 
     static bool _chromeFsActive;
     static bool _savedHideTopBar;
+    static bool _endSessionRequested;
+    static bool _ending;
 
     public static void SetFullscreen(bool on)
     {
@@ -437,6 +471,7 @@ internal static class HostWindow
         PanelManager.Register(new SettingsPopup());
         PanelManager.Register(new Modding.ModsPopup());
         PanelManager.Register(new DevMenuPopup());
+        PanelManager.Register(new PauseMenuPopup());
         PanelManager.Register(new AboutPopup());
 
         SettingsRegistry.Register(new InputSettingsSection());
@@ -463,6 +498,7 @@ internal static class HostWindow
     {
         var io = ImGui.GetIO();
         io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
+        io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
         io.ConfigWindowsMoveFromTitleBarOnly = true;
         unsafe { io.NativePtr->IniFilename = null; }
 
@@ -574,7 +610,7 @@ internal static class HostWindow
         int contentOpen = PanelManager.Panels.Count(p =>
             p.IsOpen &&
             p is not AboutPopup and not SettingsPopup and not Modding.ModsPopup
-                and not DiscPickerPopup and not DevMenuPopup);
+                and not DiscPickerPopup and not DevMenuPopup and not PauseMenuPopup);
         var dockFlags = ImGuiDockNodeFlags.PassthruCentralNode | ImGuiDockNodeFlags.AutoHideTabBar;
         if (contentOpen <= 1)
             dockFlags |= ImGuiDockNodeFlags.NoDockingSplit | ImGuiDockNodeFlags.NoUndocking;

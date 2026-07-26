@@ -37,6 +37,7 @@ internal static unsafe class InputManager
     static bool _fullscreenToggle;
     static bool _sessionMarker;
     static bool _cheatMenuToggle;
+    static bool _pauseMenuToggle;
     static readonly HashSet<Key> _keysDown = [];
 
     
@@ -44,12 +45,16 @@ internal static unsafe class InputManager
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
     public static bool ConsumeCheatMenuToggle() { var v = _cheatMenuToggle; _cheatMenuToggle = false; return v; }
+    public static bool ConsumePauseMenuToggle() { var v = _pauseMenuToggle; _pauseMenuToggle = false; return v; }
 
     /// <summary>Host / async-key path can request a toggle without Silk KeyDown.</summary>
     public static void RequestFullscreenToggle() => _fullscreenToggle = true;
 
     /// <summary>Host / async-key path can request a cheat-menu toggle without Silk KeyDown.</summary>
     public static void RequestCheatMenuToggle() => _cheatMenuToggle = true;
+
+    /// <summary>Host / async-key path can request a pause-menu toggle without Silk KeyDown.</summary>
+    public static void RequestPauseMenuToggle() => _pauseMenuToggle = true;
 
     public static void Initialize(IInputContext input)
     {
@@ -110,6 +115,7 @@ internal static unsafe class InputManager
     {
         PollFullscreenHotkeys();
         PollCheatMenuHotkey();
+        PollPauseMenuHotkey();
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
@@ -117,13 +123,15 @@ internal static unsafe class InputManager
     }
 
     // Embedded child HWND often doesn't get Silk KeyDown (focus on parent / lost focus).
-    // Edge-detect F11 / Alt+Enter / cheat menu via GetAsyncKeyState so toggles always work.
+    // Edge-detect F11 / Alt+Enter / cheat menu / Esc via GetAsyncKeyState so toggles always work.
     static bool _asyncF11;
     static bool _asyncAltEnter;
     static bool _asyncCheatMenu;
+    static bool _asyncPauseMenu;
     const int VkF11 = 0x7A;
     const int VkMenu = 0x12;   // either Alt
     const int VkReturn = 0x0D;
+    const int VkEscape = 0x1B;
 
     static void PollFullscreenHotkeys()
     {
@@ -149,6 +157,14 @@ internal static unsafe class InputManager
         bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
         if (down && !_asyncCheatMenu) _cheatMenuToggle = true;
         _asyncCheatMenu = down;
+    }
+
+    static void PollPauseMenuHotkey()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        bool down = (GetAsyncKeyState(VkEscape) & 0x8000) != 0;
+        if (down && !_asyncPauseMenu) _pauseMenuToggle = true;
+        _asyncPauseMenu = down;
     }
 
     [DllImport("user32.dll")]
@@ -383,6 +399,7 @@ internal static unsafe class InputManager
         if (key == Key.F1)  _topBarToggle = true;
         if (key == Key.F9)  _sessionMarker = true;
         if (key == Key.F11) _fullscreenToggle = true;
+        if (key == Key.Escape) _pauseMenuToggle = true;
         if (key == ResolveCheatMenuKey()) _cheatMenuToggle = true;
         // Alt+Enter — common fullscreen shortcut (Enter alone stays Start/Cross).
         if (key is Key.Enter or Key.KeypadEnter

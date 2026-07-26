@@ -171,6 +171,8 @@ public static class BiosB
         // Crash samples the pad at frame start (before VSync). Prefer a lightweight poll;
         // full window pump is done from Present. Avoid HostWindow type visibility issues.
         Host.InputManager.Poll();
+        // Re-apply after Poll — otherwise ExitToMap Start/Select is wiped before the guest sees it.
+        Host.ExitToMapInjector.ApplyOverlay();
         ushort s = Hardware.Controller.State;
         ushort swapped = (ushort)((s >> 8) | (s << 8));
         ushort s2 = Hardware.Controller.State2;

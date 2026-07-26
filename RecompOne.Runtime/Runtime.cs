@@ -57,6 +57,9 @@ public static class Runtime
     /// <summary>Queue a developer-menu toggle (safe from WinForms key routing).</summary>
     public static void RequestCheatMenuToggle() => Host.InputManager.RequestCheatMenuToggle();
 
+    /// <summary>Queue a pause-menu toggle (safe from WinForms key routing).</summary>
+    public static void RequestPauseMenuToggle() => Host.InputManager.RequestPauseMenuToggle();
+
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();

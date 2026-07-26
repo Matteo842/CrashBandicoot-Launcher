@@ -75,6 +75,8 @@ public static class LibPad
 
     public static void Refresh(IMemory m)
     {
+        // Same Poll wipe path as BiosB — keep injected Start/Select if active.
+        ExitToMapInjector.ApplyOverlay();
         if (_buf1 != 0) WritePad(m, _buf1, Controller.State, true,
             Controller.RightX, Controller.RightY, Controller.LeftX, Controller.LeftY);
         if (_buf2 != 0) WritePad(m, _buf2, Controller.State2, Controller.Connected2,

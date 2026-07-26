@@ -46,6 +46,19 @@ internal sealed class DevMenuPopup : IPanel
         _focusOnce = false;
     }
 
+    /// <summary>
+    /// Esc while open: leave a section, or close the menu at the category list.
+    /// Called from the host Esc pipeline (ImGui may not see Esc when embedded).
+    /// </summary>
+    public void HandleEscape()
+    {
+        if (!_open) return;
+        if (_inSection)
+            _inSection = false;
+        else
+            IsOpen = false;
+    }
+
     public void Draw()
     {
         var vp = ImGui.GetMainViewport();
@@ -90,7 +103,7 @@ internal sealed class DevMenuPopup : IPanel
             return;
         }
 
-        if (_inSection && (ImGui.IsKeyPressed(ImGuiKey.Escape) || ImGui.IsKeyPressed(ImGuiKey.Backspace)))
+        if (_inSection && ImGui.IsKeyPressed(ImGuiKey.Backspace))
             _inSection = false;
 
         var sections = DevMenuRegistry.Sections;

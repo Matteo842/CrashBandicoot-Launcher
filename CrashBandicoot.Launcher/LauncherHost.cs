@@ -480,6 +480,12 @@ public sealed class LauncherHost : Form
                 Runtime.RequestCheatMenuToggle();
                 return true;
             }
+
+            if (keyData == Keys.Escape)
+            {
+                Runtime.RequestPauseMenuToggle();
+                return true;
+            }
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }

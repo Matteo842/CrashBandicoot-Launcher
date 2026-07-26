@@ -29,6 +29,9 @@ internal static class MainMenuBar
             if (ImGui.MenuItem("Developer Menu...", cheatKey))
                 if (PanelManager.Get<DevMenuPopup>() is { } dev) dev.OpenTo("cheats");
 
+            if (ImGui.MenuItem("Pause Menu...", "Esc"))
+                if (PanelManager.Get<PauseMenuPopup>() is { } pause) pause.IsOpen = true;
+
             ImGui.Separator();
 
             bool showBar = !ConfigManager.View.HideTopBar;

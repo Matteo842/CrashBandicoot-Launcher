@@ -18,11 +18,23 @@ public static class CheatManager
     const uint MapLivesAddr = 0x800618EC;
     const uint LevelSelectAddr = 0x80061948;
     const uint InstantSaveMenuAddr = 0x800A264C;
+    // SCUS-94900: current level ID (cbhacks / GpuHle).
+    const uint LevelIdAddr = 0x80056710;
+    const uint TitleMenuMapLevel = 0x19;
+
+    // Hold the instant-save poke for a few frames — a single write can be overwritten.
+    static int _instantSaveHoldFrames;
 
     public static void Apply()
     {
         var mem = Runtime.Mem;
         if (mem == null) return;
+
+        if (_instantSaveHoldFrames > 0)
+        {
+            mem.WriteU16(InstantSaveMenuAddr, 4);
+            _instantSaveHoldFrames--;
+        }
 
         if (CheatConfig.InfiniteLives)
         {
@@ -71,6 +83,15 @@ public static class CheatManager
 
     public static void OpenInstantSaveMenu()
     {
+        _instantSaveHoldFrames = 8;
         Runtime.Mem?.WriteU16(InstantSaveMenuAddr, 4);
+    }
+
+    /// <summary>True on title / menus / warp map / game over (level ID 0x19).</summary>
+    public static bool IsOnTitleMenuMap()
+    {
+        var mem = Runtime.Mem;
+        if (mem == null) return true;
+        return mem.ReadU32(LevelIdAddr) == TitleMenuMapLevel;
     }
 }
