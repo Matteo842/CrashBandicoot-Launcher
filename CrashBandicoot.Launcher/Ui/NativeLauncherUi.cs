@@ -63,7 +63,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     string _status = "";
     string _statusKind = "";
     string _discPath = "";
-    string _version = "v1.4.0";
+    string _version = "v1.5.0";
     bool _disposed;
     readonly LauncherGamepad _pad = new();
 
