@@ -77,10 +77,18 @@ public static class LibPad
     {
         // Same Poll wipe path as BiosB — keep injected Start/Select if active.
         ExitToMapInjector.ApplyOverlay();
-        if (_buf1 != 0) WritePad(m, _buf1, Controller.State, true,
-            Controller.RightX, Controller.RightY, Controller.LeftX, Controller.LeftY);
-        if (_buf2 != 0) WritePad(m, _buf2, Controller.State2, Controller.Connected2,
-            Controller.RightX2, Controller.RightY2, Controller.LeftX2, Controller.LeftY2);
+        if (_buf1 != 0)
+        {
+            var buttons = Events.PadInput.Filter(m, 0, Controller.State);
+            WritePad(m, _buf1, buttons, true,
+                Controller.RightX, Controller.RightY, Controller.LeftX, Controller.LeftY);
+        }
+        if (_buf2 != 0)
+        {
+            var buttons = Events.PadInput.Filter(m, 1, Controller.State2);
+            WritePad(m, _buf2, buttons, Controller.Connected2,
+                Controller.RightX2, Controller.RightY2, Controller.LeftX2, Controller.LeftY2);
+        }
     }
 
     static bool IsPort1(uint port) => (port & 0x10u) == 0;

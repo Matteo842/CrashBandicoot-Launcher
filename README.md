@@ -134,6 +134,7 @@ Before you upload a release, check that you are shipping tools/UI only — **no*
 | `CrashBandicoot.Launcher/` | Native WinForms launcher (Windows) + CLI + local recomp pipeline |
 | `RecompOne.Runtime/` | PS1 HLE runtime (from RecompOne) |
 | `RecompOne.Recompiler/` | Recompiler library (from RecompOne) |
+| `examples/mods/` | Sample mods (e.g. `auto-spin`) — see [`docs/MODDING.md`](docs/MODDING.md) |
 | `CrashBandicoot.Recompiled/` | Placeholder only (gitignored) — not used for consumer builds |
 
 ---
@@ -145,7 +146,7 @@ All next to the binary (portable; gitignored):
 - Config: `settings.json` (+ `interface.ini` for UI layout)  
 - Saves: `save/carda.sav`, `save/cardb.sav`  
 - Prepared game: `game/{fingerprint}/` (DLL + generated sources — persistent until you delete them)  
-- Mods: `mods/`  
+- Mods: `mods/` (enable/disable from the launcher **MODS** menu; see [`docs/MODDING.md`](docs/MODDING.md))  
 
 This project does not include telemetry in the launcher path described here. Don’t commit those folders or dumps to git.
 

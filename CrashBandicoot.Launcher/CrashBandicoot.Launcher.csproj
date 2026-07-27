@@ -58,6 +58,11 @@
     <None Update="Recomp\CrashBandicoot.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Recomp\Patches\main.cs.patch" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Ui\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Sample mods for local runs (EnsureCreated seeds mods/ from examples/mods). -->
+    <None Include="..\examples\mods\**\*"
+          Link="examples\mods\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
   </ItemGroup>
 
   <!-- WinForms launcher UI is Windows-only; Linux builds keep Recomp + CLI entry. -->

@@ -52,8 +52,110 @@ public static class AppPaths
         Directory.CreateDirectory(SaveDir);
         Directory.CreateDirectory(GameDir);
         Directory.CreateDirectory(LogsDir);
-        // mods/ intentionally not created while the Mods menu is disabled
+        Directory.CreateDirectory(ModsDir);
+        SeedExampleMods();
         MigrateLegacySaves();
+    }
+
+    /// <summary>
+    /// Copy bundled example mods into mods/. Missing mods are always seeded.
+    /// Stock samples (author CrashBandicoot.Launcher) are refreshed when the
+    /// bundled mod.json version is newer, so bugfixes land without manual delete.
+    /// </summary>
+    static void SeedExampleMods()
+    {
+        try
+        {
+            var examples = Path.Combine(Root, "examples", "mods");
+            if (!Directory.Exists(examples)) return;
+
+            foreach (var dir in Directory.EnumerateDirectories(examples))
+            {
+                var name = Path.GetFileName(dir);
+                if (string.IsNullOrEmpty(name) || name.StartsWith('.')) continue;
+                var dest = Path.Combine(ModsDir, name);
+                if (File.Exists(dest + ".zip")) continue;
+
+                if (!Directory.Exists(dest))
+                {
+                    CopyDirectory(dir, dest, overwrite: false);
+                    continue;
+                }
+
+                if (ShouldRefreshStockSample(dir, dest))
+                {
+                    CopyDirectory(dir, dest, overwrite: true);
+                    ClearModCache(name);
+                }
+            }
+
+            foreach (var zip in Directory.EnumerateFiles(examples, "*.zip"))
+            {
+                var dest = Path.Combine(ModsDir, Path.GetFileName(zip));
+                if (File.Exists(dest)) continue;
+                var folderSibling = Path.Combine(ModsDir, Path.GetFileNameWithoutExtension(zip));
+                if (Directory.Exists(folderSibling)) continue;
+                File.Copy(zip, dest);
+            }
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    static bool ShouldRefreshStockSample(string srcDir, string destDir)
+    {
+        try
+        {
+            var srcJson = Path.Combine(srcDir, "mod.json");
+            var destJson = Path.Combine(destDir, "mod.json");
+            if (!File.Exists(srcJson) || !File.Exists(destJson)) return false;
+
+            using var srcDoc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(srcJson));
+            using var destDoc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(destJson));
+            var src = srcDoc.RootElement;
+            var dest = destDoc.RootElement;
+
+            var author = dest.TryGetProperty("author", out var a) ? a.GetString() : null;
+            if (!string.Equals(author, "CrashBandicoot.Launcher", StringComparison.Ordinal))
+                return false;
+
+            var srcVer = src.TryGetProperty("version", out var sv) ? sv.GetString() ?? "" : "";
+            var destVer = dest.TryGetProperty("version", out var dv) ? dv.GetString() ?? "" : "";
+            return !string.Equals(srcVer, destVer, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void ClearModCache(string modId)
+    {
+        try
+        {
+            var cache = Path.Combine(ModsDir, ".cache");
+            if (!Directory.Exists(cache)) return;
+            foreach (var stale in Directory.EnumerateFiles(cache, $"{modId}-*.dll"))
+                File.Delete(stale);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    static void CopyDirectory(string src, string dest, bool overwrite)
+    {
+        Directory.CreateDirectory(dest);
+        foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(src, file);
+            var target = Path.Combine(dest, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite);
+        }
     }
 
     static IEnumerable<string> DesktopRoots()

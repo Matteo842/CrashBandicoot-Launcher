@@ -6,7 +6,6 @@ namespace RecompOne.Runtime.Bios;
 
 public static class BiosB
 {
-    static readonly PadReadEvent _padEvent = new();
     struct EvCB { public uint Status, Class, Spec, Mode, Func; }
     const int MaxEvents = 64;
     static readonly EvCB[] _evCBs = new EvCB[MaxEvents];
@@ -155,16 +154,6 @@ public static class BiosB
         return 0xFFFFFFFFu;
     }
     
-    static ushort FirePad(IMemory m, int port, ushort buttons)
-    {
-        if (!Event.HasAnyListeners<PadReadEvent>()) return buttons;
-        var e = _padEvent;
-        e.Context = Runtime.Cpu!; e.Memory = m;
-        e.Port = port; e.Buttons = buttons;
-        Event.Dispatch(e);
-        return e.Buttons;
-    }
-
     static void PadRead(IMemory m)
     {
         if (_padBuf == 0) return;
@@ -173,12 +162,11 @@ public static class BiosB
         Host.InputManager.Poll();
         // Re-apply after Poll — otherwise ExitToMap Start/Select is wiped before the guest sees it.
         Host.ExitToMapInjector.ApplyOverlay();
-        ushort s = Hardware.Controller.State;
+        // Filter in Controller (unswapped) layout, then byte-swap into the BIOS pad buffer.
+        ushort s = PadInput.Filter(m, 0, Hardware.Controller.State);
+        ushort s2 = PadInput.Filter(m, 1, Hardware.Controller.State2);
         ushort swapped = (ushort)((s >> 8) | (s << 8));
-        ushort s2 = Hardware.Controller.State2;
         ushort swapped2 = (ushort)((s2 >> 8) | (s2 << 8));
-        swapped = FirePad(m, 0, swapped);
-        swapped2 = FirePad(m, 1, swapped2);
         // Crash PadUpdate (retail) takes the LOW 16 bits for port 0 and HIGH for port 1
         // (c1's decomp has this backwards). Keep pad1 in the low halfword.
         m.WriteU32(_padBuf, ((uint)swapped2 << 16) | swapped);

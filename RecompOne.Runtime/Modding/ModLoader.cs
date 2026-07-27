@@ -4,6 +4,7 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Host;
 
 namespace RecompOne.Runtime.Modding;
@@ -24,6 +25,46 @@ public static class ModLoader
         get { lock (_loaded) return _loaded.Select(l => l.Info).ToArray(); }
     }
 
+    /// <summary>Read mod.json manifests under mods/ without compiling sources.</summary>
+    public static IReadOnlyList<ModInfo> DiscoverInfos(string? root = null)
+    {
+        root ??= AppPaths.ModsDir;
+        if (!Directory.Exists(root)) return [];
+
+        var list = new List<ModInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dir in Directory.EnumerateDirectories(root))
+        {
+            if (Path.GetFileName(dir).StartsWith('.')) continue;
+            var jsonPath = Path.Combine(dir, "mod.json");
+            if (!File.Exists(jsonPath)) continue;
+            var info = ParseInfo(File.ReadAllText(jsonPath), dir, logErrors: false);
+            if (info == null || !seen.Add(info.Id)) continue;
+            list.Add(info);
+        }
+
+        foreach (var zipPath in Directory.EnumerateFiles(root, "*.zip"))
+        {
+            try
+            {
+                using var zip = ZipFile.OpenRead(zipPath);
+                var entry = zip.GetEntry("mod.json");
+                if (entry == null) continue;
+                using var reader = new StreamReader(entry.Open());
+                var info = ParseInfo(reader.ReadToEnd(), zipPath, logErrors: false);
+                if (info == null || !seen.Add(info.Id)) continue;
+                list.Add(info);
+            }
+            catch
+            {
+                // ignore unreadable zips in the launcher list
+            }
+        }
+
+        list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        return list;
+    }
 
     public static void LoadAll(string? root = null)
     {
@@ -31,6 +72,9 @@ public static class ModLoader
         Directory.CreateDirectory(root);
 
         var candidates = Discover(root);
+        if (candidates.Count == 0) return;
+
+        candidates = FilterActive(candidates);
         if (candidates.Count == 0) return;
 
         var ordered = Order(candidates);
@@ -62,6 +106,67 @@ public static class ModLoader
         ModLoadingPopup.End();
 
         Console.WriteLine($"[Mods] loaded {_loaded.Count}/{ordered.Count} mod(s), {HookManager.HookedFunctionCount} function(s) hooked");
+    }
+
+    /// <summary>
+    /// Until the launcher saves Mods once (<see cref="GameConfig.ModsConfigured"/>),
+    /// load everything. After that, only ids in ActiveMods (empty = none).
+    /// Dependencies of enabled mods are kept so Order can still resolve them.
+    /// </summary>
+    static List<Candidate> FilterActive(List<Candidate> candidates)
+    {
+        if (!ConfigManager.Game.ModsConfigured)
+            return candidates;
+
+        var active = ConfigManager.Game.ActiveMods ?? [];
+        var enabled = new HashSet<string>(
+            active.Where(id => !string.IsNullOrWhiteSpace(id)),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (enabled.Count == 0)
+        {
+            foreach (var c in candidates)
+                Console.WriteLine($"[Mods] {c.Info.Id}: disabled in ActiveMods, skipping");
+            return [];
+        }
+
+        var byId = candidates.ToDictionary(c => c.Info.Id, StringComparer.OrdinalIgnoreCase);
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in enabled)
+        {
+            if (!byId.ContainsKey(id))
+            {
+                Console.WriteLine($"[Mods] active id '{id}' not found under mods/, ignoring");
+                continue;
+            }
+            CollectWithDeps(id, byId, keep);
+        }
+
+        var filtered = new List<Candidate>();
+        foreach (var c in candidates)
+        {
+            if (keep.Contains(c.Info.Id))
+            {
+                filtered.Add(c);
+                continue;
+            }
+            Console.WriteLine($"[Mods] {c.Info.Id}: disabled in ActiveMods, skipping");
+        }
+        return filtered;
+    }
+
+    static void CollectWithDeps(
+        string id,
+        Dictionary<string, Candidate> byId,
+        HashSet<string> keep)
+    {
+        if (!keep.Add(id)) return;
+        if (!byId.TryGetValue(id, out var mod)) return;
+        foreach (var dep in mod.Info.Dependencies)
+        {
+            if (byId.ContainsKey(dep))
+                CollectWithDeps(dep, byId, keep);
+        }
     }
 
     static List<Candidate> Discover(string root)
@@ -124,14 +229,15 @@ public static class ModLoader
         return list;
     }
 
-    static ModInfo? ParseInfo(string json, string sourcePath)
+    static ModInfo? ParseInfo(string json, string sourcePath, bool logErrors = true)
     {
         try
         {
             var info = JsonSerializer.Deserialize<ModInfo>(json, _json);
             if (info == null || string.IsNullOrWhiteSpace(info.Id))
             {
-                Console.Error.WriteLine($"[Mods] malformed mod.json for {Path.GetFileName(sourcePath)}: missing id, skipping");
+                if (logErrors)
+                    Console.Error.WriteLine($"[Mods] malformed mod.json for {Path.GetFileName(sourcePath)}: missing id, skipping");
                 return null;
             }
             if (string.IsNullOrWhiteSpace(info.Name)) info.Name = info.Id;
@@ -140,7 +246,8 @@ public static class ModLoader
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Mods] malformed mod.json for {Path.GetFileName(sourcePath)}: {ex.Message}");
+            if (logErrors)
+                Console.Error.WriteLine($"[Mods] malformed mod.json for {Path.GetFileName(sourcePath)}: {ex.Message}");
             return null;
         }
     }

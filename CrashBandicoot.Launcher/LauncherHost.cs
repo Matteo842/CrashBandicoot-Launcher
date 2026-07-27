@@ -130,7 +130,10 @@ public sealed class LauncherHost : Form
                     BeginInvoke(Close);
                     break;
                 case "openMods":
-                    // Mods menu disabled for 1.x — ignored on purpose.
+                    OpenModsFolder();
+                    break;
+                case "saveMods":
+                    SaveMods(root);
                     break;
                 case "saveControls":
                     SaveControls(root);
@@ -186,6 +189,19 @@ public sealed class LauncherHost : Form
         }
 
         var k = ConfigManager.Game.Keys;
+        var discovered = RecompOne.Runtime.Modding.ModLoader.DiscoverInfos();
+        var modsConfigured = ConfigManager.Game.ModsConfigured;
+        var active = ConfigManager.Game.ActiveMods ?? [];
+        var activeSet = new HashSet<string>(active, StringComparer.OrdinalIgnoreCase);
+        var discoveredMods = discovered.Select(m => new
+        {
+            id = m.Id,
+            name = m.Name,
+            version = m.Version,
+            author = m.Author,
+            enabled = !modsConfigured || activeSet.Contains(m.Id),
+        }).ToArray();
+
         var state = new
         {
             version = AppVersion,
@@ -205,7 +221,9 @@ public sealed class LauncherHost : Form
             dejitter = ConfigManager.View.Dejitter,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
-            mods = ConfigManager.Game.ActiveMods,
+            mods = active,
+            modsConfigured,
+            discoveredMods,
             keys = new Dictionary<string, string>
             {
                 ["cross"] = k.Cross,
@@ -536,6 +554,43 @@ public sealed class LauncherHost : Form
             CheatConfig.LevelSelect = ls.GetBoolean();
         ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
         PushState();
+    }
+
+    void SaveMods(JsonElement root)
+    {
+        var ids = new List<string>();
+        if (root.TryGetProperty("mods", out var mods) && mods.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in mods.EnumerateArray())
+            {
+                var id = el.GetString();
+                if (!string.IsNullOrWhiteSpace(id))
+                    ids.Add(id);
+            }
+        }
+
+        ConfigManager.Game.ModsConfigured = true;
+        ConfigManager.Game.ActiveMods = ids;
+        ConfigManager.SaveGame();
+        PushState();
+    }
+
+    static void OpenModsFolder()
+    {
+        var modsDir = RecompOne.Runtime.AppPaths.ModsDir;
+        Directory.CreateDirectory(modsDir);
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = modsDir,
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     void SaveSettings(JsonElement root)

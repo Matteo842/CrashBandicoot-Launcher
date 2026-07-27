@@ -10,11 +10,27 @@ public static class ModCompiler
 {
     static List<MetadataReference>? _references;
 
+    /// <summary>SDK-style implicit usings so sample/user mods need fewer boilerplate imports.</summary>
+    const string GlobalUsings = """
+        global using System;
+        global using System.Collections.Generic;
+        global using System.Linq;
+        global using System.Threading.Tasks;
+        """;
+
     public static byte[]? Compile(string modId, IReadOnlyList<(string Path, string Text)> sources)
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
-        var trees = sources.Select(s => CSharpSyntaxTree.ParseText(SourceText.From(s.Text, Encoding.UTF8), parseOptions, s.Path)).ToList();
-        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary).WithAllowUnsafe(true).WithOptimizationLevel(OptimizationLevel.Release);
+        var trees = new List<SyntaxTree>
+        {
+            CSharpSyntaxTree.ParseText(SourceText.From(GlobalUsings, Encoding.UTF8), parseOptions, "GlobalUsings.g.cs"),
+        };
+        trees.AddRange(sources.Select(s =>
+            CSharpSyntaxTree.ParseText(SourceText.From(s.Text, Encoding.UTF8), parseOptions, s.Path)));
+
+        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+            .WithAllowUnsafe(true)
+            .WithOptimizationLevel(OptimizationLevel.Release);
 
         var compilation = CSharpCompilation.Create($"mod-{modId}", trees, References(), options);
         using var ms = new MemoryStream();

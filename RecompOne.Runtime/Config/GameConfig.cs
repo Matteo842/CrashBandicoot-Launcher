@@ -66,5 +66,13 @@ public class GameConfig
     public KeyBindings Keys2 { get; set; } = KeyBindings.Empty();
     public GamepadBindings Pad { get; set; } = new();
     public GamepadBindings Pad2 { get; set; } = GamepadBindings.Empty();
+
+    /// <summary>
+    /// False until the launcher Mods sheet is saved once. While false, every
+    /// discovered mod loads (first-run / demos). When true, only <see cref="ActiveMods"/> load.
+    /// </summary>
+    public bool ModsConfigured { get; set; }
+
+    /// <summary>Enabled mod ids when <see cref="ModsConfigured"/> is true. Empty = load none.</summary>
     public List<string> ActiveMods { get; set; } = [];
 }

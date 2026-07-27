@@ -56,7 +56,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     int _hoverMenu = -1;
     bool _hoverInfo;
     bool _hoverChip;
-    /// <summary>Controller/keyboard focus: 0–4 menu, 5 info, 6 disc chip.</summary>
+    /// <summary>Controller/keyboard focus: 0–5 menu, 6 info, 7 disc chip.</summary>
+    const int MenuCount = 6;
+    const int FocusInfo = 6;
+    const int FocusChip = 7;
+    const int FocusCount = 8;
+
     int _focusIndex;
     bool _canStart;
     float _cratePhase;
@@ -74,7 +79,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     Panel? _sheetHost;
     Panel? _activeSheet;
 
-    // Settings / controls / cheats state buffers
+    // Settings / controls / cheats / mods state buffers
     readonly Dictionary<string, TextBox> _keyBoxes = new(StringComparer.Ordinal);
     ThemeSlider? _vol;
     ThemeCheck? _muted;
@@ -88,6 +93,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _dejitter;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
+    readonly Dictionary<string, ThemeCheck> _modChecks = new(StringComparer.OrdinalIgnoreCase);
+    JsonElement _pendingDiscoveredMods;
 
     public NativeLauncherUi()
     {
@@ -275,9 +282,30 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
 
+        if (state.TryGetProperty("discoveredMods", out var dm))
+            _pendingDiscoveredMods = dm.Clone();
+        ApplyModChecks(state);
+
         LayoutHits();
         EnsureFocusValid();
         _stage.Invalidate();
+    }
+
+    void ApplyModChecks(JsonElement state)
+    {
+        if (_modChecks.Count == 0) return;
+        if (!state.TryGetProperty("discoveredMods", out var mods) || mods.ValueKind != JsonValueKind.Array)
+            return;
+        foreach (var m in mods.EnumerateArray())
+        {
+            if (!m.TryGetProperty("id", out var idEl) || idEl.GetString() is not { Length: > 0 } id)
+                continue;
+            if (!_modChecks.TryGetValue(id, out var check) || check.IsDisposed) continue;
+            var enabled = true;
+            if (m.TryGetProperty("enabled", out var en))
+                enabled = en.ValueKind == JsonValueKind.True;
+            check.Checked = enabled;
+        }
     }
 
     static void SetCheck(ThemeCheck? box, JsonElement state, string name)
@@ -326,13 +354,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         // Menu right — larger Bungee needs more width/row height
         _menuHits.Clear();
-        var menuLabels = new[] { "START GAME", "CONTROLS", "SETTINGS", "CHEAT", "EXIT" };
+        var menuLabels = new[] { "START GAME", "CONTROLS", "SETTINGS", "MODS", "CHEAT", "EXIT" };
         var menuX = w - 340;
-        var menuY = contentH / 2 - 170;
-        const int menuRow = 70;
+        var menuY = contentH / 2 - 190;
+        const int menuRow = 62;
         for (var i = 0; i < menuLabels.Length; i++)
         {
-            _menuHits.Add(new MenuHit(menuLabels[i], new Rectangle(menuX, menuY + i * menuRow, 300, 56), i));
+            _menuHits.Add(new MenuHit(menuLabels[i], new Rectangle(menuX, menuY + i * menuRow, 300, 52), i));
         }
 
         // Footer
@@ -360,8 +388,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         }
         _hoverInfo = _infoRect.Contains(e.Location);
         _hoverChip = _chipRect.Contains(e.Location);
-        if (_hoverInfo) _focusIndex = 5;
-        else if (_hoverChip) _focusIndex = 6;
+        if (_hoverInfo) _focusIndex = FocusInfo;
+        else if (_hoverChip) _focusIndex = FocusChip;
         _stage.Cursor = (_hoverMenu >= 0 || _hoverInfo || _hoverChip) ? Cursors.Hand : Cursors.Default;
         if (prevMenu != _hoverMenu || prevInfo != _hoverInfo || prevChip != _hoverChip || prevFocus != _focusIndex)
             _stage.Invalidate();
@@ -374,12 +402,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         if (_infoRect.Contains(e.Location))
         {
-            ActivateFocus(5);
+            ActivateFocus(FocusInfo);
             return;
         }
         if (_chipRect.Contains(e.Location))
         {
-            ActivateFocus(6);
+            ActivateFocus(FocusChip);
             return;
         }
 
@@ -518,17 +546,17 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         if (delta == 0) return;
         var start = _focusIndex;
         var next = start;
-        for (var step = 0; step < 8; step++)
+        for (var step = 0; step < FocusCount + 1; step++)
         {
-            next = (next + delta + 7) % 7;
+            next = (next + delta + FocusCount) % FocusCount;
             if (IsFocusSelectable(next))
             {
                 if (next != _focusIndex)
                 {
                     _focusIndex = next;
-                    _hoverMenu = next <= 4 ? next : -1;
-                    _hoverInfo = next == 5;
-                    _hoverChip = next == 6;
+                    _hoverMenu = next < MenuCount ? next : -1;
+                    _hoverInfo = next == FocusInfo;
+                    _hoverChip = next == FocusChip;
                     _stage.Invalidate();
                 }
                 return;
@@ -539,14 +567,15 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     bool IsFocusSelectable(int index) => index switch
     {
         0 => _canStart,
-        >= 1 and <= 6 => true,
+        >= 1 and < MenuCount => true,
+        FocusInfo or FocusChip => true,
         _ => false,
     };
 
     void EnsureFocusValid()
     {
         if (IsFocusSelectable(_focusIndex)) return;
-        for (var i = 0; i < 7; i++)
+        for (var i = 0; i < FocusCount; i++)
         {
             if (!IsFocusSelectable(i)) continue;
             _focusIndex = i;
@@ -572,15 +601,19 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 break;
             case 3:
                 Emit(new { type = "getState" });
-                ShowCheat();
+                ShowMods();
                 break;
             case 4:
-                Emit(new { type = "exit" });
+                Emit(new { type = "getState" });
+                ShowCheat();
                 break;
             case 5:
+                Emit(new { type = "exit" });
+                break;
+            case FocusInfo:
                 ShowAbout();
                 break;
-            case 6:
+            case FocusChip:
                 Emit(new { type = "pickDisc" });
                 break;
         }
@@ -915,7 +948,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             g.DrawLine(pen, 0, footTop, bounds.Width, footTop);
 
         // Info button — center glyph via path bounds (Bungee metrics are off with TextRenderer)
-        var infoHot = _hoverInfo || _focusIndex == 5;
+        var infoHot = _hoverInfo || _focusIndex == FocusInfo;
         var infoBack = infoHot
             ? Color.FromArgb(90, 255, 138, 0)
             : Color.FromArgb(45, 255, 138, 0);
@@ -938,7 +971,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         }
 
         // Chip
-        var chipHot = _hoverChip || _focusIndex == 6;
+        var chipHot = _hoverChip || _focusIndex == FocusChip;
         var chipFill = chipHot
             ? Color.FromArgb(70, 255, 138, 0)
             : Color.FromArgb(30, 255, 138, 0);
@@ -1373,6 +1406,100 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         card.Height = Math.Min(720, y + 80);
         OpenSheet(card);
         SyncFilterStrengthRow();
+        Emit(new { type = "getState" });
+    }
+
+    void ShowMods()
+    {
+        var card = MakeCard(560, 520);
+        card.AutoScroll = true;
+        card.Controls.Add(MakeTitle("Mods"));
+        var y = 110;
+        card.Controls.Add(Hint(
+            "Drop mods into the mods folder next to the exe. Enable/disable here; restart the game to apply.",
+            ref y));
+
+        _modChecks.Clear();
+        var hasAny = false;
+        if (_pendingDiscoveredMods.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var m in _pendingDiscoveredMods.EnumerateArray())
+            {
+                hasAny = true;
+                var id = m.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                var name = m.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? id : id;
+                var version = m.TryGetProperty("version", out var verEl) ? verEl.GetString() ?? "" : "";
+                var author = m.TryGetProperty("author", out var authEl) ? authEl.GetString() ?? "" : "";
+                var enabled = !m.TryGetProperty("enabled", out var en) || en.ValueKind == JsonValueKind.True;
+
+                var label = string.IsNullOrWhiteSpace(version) ? name : $"{name}  v{version}";
+                if (!string.IsNullOrWhiteSpace(author))
+                    label += $"  —  {author}";
+
+                var check = MakeCheck(label);
+                check.Location = new Point(36, y);
+                check.Width = 480;
+                check.Checked = enabled;
+                if (!string.IsNullOrWhiteSpace(id))
+                    _modChecks[id] = check;
+                card.Controls.Add(check);
+                y += 36;
+
+                if (!string.IsNullOrWhiteSpace(id) && !string.Equals(name, id, StringComparison.Ordinal))
+                {
+                    card.Controls.Add(new Label
+                    {
+                        Text = id,
+                        ForeColor = Color.FromArgb(140, NativeTheme.Sand),
+                        Font = NativeTheme.MakeNunito(12),
+                        Location = new Point(64, y - 6),
+                        Size = new Size(440, 18),
+                        BackColor = Color.Transparent,
+                    });
+                    y += 16;
+                }
+            }
+        }
+
+        if (!hasAny)
+        {
+            card.Controls.Add(new Label
+            {
+                Text = "(no mods found — open the folder and add a mod.json package)",
+                ForeColor = Color.FromArgb(160, NativeTheme.Sand),
+                Font = NativeTheme.MakeNunito(15),
+                Location = new Point(36, y),
+                Size = new Size(480, 48),
+                BackColor = Color.Transparent,
+            });
+            y += 56;
+        }
+
+        y += 8;
+        var open = MakePrimaryBtn("Open mods folder");
+        open.Size = new Size(200, 42);
+        open.Location = new Point(36, y);
+        open.Click += (_, _) => Emit(new { type = "openMods" });
+
+        var save = MakePrimaryBtn("Save");
+        save.Location = new Point(250, y);
+        save.Click += (_, _) =>
+        {
+            var enabled = _modChecks
+                .Where(kv => kv.Value is { IsDisposed: false, Checked: true })
+                .Select(kv => kv.Key)
+                .ToArray();
+            Emit(new { type = "saveMods", mods = enabled });
+            CloseSheet();
+        };
+        var back = MakeGhostBtn("Back");
+        back.Location = new Point(400, y);
+        back.Click += (_, _) => CloseSheet();
+        card.Controls.Add(open);
+        card.Controls.Add(save);
+        card.Controls.Add(back);
+        card.Height = Math.Min(720, y + 80);
+        OpenSheet(card);
         Emit(new { type = "getState" });
     }
 

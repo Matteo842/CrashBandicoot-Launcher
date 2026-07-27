@@ -32,7 +32,7 @@ internal sealed class ModsPopup : IPanel
         if (mods.Count == 0)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
-            ImGui.TextUnformatted("No mods loaded. Drop mods into the mods folder and restart.");
+            ImGui.TextUnformatted("No mods loaded. Enable mods in the launcher Mods menu, then restart.");
             ImGui.PopStyleColor();
         }
         else if (ImGui.BeginTable("##mods-table", 4,

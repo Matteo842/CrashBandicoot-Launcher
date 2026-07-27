@@ -211,6 +211,8 @@ def publish(out_dir: Path, rid: str) -> None:
     for junk in out_dir.glob("*.xml"):
         junk.unlink(missing_ok=True)
 
+    copy_example_mods(out_dir)
+
     bad: list[Path] = []
     for pattern in FORBIDDEN_GLOBS:
         bad.extend(out_dir.rglob(pattern))
@@ -238,12 +240,34 @@ def publish(out_dir: Path, rid: str) -> None:
     if is_windows:
         print(f'  1. Copy/run:  "{binary}"')
         print("  2. Select a valid .cue (+ .bin beside it)")
-        print("  3. Expect next to the exe: settings.json, save\\, game\\")
+        print("  3. Expect next to the exe: settings.json, save\\, game\\, mods\\")
     else:
         print(f"  1. Copy/run:  {binary} --run /path/to/game.cue")
         print("  2. Needs OpenGL 4.3+ + system OpenAL Soft (e.g. libopenal1)")
-        print("  3. Expect next to the binary: settings.json, save/, game/")
+        print("  3. Expect next to the binary: settings.json, save/, game/, mods/")
         print("  Note: graphical launcher UI is Windows-only; Linux is CLI + game window.")
+
+
+def copy_example_mods(out_dir: Path) -> None:
+    """Ship sample mods under out/mods (and examples/mods for EnsureCreated seeding)."""
+    src = ROOT / "examples" / "mods"
+    if not src.is_dir():
+        print("[publish] WARNING: examples/mods missing — skipping sample mods")
+        return
+
+    for dest_root in (out_dir / "mods", out_dir / "examples" / "mods"):
+        dest_root.mkdir(parents=True, exist_ok=True)
+        for child in src.iterdir():
+            if child.name.startswith("."):
+                continue
+            dest = dest_root / child.name
+            if dest.exists():
+                continue
+            if child.is_dir():
+                shutil.copytree(child, dest)
+            elif child.is_file():
+                shutil.copy2(child, dest)
+        print(f"[publish] sample mods → {dest_root.relative_to(out_dir)}")
 
 
 def main() -> None:
