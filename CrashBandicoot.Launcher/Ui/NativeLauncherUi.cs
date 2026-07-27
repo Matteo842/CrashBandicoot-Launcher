@@ -995,20 +995,20 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     {
         _prepOverlay = MakeDimHost();
         var prepCard = MakeCard(480, 180);
-        prepCard.Controls.Add(MakeTitle("Preparing game"));
+        prepCard.Controls.Add(MakeTitle("Preparing game", new Point(36, 12)));
         _prepDetail = new Label
         {
             Text = "Working from your disc…",
             ForeColor = Color.FromArgb(210, NativeTheme.Sand),
             Font = NativeTheme.MakeNunito(15),
-            Location = new Point(36, 110),
+            Location = new Point(36, 92),
             Size = new Size(480, 24),
             BackColor = Color.Transparent,
         };
         prepCard.Controls.Add(_prepDetail);
         var barBg = new Panel
         {
-            Location = new Point(36, 148),
+            Location = new Point(36, 130),
             Size = new Size(480, 12),
             BackColor = Color.FromArgb(20, 255, 255, 255),
         };
@@ -1025,7 +1025,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             Text = "First prepare writes into the game folder next to the exe. Your .cue + .bin must still be present to play.",
             ForeColor = Color.FromArgb(140, NativeTheme.Sand),
             Font = NativeTheme.MakeNunito(13),
-            Location = new Point(36, 176),
+            Location = new Point(36, 156),
             Size = new Size(480, 40),
             BackColor = Color.Transparent,
         });
@@ -1196,12 +1196,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     void ShowControls()
     {
         var card = MakeCard(560, 520);
-        card.AutoScroll = true;
-        card.Controls.Add(MakeTitle("Controls"));
-        card.Controls.Add(BodyLabel("Keyboard bindings (player 1). Saved to settings.json.", new Point(36, 110), 520, 28));
+        card.Controls.Add(MakeTitle("Controls", new Point(36, 12)));
+        card.Controls.Add(BodyLabel("Keyboard bindings (player 1). Saved to settings.json.", new Point(36, 88), 520, 28));
 
         _keyBoxes.Clear();
-        var y = 150;
+        var y = 126;
         foreach (var (label, id) in KeyFields)
         {
             card.Controls.Add(new Label
@@ -1225,11 +1224,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             };
             _keyBoxes[id] = box;
             card.Controls.Add(box);
-            y += 40;
+            y += 38;
         }
 
         var save = MakePrimaryBtn("Save");
-        save.Location = new Point(36, y + 16);
+        save.Location = new Point(36, y + 10);
         save.Click += (_, _) =>
         {
             var keys = new Dictionary<string, string>();
@@ -1239,11 +1238,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(210, y + 16);
+        back.Location = new Point(210, y + 10);
         back.Click += (_, _) => CloseSheet();
         card.Controls.Add(save);
         card.Controls.Add(back);
-        card.Height = Math.Min(640, y + 90);
+        card.Height = y + 70;
         OpenSheet(card);
         Emit(new { type = "getState" });
     }
