@@ -111,28 +111,22 @@ internal sealed class PauseMenuPopup : IPanel
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.TextUnformatted("Quick graphics");
-        ImGui.Spacing();
 
-        bool widescreen = Config.ConfigManager.View.Widescreen;
-        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
+        var game = Config.ConfigManager.Game;
+        float pct = game.MasterVolume * 100f;
+        if (ImGui.SliderFloat("Volume", ref pct, 0f, 100f, "%.0f%%"))
         {
-            Config.ConfigManager.View.Widescreen = widescreen;
-            HostWindow.ApplyWidescreen(widescreen);
-            Config.ConfigManager.SaveView(PanelManager.Panels);
+            game.MasterVolume = Math.Clamp(pct / 100f, 0f, 1f);
+            Audio.SetMasterVolume(game.Muted ? 0f : game.MasterVolume);
+            Config.ConfigManager.SaveGame();
         }
 
-        for (int i = 0; i < GraphicsPresets.Labels.Length; i++)
+        bool muted = game.Muted;
+        if (ImGui.Checkbox("Mute", ref muted))
         {
-            if (ImGui.Button(GraphicsPresets.Labels[i], new Vector2(-1, 0)))
-                GraphicsPresets.Apply(i);
-        }
-
-        if (ImGui.Button("More graphics…", new Vector2(-1, 0)))
-        {
-            open = false;
-            if (PanelManager.Get<DevMenuPopup>() is { } dev)
-                dev.OpenTo("rendering");
+            game.Muted = muted;
+            Audio.SetMasterVolume(muted ? 0f : game.MasterVolume);
+            Config.ConfigManager.SaveGame();
         }
 
         ImGui.Spacing();

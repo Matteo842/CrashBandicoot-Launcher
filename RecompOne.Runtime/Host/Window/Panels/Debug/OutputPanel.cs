@@ -85,15 +85,17 @@ internal sealed class OutputPanel : IPanel
 
     static Vector2 FitAspect(Vector2 src, Vector2 dst, bool integerScale)
     {
-        float scale = MathF.Min(dst.X / src.X, dst.Y / src.Y);
         if (integerScale && _texW > 0 && _texH > 0)
         {
-            // Floor to whole framebuffer pixels so upscale stays sharp.
-            float px = MathF.Floor(dst.X / _texW);
-            float py = MathF.Floor(dst.Y / _texH);
-            float i = MathF.Max(1f, MathF.Min(px, py));
-            return new Vector2(_texW * i, _texH * i);
+            // Largest whole-pixel scale that still fits. If the FB is bigger than the
+            // window (high internal res), fall back to fractional letterbox — never
+            // force 1:1 which overflows and looks like a huge zoom.
+            int i = (int)MathF.Floor(MathF.Min(dst.X / _texW, dst.Y / _texH));
+            if (i >= 1)
+                return new Vector2(_texW * i, _texH * i);
         }
+
+        float scale = MathF.Min(dst.X / src.X, dst.Y / src.Y);
         return src * scale;
     }
 }
