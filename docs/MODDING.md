@@ -2,7 +2,7 @@
 
 Mods are C# packages under a `mods/` folder next to the exe. At game start the runtime discovers them, optionally filters by launcher enable state, compiles with Roslyn, and installs MonoMod hooks before the recompiled EXE runs.
 
-Sample mods live in [`examples/mods/`](../examples/mods/) (currently `auto-spin`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
+Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
 
 ## Layout
 
@@ -12,6 +12,8 @@ mods/
     mod.json
     Something.cs
     Nested/More.cs
+    disc/                 # optional ISO path overlays (see Disc remap)
+      S0/MYFILE.NSD
   other-mod.zip          # zip root must contain mod.json
   .cache/                # compiled DLLs (auto-managed)
 ```
@@ -30,6 +32,8 @@ mods/
 
 - **id** — unique, used by `ActiveMods` and the cache filename.
 - **dependencies** — other mod ids that must load first (topo-sorted; missing deps skip the mod).
+
+Asset-only mods are allowed: if there are no `.cs` sources but a `disc/` folder (or zip entries under `disc/`) is present, the mod still loads and contributes disc remaps.
 
 ## Enable / disable (launcher)
 
@@ -114,9 +118,42 @@ Event.AddListener<VSyncEvent>(e => { /* after each waited vblank in LibEtc.VSync
 
 Other useful events: `DrawEnvEvent`, `DispEnvEvent`, `OverlayLoadedEvent`, `RuntimeReadyEvent`.
 
+## Disc remap
+
+Replace disc file reads without patching the user's `.bin` / `.cue`. Host files live under:
+
+```
+mods/<mod-id>/disc/<ISO-relative-path>
+```
+
+Example: `mods/my-patch/disc/S0/S000001E.NSD` redirects ISO path `S0/S000001E.NSD` (`;1` optional, case-insensitive).
+
+**How it works**
+
+1. After mods load, the runtime indexes each loaded mod's `disc/` tree (folders, or `disc/…` inside a `.zip`).
+2. Each host file is resolved with `CueFs.Locate` on the user's disc. If the path is missing, it is skipped (`[Disc] … not on disc, skipped`).
+3. Later `CdSearchFile` / sector reads / `ReadFile` (including BIOS open and boot) serve the host file when the LBA or path matches.
+4. **First match wins** using the same order as mod load (dependency topo-sort, then id). Later mods cannot override an already-remapped path (logged as `skip … already remapped`).
+5. Same-or-smaller replacements keep the original disc LBA; larger files get a virtual LBA so neighbors are not shadowed.
+6. Overlay bytes are treated as concatenated Mode1 user data (2048 bytes/sector). XA/FMV framed streams are not a supported authoring target yet (raw LBA intercept still applies if you supply matching sector payloads).
+
+Look for log lines:
+
+```
+[Mods] disc-overlay-stub v1.0.0: asset-only (disc overlay)
+[Disc] remap 'S0/FOO.NSD' ← disc-overlay-stub/disc/S0/FOO.NSD (disc-overlay-stub) lba=… size=…
+[Disc] 1 disc remap(s) active
+```
+
+Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, textures, or audio in the repo or releases. The stub sample only documents the folder layout.
+
 ## Sample: Auto Spin
 
 [`examples/mods/auto-spin`](../examples/mods/auto-spin) listens to `PadReadEvent` and, while Cross is held **in a gameplay level**, also presses Square (spin). It stays off on the warp map / title / menus / cinema so Cross can still confirm level select.
+
+## Sample: Disc Overlay Stub
+
+[`examples/mods/disc-overlay-stub`](../examples/mods/disc-overlay-stub) is asset-only (no C#). Put your own replacements under `disc/` mirroring ISO paths; see that folder's README.
 
 ## Tips
 

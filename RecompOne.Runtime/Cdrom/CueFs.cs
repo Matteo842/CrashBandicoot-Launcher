@@ -12,6 +12,9 @@ public sealed class CueFs : IDisposable
 
     public byte[] ReadFile(string path)
     {
+        if (DiscOverlay.TryReadFile(path, out var overlay))
+            return overlay;
+
         path = path.TrimStart('/', '\\');
         var parts = path.Split('/', '\\');
         var dir = Root();
@@ -36,6 +39,14 @@ public sealed class CueFs : IDisposable
     public string? FindFile(string name) => Search(Root(), "", name.ToUpperInvariant());
 
     public bool Locate(string name, out int lba, out uint size)
+    {
+        if (DiscOverlay.TryLocate(name, out lba, out size))
+            return true;
+        return LocateWithoutOverlay(name, out lba, out size);
+    }
+
+    /// <summary>ISO lookup only — used while building <see cref="DiscOverlay"/> so init cannot recurse.</summary>
+    public bool LocateWithoutOverlay(string name, out int lba, out uint size)
     {
         lba = 0;
         size = 0;
@@ -79,9 +90,19 @@ public sealed class CueFs : IDisposable
         return null;
     }
 
-    public byte[] ReadSector(int lba) => _bin.ReadSector(lba);
+    public byte[] ReadSector(int lba)
+    {
+        if (DiscOverlay.TryReadSectorData(lba, 2048, out var overlay))
+            return overlay;
+        return _bin.ReadSector(lba);
+    }
 
-    public byte[] ReadSectorData(int lba, int size) => _bin.ReadSectorData(lba, size);
+    public byte[] ReadSectorData(int lba, int size)
+    {
+        if (DiscOverlay.TryReadSectorData(lba, size, out var overlay))
+            return overlay;
+        return _bin.ReadSectorData(lba, size);
+    }
 
     public byte[] ReadSectors(int lba, int size) => ReadExtent(lba, size);
 
@@ -118,7 +139,8 @@ public sealed class CueFs : IDisposable
 
     private IEnumerable<Entry> Entries(Entry dir)
     {
-        var data = ReadExtent(dir.Lba, (int)dir.Size);
+        // Always read directory records from the real disc — overlays replace files, not ISO9660 dirs.
+        var data = ReadExtentFromBin(dir.Lba, (int)dir.Size);
         int i = 0;
         while (i < data.Length)
         {
@@ -132,6 +154,22 @@ public sealed class CueFs : IDisposable
     }
 
     private byte[] ReadExtent(int lba, int size)
+    {
+        var result = new byte[size];
+        int done = 0;
+        int cur = lba;
+        while (done < size)
+        {
+            // Goes through ReadSector so disc overlays apply to multi-sector file reads.
+            var sector = ReadSector(cur++);
+            int n = Math.Min(2048, size - done);
+            sector.AsSpan(0, n).CopyTo(result.AsSpan(done));
+            done += n;
+        }
+        return result;
+    }
+
+    private byte[] ReadExtentFromBin(int lba, int size)
     {
         var result = new byte[size];
         int done = 0;

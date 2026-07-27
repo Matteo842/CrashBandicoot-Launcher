@@ -4,6 +4,7 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Host;
 
@@ -70,15 +71,28 @@ public static class ModLoader
     {
         root ??= AppPaths.ModsDir;
         Directory.CreateDirectory(root);
+        DiscOverlay.Reset();
 
         var candidates = Discover(root);
-        if (candidates.Count == 0) return;
+        if (candidates.Count == 0)
+        {
+            InitDiscOverlay();
+            return;
+        }
 
         candidates = FilterActive(candidates);
-        if (candidates.Count == 0) return;
+        if (candidates.Count == 0)
+        {
+            InitDiscOverlay();
+            return;
+        }
 
         var ordered = Order(candidates);
-        if (ordered.Count == 0) return;
+        if (ordered.Count == 0)
+        {
+            InitDiscOverlay();
+            return;
+        }
 
         var cacheDir = Path.Combine(root, ".cache");
 
@@ -106,6 +120,15 @@ public static class ModLoader
         ModLoadingPopup.End();
 
         Console.WriteLine($"[Mods] loaded {_loaded.Count}/{ordered.Count} mod(s), {HookManager.HookedFunctionCount} function(s) hooked");
+        InitDiscOverlay();
+    }
+
+    static void InitDiscOverlay()
+    {
+        var cd = Runtime.Cd;
+        if (cd == null) return;
+        try { DiscOverlay.Initialize(cd.Fs, LoadedMods); }
+        catch (Exception ex) { Console.Error.WriteLine($"[Disc] overlay init failed: {ex.Message}"); }
     }
 
     /// <summary>
@@ -296,7 +319,14 @@ public static class ModLoader
         {
             if (mod.Sources.Count == 0)
             {
-                Console.Error.WriteLine($"[Mods] {mod.Info.Id}: no source files, skipping");
+                if (!HasDiscFolder(mod.Info.SourcePath))
+                {
+                    Console.Error.WriteLine($"[Mods] {mod.Info.Id}: no source files, skipping");
+                    return;
+                }
+
+                lock (_loaded) _loaded.Add((mod.Info, []));
+                Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: asset-only (disc overlay)");
                 return;
             }
 
@@ -399,5 +429,27 @@ public static class ModLoader
             }
         }
         return instances.ToArray();
+    }
+
+    static bool HasDiscFolder(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath)) return false;
+        if (Directory.Exists(sourcePath))
+            return Directory.Exists(Path.Combine(sourcePath, "disc"));
+        if (!File.Exists(sourcePath) || !sourcePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            return false;
+        try
+        {
+            using var zip = ZipFile.OpenRead(sourcePath);
+            return zip.Entries.Any(e =>
+            {
+                var n = e.FullName.Replace('\\', '/');
+                return n.StartsWith("disc/", StringComparison.OrdinalIgnoreCase) && !n.EndsWith('/');
+            });
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

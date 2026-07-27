@@ -69,6 +69,31 @@ x86/
 **/SCUS-94900*
 **/SCUS_949*
 
+# --- Disc overlay payloads (mod asset folders) -------------------------------
+# Infrastructure may ship disc/README.md stubs only. Never commit replacements
+# extracted from the retail disc (NSD/NSF/STR/XA/etc.).
+examples/mods/**/disc/**
+!examples/mods/**/disc/README.md
+!examples/mods/**/disc/**/README.md
+# Runtime mods folder at repo root only (bin/mods is already covered by bin/)
+/mods/
+
+# Common Crash disc asset extensions anywhere (belt and suspenders)
+*.NSD
+*.NSF
+*.nsd
+*.nsf
+*.VAB
+*.vab
+*.VH
+*.vh
+*.SEQ
+*.seq
+*.STR
+*.str
+*.XA
+*.xa
+
 # --- Recompiled / derived game code (derivative of retail EXE) ---------------
 # Generated C# from the recompiler — create only on the user's machine
 CrashBandicoot.Recompiled/**
