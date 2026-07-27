@@ -45,16 +45,6 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGuiEx.TextDisabled("F1 also toggles the menu bar");
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        if (ImGui.Button("Open full Settings…"))
-        {
-            if (PanelManager.Get<SettingsPopup>() is { } settings)
-                settings.IsOpen = true;
-        }
-        ImGuiEx.TextDisabled("Resolution / filter / audio live under Settings");
+        ImGuiEx.TextDisabled("Graphics presets / integer scale / VSync → Rendering");
     }
 }

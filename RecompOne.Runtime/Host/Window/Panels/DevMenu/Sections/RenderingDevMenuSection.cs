@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using RecompOne.Runtime.Config;
 
@@ -19,6 +20,78 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
 
     public void Draw()
     {
+        ImGui.TextUnformatted("Presets");
+        ImGui.Spacing();
+        for (int i = 0; i < GraphicsPresets.Labels.Length; i++)
+        {
+            if (ImGui.Button(GraphicsPresets.Labels[i], new Vector2(-1, 0)))
+                GraphicsPresets.Apply(i);
+        }
+        ImGuiEx.TextDisabled("One-click look — live, no restart");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        bool widescreen = ConfigManager.View.Widescreen;
+        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
+        {
+            ConfigManager.View.Widescreen = widescreen;
+            HostWindow.ApplyWidescreen(widescreen);
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGuiEx.TextDisabled("Expands FOV — does not stretch");
+
+        bool dedither = ConfigManager.View.Dedither;
+        if (ImGui.Checkbox("Dedither", ref dedither))
+        {
+            ConfigManager.View.Dedither = dedither;
+            Hle.GpuHle.Dedither = dedither;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        bool dejitter = ConfigManager.View.Dejitter;
+        if (ImGui.Checkbox("Dejitter", ref dejitter))
+        {
+            ConfigManager.View.Dejitter = dejitter;
+            Hle.GpuHle.Dejitter = dejitter;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        bool integer = ConfigManager.View.IntegerScale;
+        if (ImGui.Checkbox("Integer scaling", ref integer))
+        {
+            ConfigManager.View.IntegerScale = integer;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGuiEx.TextDisabled("Whole-pixel upscale — sharp, with black bars");
+
+        bool nearest = ConfigManager.View.PresentNearest;
+        if (ImGui.Checkbox("Crisp pixels (nearest)", ref nearest))
+        {
+            ConfigManager.View.PresentNearest = nearest;
+            Hle.GpuHle.PresentNearest = nearest;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGuiEx.TextDisabled("Nearest present filter — no blurry upscale");
+
+        bool vsync = ConfigManager.View.VSync;
+        if (ImGui.Checkbox("VSync", ref vsync))
+        {
+            ConfigManager.View.VSync = vsync;
+            HostWindow.ApplyVSync(vsync);
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGuiEx.TextDisabled("Reduces tearing; may add a frame of latency");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
         int scale = ConfigManager.View.InternalResolution;
         int idx = IndexOfScale(scale);
         if (ImGui.Combo("Internal resolution", ref idx, ResolutionLabels, ResolutionLabels.Length))
@@ -29,7 +102,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             ConfigManager.SaveView(PanelManager.Panels);
             NoticePopup.Show("You need to restart the application to apply this configuration");
         }
-        ImGuiEx.TextDisabled("Higher scales use more GPU VRAM (see System)");
+        ImGuiEx.TextDisabled("Higher scales use more GPU VRAM (see Engine)");
         if (ConfigManager.View.InternalResolution != Hle.GlVram.Scale)
             ImGuiEx.TextDisabled("restart required to apply");
 
@@ -52,6 +125,8 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
                 ConfigManager.SaveView(PanelManager.Panels);
             }
         }
+
+        ImGuiEx.TextDisabled("Filters auto-off on menus & cutscenes");
 
         ImGui.Spacing();
         ImGui.Separator();

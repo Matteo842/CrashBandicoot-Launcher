@@ -77,15 +77,23 @@ internal sealed class OutputPanel : IPanel
         if (_texId == 0 || _texW <= 0 || _texH <= 0) return;
 
         var avail = ImGui.GetContentRegionAvail();
-        var imageSize = FitAspect(new Vector2(_aspect, 1f), avail);
+        var imageSize = FitAspect(new Vector2(_aspect, 1f), avail, ConfigManager.View.IntegerScale);
         var offset = (avail - imageSize) * 0.5f;
         ImGui.SetCursorPos(ImGui.GetCursorPos() + offset);
         ImGui.Image((nint)_texId, imageSize);
     }
 
-    static Vector2 FitAspect(Vector2 src, Vector2 dst)
+    static Vector2 FitAspect(Vector2 src, Vector2 dst, bool integerScale)
     {
         float scale = MathF.Min(dst.X / src.X, dst.Y / src.Y);
+        if (integerScale && _texW > 0 && _texH > 0)
+        {
+            // Floor to whole framebuffer pixels so upscale stays sharp.
+            float px = MathF.Floor(dst.X / _texW);
+            float py = MathF.Floor(dst.Y / _texH);
+            float i = MathF.Max(1f, MathF.Min(px, py));
+            return new Vector2(_texW * i, _texH * i);
+        }
         return src * scale;
     }
 }

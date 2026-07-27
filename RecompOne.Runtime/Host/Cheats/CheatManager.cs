@@ -16,10 +16,11 @@ public static class CheatManager
     ];
 
     const uint MapLivesAddr = 0x800618EC;
+    const uint MapMaskAddr = 0x800618F0;
     const uint LevelSelectAddr = 0x80061948;
     const uint InstantSaveMenuAddr = 0x800A264C;
     // SCUS-94900: current level ID (cbhacks / GpuHle).
-    const uint LevelIdAddr = 0x80056710;
+    public const uint LevelIdAddr = 0x80056710;
     const uint TitleMenuMapLevel = 0x19;
 
     // Hold the instant-save poke for a few frames — a single write can be overwritten.
@@ -40,29 +41,41 @@ public static class CheatManager
         {
             // Map / continue stock.
             mem.WriteU16(MapLivesAddr, 99);
-            FreezeActiveLevelLives(mem);
+            if (TryFindActiveLevelLives(mem, out uint livesAddr))
+                mem.WriteU16(livesAddr, 99);
+        }
+
+        if (CheatConfig.InfiniteWumpa)
+        {
+            // GameShark: Wumpa is typically 4 bytes before the per-level lives field.
+            if (TryFindActiveLevelLives(mem, out uint livesAddr))
+                mem.WriteU16(livesAddr - 4, 99);
         }
 
         if (CheatConfig.LevelSelect)
             mem.WriteU8(LevelSelectAddr, 0x40);
     }
 
-    static void FreezeActiveLevelLives(Memory.IMemory mem)
+    /// <summary>
+    /// Finds the single active per-level lives counter. Ambiguous → false (avoid corruption).
+    /// </summary>
+    static bool TryFindActiveLevelLives(Memory.IMemory mem, out uint addr)
     {
+        addr = 0;
         uint best = 0;
         int matches = 0;
         int bestRank = 0;
 
-        foreach (var addr in LevelLivesAddrs)
+        foreach (var candidate in LevelLivesAddrs)
         {
-            ushort v = mem.ReadU16(addr);
+            ushort v = mem.ReadU16(candidate);
             // Active lives are a small count; 99 means we already froze this slot.
             int rank = v <= 10 ? 2 : v == 99 ? 1 : 0;
             if (rank == 0) continue;
             if (rank > bestRank)
             {
                 bestRank = rank;
-                best = addr;
+                best = candidate;
                 matches = 1;
             }
             else if (rank == bestRank)
@@ -71,14 +84,32 @@ public static class CheatManager
             }
         }
 
-        // Exactly one candidate → safe to freeze. Ambiguous → skip (avoid corruption).
-        if (matches == 1 && best != 0)
-            mem.WriteU16(best, 99);
+        if (matches != 1 || best == 0) return false;
+        addr = best;
+        return true;
     }
 
     public static void Give99LivesOnMap()
     {
         Runtime.Mem?.WriteU16(MapLivesAddr, 99);
+    }
+
+    /// <summary>Reset to 2nd Aku Aku mask on the warp map (GameShark 800618F0 0200).</summary>
+    public static void Give2ndMaskOnMap()
+    {
+        Runtime.Mem?.WriteU16(MapMaskAddr, 2);
+    }
+
+    /// <summary>
+    /// One-shot 99 Wumpa on the active level (livesAddr − 4). No-op if ambiguous.
+    /// </summary>
+    public static bool Give99Wumpa()
+    {
+        var mem = Runtime.Mem;
+        if (mem == null) return false;
+        if (!TryFindActiveLevelLives(mem, out uint livesAddr)) return false;
+        mem.WriteU16(livesAddr - 4, 99);
+        return true;
     }
 
     public static void OpenInstantSaveMenu()
@@ -87,11 +118,26 @@ public static class CheatManager
         Runtime.Mem?.WriteU16(InstantSaveMenuAddr, 4);
     }
 
+    public static bool TryGetLevelId(out uint levelId)
+    {
+        levelId = 0;
+        var mem = Runtime.Mem;
+        if (mem == null) return false;
+        try
+        {
+            levelId = mem.ReadU32(LevelIdAddr);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>True on title / menus / warp map / game over (level ID 0x19).</summary>
     public static bool IsOnTitleMenuMap()
     {
-        var mem = Runtime.Mem;
-        if (mem == null) return true;
-        return mem.ReadU32(LevelIdAddr) == TitleMenuMapLevel;
+        if (!TryGetLevelId(out uint id)) return true;
+        return id == TitleMenuMapLevel;
     }
 }

@@ -1,13 +1,14 @@
 using ImGuiNET;
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Host.Cheats;
 using RecompOne.Runtime.Host.Diagnostics;
 
 namespace RecompOne.Runtime.Host.Window;
 
-internal sealed class SystemDevMenuSection : IDevMenuSection
+internal sealed class EngineDevMenuSection : IDevMenuSection
 {
-    public string Id => "system";
-    public string Title => "System";
+    public string Id => "engine";
+    public string Title => "Engine";
     public int Order => 40;
 
     public void Draw()
@@ -70,6 +71,14 @@ internal sealed class SystemDevMenuSection : IDevMenuSection
         DrawGuest("ticks_elapsed", HostDiagnostics.GuestTicksElapsed);
         DrawGuest("frames_elapsed", HostDiagnostics.GuestFramesElapsed);
         DrawGuest("vblank counter", HostDiagnostics.GuestVblankCounter);
+        DrawGuest("title_state", HostDiagnostics.GuestTitleState);
+        DrawGuest("pads[0]", HostDiagnostics.GuestPads0);
+
+        if (CheatManager.TryGetLevelId(out uint levelId))
+            ImGui.Text($"level_id: {levelId}  (0x{CheatManager.LevelIdAddr:X8})");
+        else
+            ImGui.TextDisabled("level_id: —");
+
         ImGuiEx.TextDisabled($"GL scale active: {Hle.GlVram.Scale}x   RamLogger: {(Runtime.RamLog.IsAllocated ? "on" : "off")}");
     }
 

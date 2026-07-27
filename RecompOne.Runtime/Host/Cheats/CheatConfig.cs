@@ -11,6 +11,12 @@ public static class CheatConfig
         set => ConfigManager.View.SetBool("Cheat.InfiniteLives", value);
     }
 
+    public static bool InfiniteWumpa
+    {
+        get => ConfigManager.View.GetBool("Cheat.InfiniteWumpa");
+        set => ConfigManager.View.SetBool("Cheat.InfiniteWumpa", value);
+    }
+
     public static bool LevelSelect
     {
         get => ConfigManager.View.GetBool("Cheat.LevelSelect");

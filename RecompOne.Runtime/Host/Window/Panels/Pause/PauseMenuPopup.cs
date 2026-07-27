@@ -110,6 +110,33 @@ internal sealed class PauseMenuPopup : IPanel
 
         ImGui.Spacing();
         ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Quick graphics");
+        ImGui.Spacing();
+
+        bool widescreen = Config.ConfigManager.View.Widescreen;
+        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
+        {
+            Config.ConfigManager.View.Widescreen = widescreen;
+            HostWindow.ApplyWidescreen(widescreen);
+            Config.ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        for (int i = 0; i < GraphicsPresets.Labels.Length; i++)
+        {
+            if (ImGui.Button(GraphicsPresets.Labels[i], new Vector2(-1, 0)))
+                GraphicsPresets.Apply(i);
+        }
+
+        if (ImGui.Button("More graphics…", new Vector2(-1, 0)))
+        {
+            open = false;
+            if (PanelManager.Get<DevMenuPopup>() is { } dev)
+                dev.OpenTo("rendering");
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
         ImGuiEx.TextDisabled("Toggle: Esc");
 
         IsOpen = open;

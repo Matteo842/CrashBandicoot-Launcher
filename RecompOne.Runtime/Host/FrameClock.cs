@@ -9,9 +9,14 @@ internal static class FrameClock
     static readonly Stopwatch _clock = Stopwatch.StartNew();
     static double _nextFrameMs;
 
+    /// <summary>When true, skip software throttle (display VSync paces the frame).</summary>
+    public static bool SkipThrottle { get; set; }
+
     //maybe not the best but it seens to work for now
     public static void Throttle()
     {
+        if (SkipThrottle) return;
+
         _nextFrameMs += FrameMs;
         double now = _clock.Elapsed.TotalMilliseconds;
         double wait = _nextFrameMs - now;

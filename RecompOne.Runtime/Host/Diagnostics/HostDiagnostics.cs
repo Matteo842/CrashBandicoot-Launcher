@@ -17,6 +17,8 @@ internal static class HostDiagnostics
     public const uint GuestTicksElapsed = 0x80034520;
     public const uint GuestFramesElapsed = 0x80060E04;
     public const uint GuestVblankCounter = 0x800549F0;
+    public const uint GuestTitleState = 0x800618D4;
+    public const uint GuestPads0 = 0x8005E71C;
 
     public static double Fps => _fps;
 

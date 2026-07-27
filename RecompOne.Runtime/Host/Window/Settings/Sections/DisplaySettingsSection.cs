@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using RecompOne.Runtime.Config;
 
@@ -19,6 +20,18 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 
     public void Draw()
     {
+        ImGui.TextUnformatted("Presets");
+        for (int i = 0; i < GraphicsPresets.Labels.Length; i++)
+        {
+            if (ImGui.Button(GraphicsPresets.Labels[i], new Vector2(-1, 0)))
+                GraphicsPresets.Apply(i);
+        }
+        ImGui.TextDisabled("One-click look — live, no restart");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
         bool fullscreen = ConfigManager.View.Fullscreen;
         if (ImGui.Checkbox("Fullscreen", ref fullscreen))
         {
@@ -35,6 +48,34 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGui.TextDisabled("Expands the view — does not stretch");
+
+        bool integer = ConfigManager.View.IntegerScale;
+        if (ImGui.Checkbox("Integer scaling", ref integer))
+        {
+            ConfigManager.View.IntegerScale = integer;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Whole-pixel upscale — sharp, with black bars");
+
+        bool nearest = ConfigManager.View.PresentNearest;
+        if (ImGui.Checkbox("Crisp pixels (nearest)", ref nearest))
+        {
+            ConfigManager.View.PresentNearest = nearest;
+            Hle.GpuHle.PresentNearest = nearest;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        bool vsync = ConfigManager.View.VSync;
+        if (ImGui.Checkbox("VSync", ref vsync))
+        {
+            ConfigManager.View.VSync = vsync;
+            HostWindow.ApplyVSync(vsync);
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
 
         int scale = ConfigManager.View.InternalResolution;
         int idx = IndexOfScale(scale);

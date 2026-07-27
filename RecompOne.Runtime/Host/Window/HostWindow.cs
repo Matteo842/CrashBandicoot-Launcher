@@ -90,7 +90,7 @@ internal static class HostWindow
                 // Hide off-screen until SetParent — avoids a brief second-window flash.
                 Position = embed ? new Vector2D<int>(-32000, -32000) : new Vector2D<int>(100, 100),
                 Title = title,
-                VSync = false,
+                VSync = ConfigManager.View.VSync,
                 UpdatesPerSecond = 0,
                 FramesPerSecond = 0,
                 WindowBorder = embed ? WindowBorder.Hidden : WindowBorder.Resizable,
@@ -345,6 +345,15 @@ internal static class HostWindow
         Hle.GpuHle.RefreshWideFov();
     }
 
+    /// <summary>Enable/disable host swap-interval VSync and relax software frame throttle.</summary>
+    public static void ApplyVSync(bool on)
+    {
+        FrameClock.SkipThrottle = on;
+        if (_window == null) return;
+        try { _window.VSync = on; }
+        catch { /* some backends reject runtime changes */ }
+    }
+
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
 
     public static void RequestDiscPath() => _discPicker?.Show();
@@ -455,7 +464,9 @@ internal static class HostWindow
         Hle.GpuHle.TextureFilterStrength = ConfigManager.View.TextureFilterStrength;
         Hle.GpuHle.Dedither = ConfigManager.View.Dedither;
         Hle.GpuHle.Dejitter = ConfigManager.View.Dejitter;
+        Hle.GpuHle.PresentNearest = ConfigManager.View.PresentNearest;
         ApplyWidescreen(ConfigManager.View.Widescreen);
+        ApplyVSync(ConfigManager.View.VSync);
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 
@@ -479,10 +490,12 @@ internal static class HostWindow
         SettingsRegistry.Register(new AudioSettingsSection());
 
         DevMenuRegistry.Register(new CheatsDevMenuSection());
+        DevMenuRegistry.Register(new LevelsDevMenuSection());
         DevMenuRegistry.Register(new DisplayDevMenuSection());
         DevMenuRegistry.Register(new RenderingDevMenuSection());
+        DevMenuRegistry.Register(new AudioDevMenuSection());
         DevMenuRegistry.Register(new DebugDevMenuSection());
-        DevMenuRegistry.Register(new SystemDevMenuSection());
+        DevMenuRegistry.Register(new EngineDevMenuSection());
 
         _discPicker = new DiscPickerPopup();
         PanelManager.Register(_discPicker);

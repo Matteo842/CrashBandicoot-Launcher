@@ -20,6 +20,9 @@ public static class GpuHle
     public static bool Dedither { get; set; }
     public static bool Dejitter { get; set; }
 
+    /// <summary>Force nearest filtering on the present texture (crisp pixels when upscaled).</summary>
+    public static bool PresentNearest { get; set; }
+
     /// <summary>
     /// When widescreen is on, expand GTE horizontal FOV into side margins and present them.
     /// Off for Crash 1 non-gameplay levels (title/menu/map, intro, ending, completion):

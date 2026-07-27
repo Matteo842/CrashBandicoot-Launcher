@@ -170,6 +170,27 @@ public class ViewConfig
         set => SetBool("Widescreen", value);
     }
 
+    /// <summary>Scale the framebuffer by whole pixels only (no blurry fractional upscale).</summary>
+    public bool IntegerScale
+    {
+        get => GetBool("IntegerScale");
+        set => SetBool("IntegerScale", value);
+    }
+
+    /// <summary>Nearest sampling on the presented frame (crisp pixels). Default on at 1x internal.</summary>
+    public bool PresentNearest
+    {
+        get => GetBool("PresentNearest");
+        set => SetBool("PresentNearest", value);
+    }
+
+    /// <summary>Host swap-interval VSync (reduces tearing; may add input latency).</summary>
+    public bool VSync
+    {
+        get => GetBool("VSync");
+        set => SetBool("VSync", value);
+    }
+
     /// <summary>Host hotkey that opens/closes the Developer Menu (Silk Key name, e.g. F3).</summary>
     public string CheatMenuKey
     {

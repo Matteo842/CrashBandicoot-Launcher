@@ -522,7 +522,9 @@ public sealed class GlBackend : IGpuBackend
         int presentScale = GlVram.Scale;
         int fbW = w1x * presentScale;
         int fbH = h1x * presentScale;
-        EnsurePresentSize(fbW, fbH, presentScale <= 1);
+        // Nearest when native scale, or when the player asked for crisp pixels.
+        bool nearest = presentScale <= 1 || GpuHle.PresentNearest;
+        EnsurePresentSize(fbW, fbH, nearest);
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         _gl.Viewport(0, 0, (uint)fbW, (uint)fbH);
