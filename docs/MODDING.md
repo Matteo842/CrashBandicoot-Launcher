@@ -2,7 +2,7 @@
 
 Mods are C# packages under a `mods/` folder next to the exe. At game start the runtime discovers them, optionally filters by launcher enable state, compiles with Roslyn, and installs MonoMod hooks before the recompiled EXE runs.
 
-Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
+Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
 
 ## Layout
 
@@ -116,7 +116,7 @@ Event.AddListener<VSyncEvent>(e => { /* after each waited vblank in LibEtc.VSync
 
 `PadReadEvent` runs on both the BIOS pad buffer path and the LibPad refresh path, so filters apply whichever API the game uses.
 
-Other useful events: `DrawEnvEvent`, `DispEnvEvent`, `OverlayLoadedEvent`, `RuntimeReadyEvent`, `VramTransferEvent` (see below).
+Other useful events: `DrawEnvEvent`, `DispEnvEvent`, `OverlayLoadedEvent`, `RuntimeReadyEvent`, `VramTransferEvent` (see below), `SpuDmaEvent` (see below).
 
 ## VRAM transfer hook
 
@@ -145,6 +145,24 @@ Event.AddListener<VramTransferEvent>(e =>
 | `Move` | After VRAM→VRAM copy | `null` (coords only; `SrcX`/`SrcY` + `X`/`Y`) |
 
 No game textures are shipped. See [`examples/mods/vram-transfer-stub`](../examples/mods/vram-transfer-stub) for a logging sample.
+
+## SPU DMA hook
+
+When the game uploads **sound samples** (and related SPU data) from main RAM into the sound chip’s 512 KiB RAM, DMA channel 4 runs. `SpuDmaEvent` fires **after** the bytes are copied from main RAM and **before** they are written into SPU RAM — mutate `e.Data` to replace/patch audio.
+
+```csharp
+using RecompOne.Runtime.Events;
+
+Event.AddListener<SpuDmaEvent>(e =>
+{
+    // e.SpuAddr      — destination in SPU RAM (bytes)
+    // e.MainRamAddr  — source in main RAM
+    // e.Data / Length — mutable payload (often PS1 ADPCM / VAB chunks)
+    // Array.Clear(e.Data); // would silence this upload
+});
+```
+
+This is **not** an audio-pack format and does not ship game audio. See [`examples/mods/spu-dma-stub`](../examples/mods/spu-dma-stub).
 
 ## Disc remap
 
@@ -186,6 +204,10 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 ## Sample: VRAM Transfer Stub
 
 [`examples/mods/vram-transfer-stub`](../examples/mods/vram-transfer-stub) listens to `VramTransferEvent` and **draws a green check** into each Load upload (and a small HUD badge at the top-left of the display) so you can see the hook working. Disable the mod when you no longer want the overlay.
+
+## Sample: SPU DMA Stub
+
+[`examples/mods/spu-dma-stub`](../examples/mods/spu-dma-stub) logs the first SPU DMA uploads (`[SPU] DMA → …`). Enable it and play — console lines mean sample data is going through the hook.
 
 ## Tips
 

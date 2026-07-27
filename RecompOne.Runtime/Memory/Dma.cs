@@ -1,4 +1,5 @@
 using RecompOne.Runtime.Cdrom;
+using RecompOne.Runtime.Events;
 
 namespace RecompOne.Runtime.Memory;
 
@@ -100,12 +101,14 @@ public sealed class Dma
 
     void TransferSpu(uint madr, uint bcr, uint chcr)
     {
-        if ((chcr & 1u) == 0) return;
+        if ((chcr & 1u) == 0) return; // from-main-RAM only
         uint bytes = WordCount(bcr) * 4u;
         var buf = new byte[bytes];
         for (uint i = 0; i < bytes; i++)
             buf[i] = _mem.ReadU8(madr + i);
-        _spu.DmaWrite(_spu.TransferAddrBytes(), buf);
+        uint spuAddr = _spu.TransferAddrBytes();
+        buf = SpuDma.Filter(spuAddr, madr, buf);
+        _spu.DmaWrite(spuAddr, buf);
     }
 
     void TransferCd(uint madr, uint bcr)
