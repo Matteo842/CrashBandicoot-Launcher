@@ -134,7 +134,7 @@ Before you upload a release, check that you are shipping tools/UI only — **no*
 | `CrashBandicoot.Launcher/` | Native WinForms launcher (Windows) + CLI + local recomp pipeline |
 | `RecompOne.Runtime/` | PS1 HLE runtime (from RecompOne) |
 | `RecompOne.Recompiler/` | Recompiler library (from RecompOne) |
-| `examples/mods/` | Sample mods (`auto-spin`, `disc-overlay-stub`) — see [`docs/MODDING.md`](docs/MODDING.md) |
+| `examples/mods/` | Sample mods (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`) — see [`docs/MODDING.md`](docs/MODDING.md) |
 | `CrashBandicoot.Recompiled/` | Placeholder only (gitignored) — not used for consumer builds |
 
 ---

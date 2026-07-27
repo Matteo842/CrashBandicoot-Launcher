@@ -104,7 +104,12 @@ public sealed partial class Gpu
         int dx = (int)(_fifo[2] & 0x3FF), dy = (int)((_fifo[2] >> 16) & 0x1FF);
         int w = (int)(_fifo[3] & 0x3FF); if (w == 0) w = 0x400;
         int h = (int)((_fifo[3] >> 16) & 0x1FF); if (h == 0) h = 0x200;
-        if (HleOn) { HleCopy(sx, sy, dx, dy, w, h); return; }
+        if (HleOn)
+        {
+            HleCopy(sx, sy, dx, dy, w, h);
+            Events.VramTransfers.NotifyMove(sx, sy, dx, dy, w, h);
+            return;
+        }
         for (int row = 0; row < h; row++)
             for (int col = 0; col < w; col++)
             {
@@ -115,6 +120,7 @@ public sealed partial class Gpu
                 if (_setMask) px |= 0x8000;
                 Vram[d] = px;
             }
+        Events.VramTransfers.NotifyMove(sx, sy, dx, dy, w, h);
     }
 
     void BeginImageLoad()
@@ -133,7 +139,9 @@ public sealed partial class Gpu
     {
         if (!_loadImage) return;
         ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
-        if (!HleOn)   // gl mode uploads to gl vram via HleLoadPut
+        // Fast path: no HLE and no mod listeners — write soft VRAM immediately.
+        // HLE / hooked loads buffer via HleLoadPut and commit in HleLoadFlush.
+        if (!HleOn && !_hleLoadActive)
         {
             int x = (_loadX + (_loadPx % _loadW)) & (VramWidth - 1);
             int y = (_loadY + (_loadPx / _loadW)) & (VramHeight - 1);
@@ -153,14 +161,28 @@ public sealed partial class Gpu
         _readH = (int)((_fifo[2] >> 16) & 0x1FF); if (_readH == 0) _readH = 0x200;
         _readPx = 0;
         _readImage = true;
-        if (HleOn) HleReadback(_readX, _readY, _readW, _readH);
+        _readUseBuf = false;
+
+        if (HleOn)
+        {
+            HleReadback(_readX, _readY, _readW, _readH);
+            _readUseBuf = true;
+        }
+        else if (Events.VramTransfers.HasListeners)
+        {
+            CopySoftRectToReadBuf(_readX, _readY, _readW, _readH);
+            _readUseBuf = true;
+        }
+
+        if (_readUseBuf)
+            Events.VramTransfers.NotifyStore(_readX, _readY, _readW, _readH, _readBuf, _readW * _readH);
     }
 
     ushort ReadImageHalfword()
     {
         if (!_readImage) return 0;
         ushort v;
-        if (HleOn)
+        if (_readUseBuf)
             v = _readPx < _readBuf.Length ? _readBuf[_readPx] : (ushort)0;
         else
         {

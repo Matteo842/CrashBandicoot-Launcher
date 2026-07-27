@@ -79,14 +79,27 @@ public sealed partial class Gpu
         GpuHle.Backend!.ReadVram(x, y, w, h, _readBuf);
     }
 
-    //img load
+    void CopySoftRectToReadBuf(int x, int y, int w, int h)
+    {
+        int n = w * h;
+        if (_readBuf.Length < n) _readBuf = new ushort[n];
+        for (int i = 0; i < n; i++)
+        {
+            int px = (x + (i % w)) & (VramWidth - 1);
+            int py = (y + (i / w)) & (VramHeight - 1);
+            _readBuf[i] = Vram[py * VramWidth + px];
+        }
+    }
+
+    // img load buffer (HLE upload and/or VramTransferEvent hook)
     ushort[] _hleLoad = Array.Empty<ushort>();
     bool _hleLoadActive;
     int _hleLoadPos;
 
     void HleLoadBegin()
     {
-        _hleLoadActive = HleOn;
+        // Buffer when HLE/GL is on, or when a mod listens for VramTransferEvent.
+        _hleLoadActive = HleOn || Events.VramTransfers.HasListeners;
         if (!_hleLoadActive) return;
         int n = _loadW * _loadH;
         if (_hleLoad.Length < n) _hleLoad = new ushort[n];
@@ -101,7 +114,28 @@ public sealed partial class Gpu
     void HleLoadFlush()
     {
         if (!_hleLoadActive) return;
-        GpuHle.Backend!.WriteVram(_loadX, _loadY, _loadW, _loadH, _hleLoad.AsSpan(0, _loadW * _loadH));
+        int n = _loadW * _loadH;
+        var pixels = _hleLoad;
+        Events.VramTransfers.NotifyLoad(_loadX, _loadY, _loadW, _loadH, pixels, n);
+
+        var span = pixels.AsSpan(0, n);
+        if (HleOn)
+            GpuHle.Backend!.WriteVram(_loadX, _loadY, _loadW, _loadH, span);
+        else
+            WriteSoftLoadRect(span);
+
         _hleLoadActive = false;
+    }
+
+    void WriteSoftLoadRect(ReadOnlySpan<ushort> px)
+    {
+        for (int i = 0; i < px.Length; i++)
+        {
+            int x = (_loadX + (i % _loadW)) & (VramWidth - 1);
+            int y = (_loadY + (i / _loadW)) & (VramHeight - 1);
+            int idx = y * VramWidth + x;
+            if (_checkMask && (Vram[idx] & 0x8000) != 0) continue;
+            Vram[idx] = px[i];
+        }
     }
 }

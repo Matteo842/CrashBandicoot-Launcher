@@ -2,7 +2,7 @@
 
 Mods are C# packages under a `mods/` folder next to the exe. At game start the runtime discovers them, optionally filters by launcher enable state, compiles with Roslyn, and installs MonoMod hooks before the recompiled EXE runs.
 
-Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
+Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
 
 ## Layout
 
@@ -116,7 +116,35 @@ Event.AddListener<VSyncEvent>(e => { /* after each waited vblank in LibEtc.VSync
 
 `PadReadEvent` runs on both the BIOS pad buffer path and the LibPad refresh path, so filters apply whichever API the game uses.
 
-Other useful events: `DrawEnvEvent`, `DispEnvEvent`, `OverlayLoadedEvent`, `RuntimeReadyEvent`.
+Other useful events: `DrawEnvEvent`, `DispEnvEvent`, `OverlayLoadedEvent`, `RuntimeReadyEvent`, `VramTransferEvent` (see below).
+
+## VRAM transfer hook
+
+Fires on GP0 **LoadImage** (CPU→VRAM), **StoreImage** (VRAM→CPU), and **MoveImage** (VRAM→VRAM). This is the path for texture-style patches — **not** `RenderPrimEvent`.
+
+Works on both soft VRAM and the HLE/GL backend (including widescreen / filters): mods patch pixels **before** `WriteVram`.
+
+```csharp
+using RecompOne.Runtime.Events;
+
+Event.AddListener<VramTransferEvent>(e =>
+{
+    if (e.Direction != VramTransfer.Load) return;
+    if (e.Pixels == null) return;
+    // e.X/Y/W/H = destination rect in VRAM
+    // e.Pixels = BGR555, row-major, length e.PixelCount (== W*H)
+    // Mutate in place to replace the upload:
+    // for (int i = 0; i < e.PixelCount; i++) e.Pixels[i] = …;
+});
+```
+
+| Direction | When | `Pixels` |
+|-----------|------|----------|
+| `Load` | After DMA/GP0 filled the upload buffer, before soft/GL commit | Mutable upload |
+| `Store` | After readback into a buffer, before the game reads it | Mutable readback |
+| `Move` | After VRAM→VRAM copy | `null` (coords only; `SrcX`/`SrcY` + `X`/`Y`) |
+
+No game textures are shipped. See [`examples/mods/vram-transfer-stub`](../examples/mods/vram-transfer-stub) for a logging sample.
 
 ## Disc remap
 
@@ -154,6 +182,10 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 ## Sample: Disc Overlay Stub
 
 [`examples/mods/disc-overlay-stub`](../examples/mods/disc-overlay-stub) is asset-only (no C#). Put your own replacements under `disc/` mirroring ISO paths; see that folder's README.
+
+## Sample: VRAM Transfer Stub
+
+[`examples/mods/vram-transfer-stub`](../examples/mods/vram-transfer-stub) listens to `VramTransferEvent` and **draws a green check** into each Load upload (and a small HUD badge at the top-left of the display) so you can see the hook working. Disable the mod when you no longer want the overlay.
 
 ## Tips
 

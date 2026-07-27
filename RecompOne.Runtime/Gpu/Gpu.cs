@@ -40,6 +40,7 @@ public sealed partial class Gpu
 
     bool _readImage;
     int _readX, _readY, _readW, _readH, _readPx;
+    bool _readUseBuf;
     uint _gpuRead;
 
     bool _statField;
@@ -176,7 +177,7 @@ public sealed partial class Gpu
     void Reset()
     {
         _fifo.Clear();
-        _polyline = _loadImage = _readImage = false;
+        _polyline = _loadImage = _readImage = _readUseBuf = false;
         _displayDisabled = true;
         _dmaDir = 0;
         _texPageX = _texPageY = _texDepth = _blendMode = 0;
