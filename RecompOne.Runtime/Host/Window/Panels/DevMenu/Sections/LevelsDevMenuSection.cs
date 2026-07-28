@@ -1,4 +1,5 @@
 using ImGuiNET;
+using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Host.Cheats;
 
 namespace RecompOne.Runtime.Host.Window;
@@ -16,13 +17,18 @@ internal sealed class LevelsDevMenuSection : IDevMenuSection
         if (CheatManager.TryGetLevelId(out uint id))
         {
             ImGui.Text($"ID: {id}  (0x{id:X})");
-            if (CheatManager.IsOnTitleMenuMap())
+            if (Catalog.Levels.TryGet(id, out var info))
+            {
+                ImGui.Text($"{info.Name}");
+                ImGuiEx.TextDisabled($"slug: {info.Slug}  kind: {info.Kind}");
+            }
+            else if (CheatManager.IsOnTitleMenuMap())
                 ImGuiEx.TextDisabled("Title / menus / warp map / game over");
         }
         else
             ImGuiEx.TextDisabled("ID: — (no guest RAM)");
 
-        ImGuiEx.TextDisabled($"VA 0x{CheatManager.LevelIdAddr:X8}");
+        ImGuiEx.TextDisabled($"VA 0x{Catalog.LevelIdAddr:X8}");
         ImGui.Spacing();
         ImGuiEx.TextDisabled("Level Select and other cheats are under Cheats.");
     }

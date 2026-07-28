@@ -1,3 +1,4 @@
+using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Events;
 using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Memory;
@@ -10,13 +11,6 @@ using RecompOne.Runtime.Modding;
 /// </summary>
 public sealed class AutoSpinMod : IMod
 {
-    // SCUS-94900 (same gate as GpuHle widescreen / filters).
-    const uint LevelIdAddr = 0x80056710u;
-    const uint TitleMenuMap = 0x19u;
-    const uint LevelComplete = 0x2Du;
-    const uint IntroLevel = 0x38u;
-    const uint EndingLevel = 0x39u;
-
     public void OnLoad()
     {
         Event.AddListener<PadReadEvent>(OnPad);
@@ -39,10 +33,8 @@ public sealed class AutoSpinMod : IMod
 
     static bool InGameplayLevel(IMemory m)
     {
-        uint level = m.ReadU32(LevelIdAddr);
-        return level != TitleMenuMap
-            && level != LevelComplete
-            && level != IntroLevel
-            && level != EndingLevel;
+        uint level = m.ReadU32(Catalog.LevelIdAddr);
+        // Same gate as GpuHle widescreen / filters (titleMap / complete / cinema).
+        return !Catalog.Levels.IsUiOrCinema(level);
     }
 }

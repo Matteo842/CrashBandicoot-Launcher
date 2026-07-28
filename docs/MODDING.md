@@ -2,7 +2,7 @@
 
 Mods are C# packages under a `mods/` folder next to the exe. At game start the runtime discovers them, optionally filters by launcher enable state, compiles with Roslyn, and installs MonoMod hooks before the recompiled EXE runs.
 
-Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
+Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`, `catalog-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
 
 ## Layout
 
@@ -118,6 +118,92 @@ Event.AddListener<VSyncEvent>(e => { /* after each waited vblank in LibEtc.VSync
 
 Other useful events: `DrawEnvEvent`, `DispEnvEvent`, `OverlayLoadedEvent`, `RuntimeReadyEvent`, `VramTransferEvent` (see below), `SpuDmaEvent` (see below).
 
+## Asset catalogs
+
+Stable **ids** for levels / textures / sounds so mods can target assets by name instead of raw LBA / VRAM rect / SPU address. Reverse engineering fills the JSON once; modders consume ids. **No game textures or audio are shipped** — only metadata fingerprints.
+
+Embedded defaults live in `RecompOne.Runtime/Catalog/data/` (`levels.scus94900.json`, `textures.scus94900.json`, `sounds.scus94900.json`). Namespace: `RecompOne.Runtime.Catalogs`. Optional loose overrides: place the same filenames under `catalog/` next to the exe (full replace per file).
+
+### Levels
+
+Crash 1 (SCUS-94900) level table is seeded from [cbhacks Level ID](https://wiki.cbhacks.com/w/Level_ID). Each entry has `id`, `slug`, `name`, `kind`, and NSD `code`.
+
+`kind`: `gameplay` | `titleMap` | `complete` | `cinema` | `bonus` | `unused` | `empty`.
+
+Widescreen / filters / auto-spin treat `titleMap`, `complete`, and `cinema` as non-gameplay (same gate as before).
+
+```csharp
+using RecompOne.Runtime.Catalogs;
+
+if (Catalog.Levels.TryGetBySlug("n-sanity-beach", out var level))
+    Console.WriteLine($"{level.Id} {level.Name}");
+
+if (Catalog.Levels.TryGetCurrent(out var cur))
+    Console.WriteLine($"now: {cur.Slug}");
+
+bool ui = Catalog.Levels.IsUiOrCinema(id); // titleMap | complete | cinema
+```
+
+### Textures / sounds (fingerprints)
+
+Texture entries match VRAM **Load** uploads by optional `pixelHash` (SHA256 prefix of BGR555 pixels) and/or destination rect `(x,y,w,h)`, optionally scoped with `levelIds`. Sound entries match SPU DMA by optional `payloadHash` and/or `(spuAddr, length)`.
+
+Shipped DBs start **empty** — use discovery (below) or a future export tool to fill them.
+
+```json
+{
+  "game": "SCUS-94900",
+  "textures": [
+    {
+      "id": "crate_wood",
+      "match": { "x": 512, "y": 384, "w": 64, "h": 64 },
+      "pixelHash": "0123456789abcdef",
+      "levelIds": [9, 12]
+    }
+  ]
+}
+```
+
+```json
+{
+  "game": "SCUS-94900",
+  "sounds": [
+    {
+      "id": "spin",
+      "match": { "spuAddr": "0x1A000", "length": 2048 },
+      "payloadHash": null
+    }
+  ]
+}
+```
+
+```csharp
+if (Catalog.Textures.Resolve(e, out var tex) && tex != null)
+    Console.WriteLine($"matched {tex.Id}");
+
+if (Catalog.Sounds.Resolve(e, out var snd) && snd != null)
+    Console.WriteLine($"matched {snd.Id}");
+```
+
+### Discovery logging
+
+Set `"CatalogDiscovery": true` in `settings.json` (or `GameConfig.CatalogDiscovery`). Unknown VRAM Loads / SPU DMA uploads log once per fingerprint:
+
+```
+[Catalog] unknown texture rect=(512,0) 64x64 hash=… level=0x9 (n-sanity-beach)
+[Catalog] unknown sound spu=0x1A000 len=2048 hash=…
+```
+
+Paste those fingerprints into the JSON catalogs. Caps at 256 unique lines per session.
+
+### Roadmap (not in this release)
+
+1. Catalogs with stable ids — **done**
+2. PNG / WAV loaders applied via VRAM / SPU hooks
+3. Folder convention + `mod.json` assets (pack without C#)
+4. GUI/CLI export/replace from the user’s disc
+5. High-level API (`Textures.Replace("crate_wood", …)`) + hot-reload
+
 ## VRAM transfer hook
 
 Fires on GP0 **LoadImage** (CPU→VRAM), **StoreImage** (VRAM→CPU), and **MoveImage** (VRAM→VRAM). This is the path for texture-style patches — **not** `RenderPrimEvent`.
@@ -195,7 +281,11 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 
 ## Sample: Auto Spin
 
-[`examples/mods/auto-spin`](../examples/mods/auto-spin) listens to `PadReadEvent` and, while Cross is held **in a gameplay level**, also presses Square (spin). It stays off on the warp map / title / menus / cinema so Cross can still confirm level select.
+[`examples/mods/auto-spin`](../examples/mods/auto-spin) listens to `PadReadEvent` and, while Cross is held **in a gameplay level**, also presses Square (spin). It stays off on the warp map / title / menus / cinema so Cross can still confirm level select (uses `Catalog.Levels.IsUiOrCinema`).
+
+## Sample: Catalog Stub
+
+[`examples/mods/catalog-stub`](../examples/mods/catalog-stub) logs level slug/name changes and whether VRAM Loads / SPU DMA resolve to a catalog id. With empty texture/sound DBs you will see `unresolved` lines — useful while filling catalogs. Does not mutate pixels or audio.
 
 ## Sample: Disc Overlay Stub
 

@@ -1,3 +1,5 @@
+using RecompOne.Runtime.Catalogs;
+
 namespace RecompOne.Runtime.Events;
 
 /// <summary>Dispatches <see cref="SpuDmaEvent"/> for SPU DMA uploads.</summary>
@@ -12,15 +14,27 @@ public static class SpuDma
     /// </summary>
     public static byte[] Filter(uint spuAddr, uint mainRamAddr, byte[] data)
     {
-        if (!HasListeners || data.Length == 0) return data;
-        var e = Instance;
-        e.Context = Runtime.Cpu!;
-        e.Memory = Runtime.Mem!;
-        e.SpuAddr = spuAddr;
-        e.MainRamAddr = mainRamAddr;
-        e.Data = data;
-        e.Length = data.Length;
-        Event.Dispatch(e);
-        return e.Data ?? data;
+        if (data.Length == 0) return data;
+        bool discover = Catalog.DiscoveryEnabled;
+        if (!HasListeners && !discover) return data;
+
+        byte[] result = data;
+        if (HasListeners)
+        {
+            var e = Instance;
+            e.Context = Runtime.Cpu!;
+            e.Memory = Runtime.Mem!;
+            e.SpuAddr = spuAddr;
+            e.MainRamAddr = mainRamAddr;
+            e.Data = data;
+            e.Length = data.Length;
+            Event.Dispatch(e);
+            result = e.Data ?? data;
+        }
+
+        if (discover)
+            Catalog.ObserveSound(spuAddr, result);
+
+        return result;
     }
 }

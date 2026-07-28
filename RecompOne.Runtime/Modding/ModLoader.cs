@@ -4,6 +4,7 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Host;
@@ -71,6 +72,7 @@ public static class ModLoader
     {
         root ??= AppPaths.ModsDir;
         Directory.CreateDirectory(root);
+        Catalog.Initialize();
         DiscOverlay.Reset();
 
         var candidates = Discover(root);

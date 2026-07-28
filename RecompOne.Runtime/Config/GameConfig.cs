@@ -75,4 +75,10 @@ public class GameConfig
 
     /// <summary>Enabled mod ids when <see cref="ModsConfigured"/> is true. Empty = load none.</summary>
     public List<string> ActiveMods { get; set; } = [];
+
+    /// <summary>
+    /// When true, log unknown VRAM Load / SPU DMA uploads once per fingerprint
+    /// so catalogs can be filled without a GUI tool yet.
+    /// </summary>
+    public bool CatalogDiscovery { get; set; }
 }

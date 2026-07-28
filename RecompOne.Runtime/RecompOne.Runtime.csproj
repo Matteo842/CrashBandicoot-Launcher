@@ -10,6 +10,7 @@
     <ItemGroup>
       <EmbeddedResource Include="Bios\Fonts\font1.raw" />
       <EmbeddedResource Include="Bios\Fonts\font2.raw" />
+      <EmbeddedResource Include="Catalog\data\*.json" />
     </ItemGroup>
 
     <ItemGroup>

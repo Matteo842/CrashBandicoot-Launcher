@@ -1,3 +1,5 @@
+using RecompOne.Runtime.Catalogs;
+
 namespace RecompOne.Runtime.Host.Cheats;
 
 /// <summary>Applies cheat RAM writes for Crash Bandicoot NTSC-U (SCUS-94900).</summary>
@@ -19,9 +21,8 @@ public static class CheatManager
     const uint MapMaskAddr = 0x800618F0;
     const uint LevelSelectAddr = 0x80061948;
     const uint InstantSaveMenuAddr = 0x800A264C;
-    // SCUS-94900: current level ID (cbhacks / GpuHle).
+    // SCUS-94900: current level ID (cbhacks / GpuHle). Prefer Catalog.LevelIdAddr at runtime.
     public const uint LevelIdAddr = 0x80056710;
-    const uint TitleMenuMapLevel = 0x19;
 
     // Hold the instant-save poke for a few frames — a single write can be overwritten.
     static int _instantSaveHoldFrames;
@@ -119,25 +120,14 @@ public static class CheatManager
     }
 
     public static bool TryGetLevelId(out uint levelId)
-    {
-        levelId = 0;
-        var mem = Runtime.Mem;
-        if (mem == null) return false;
-        try
-        {
-            levelId = mem.ReadU32(LevelIdAddr);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+        => Catalog.Levels.TryReadCurrentId(out levelId);
 
-    /// <summary>True on title / menus / warp map / game over (level ID 0x19).</summary>
+    /// <summary>True on title / menus / warp map / game over (level kind titleMap).</summary>
     public static bool IsOnTitleMenuMap()
     {
         if (!TryGetLevelId(out uint id)) return true;
-        return id == TitleMenuMapLevel;
+        return Catalog.Levels.TryGet(id, out var info)
+            ? info.Kind == LevelKind.TitleMap
+            : id == 0x19u;
     }
 }

@@ -1,3 +1,5 @@
+using RecompOne.Runtime.Catalogs;
+
 namespace RecompOne.Runtime.Events;
 
 /// <summary>Dispatches <see cref="VramTransferEvent"/> for GPU image transfers.</summary>
@@ -20,19 +22,27 @@ public static class VramTransfers
         VramTransfer dir, int x, int y, int w, int h, int srcX, int srcY,
         ushort[]? pixels, int count)
     {
-        if (!HasListeners) return;
-        var e = Instance;
-        e.Context = Runtime.Cpu!;
-        e.Memory = Runtime.Mem!;
-        e.Direction = dir;
-        e.X = x;
-        e.Y = y;
-        e.W = w;
-        e.H = h;
-        e.SrcX = srcX;
-        e.SrcY = srcY;
-        e.Pixels = pixels;
-        e.PixelCount = count;
-        Event.Dispatch(e);
+        bool discover = dir == VramTransfer.Load && Catalog.DiscoveryEnabled;
+        if (!HasListeners && !discover) return;
+
+        if (HasListeners)
+        {
+            var e = Instance;
+            e.Context = Runtime.Cpu!;
+            e.Memory = Runtime.Mem!;
+            e.Direction = dir;
+            e.X = x;
+            e.Y = y;
+            e.W = w;
+            e.H = h;
+            e.SrcX = srcX;
+            e.SrcY = srcY;
+            e.Pixels = pixels;
+            e.PixelCount = count;
+            Event.Dispatch(e);
+        }
+
+        if (discover)
+            Catalog.ObserveTextureLoad(x, y, w, h, pixels, count);
     }
 }

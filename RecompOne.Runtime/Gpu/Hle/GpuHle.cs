@@ -1,3 +1,5 @@
+using RecompOne.Runtime.Catalogs;
+
 namespace RecompOne.Runtime.Hle;
 
 public static class GpuHle
@@ -42,16 +44,8 @@ public static class GpuHle
     /// <summary>Same gate — 2D UI is not GTE-projected; skip cache lookups there.</summary>
     public static bool DejitterActive { get; private set; }
 
-    // SCUS-94900: current level ID (cbhacks Memory Map).
-    const uint Crash1LevelIdAddr = 0x80056710u;
-    const uint Crash1TitleMenuMap = 0x19u; // title, menus, map, game over
-    const uint Crash1LevelComplete = 0x2Du;
-    const uint Crash1IntroLevel = 0x38u;   // Naughty Dog house / opening cinema
-    const uint Crash1EndingLevel = 0x39u;
-
-    static bool IsUiOrCinemaLevel(uint level) =>
-        level == Crash1TitleMenuMap || level == Crash1LevelComplete
-        || level == Crash1IntroLevel || level == Crash1EndingLevel;
+    // SCUS-94900: current level ID — see Catalog.Levels (cbhacks Memory Map).
+    static bool IsUiOrCinemaLevel(uint level) => Catalog.Levels.IsUiOrCinema(level);
 
     /// <summary>Call once per frame (e.g. PutDrawEnv) before GTE draws.</summary>
     public static void RefreshWideFov()
@@ -59,7 +53,7 @@ public static class GpuHle
         bool uiOrCinema = false;
         var m = Runtime.Mem;
         if (m != null)
-            uiOrCinema = IsUiOrCinemaLevel(m.ReadU32(Crash1LevelIdAddr));
+            uiOrCinema = IsUiOrCinemaLevel(m.ReadU32(Catalog.LevelIdAddr));
 
         WideFovActive = WideAspect > 0f && !uiOrCinema;
 
