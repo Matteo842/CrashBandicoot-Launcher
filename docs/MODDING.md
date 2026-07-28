@@ -252,12 +252,40 @@ Set `"CatalogDiscovery": true` in `settings.json` (or `GameConfig.CatalogDiscove
 
 Paste those fingerprints into the JSON catalogs. Caps at 256 unique lines per session.
 
+When discovery is on, each unknown Load is also written once under `captures/textures/`:
+
+```
+captures/textures/r512_0_64x64_<hash16>.png
+captures/textures/r512_0_64x64_<hash16>.json   # rect, pixelHash, level
+```
+
+Use those PNGs with the ModTools CLI (`add-texture --from-capture`). Captures are local only — do not commit game art.
+
+### Export / scaffold tools (CLI)
+
+Project: [`tools/CrashBandicoot.ModTools`](../tools/CrashBandicoot.ModTools/). Operates on the user’s disc / captures only; never ships retail assets.
+
+```bash
+dotnet run --project tools/CrashBandicoot.ModTools -- scaffold --id my-pack [--name "My Pack"] [--out ./mods]
+dotnet run --project tools/CrashBandicoot.ModTools -- export-disc --iso S0/FOO.NSD --mod my-pack --cue path/to/game.cue [--out ./mods]
+dotnet run --project tools/CrashBandicoot.ModTools -- add-texture --mod my-pack --id crate_wood --png ./edit.png [--out ./mods]
+dotnet run --project tools/CrashBandicoot.ModTools -- add-texture --mod my-pack --id crate_wood --from-capture ./captures/textures/r….png [--out ./mods]
+```
+
+| Command | Effect |
+|---------|--------|
+| `scaffold` | Creates `mods/<id>/` with declared `assets` (`textures`/`audio`/`disc` empty arrays) + empty folders. Asset-only (no C#). |
+| `export-disc` | Reads an ISO path from the user’s `.cue` (real bin, no overlay) into `disc/<ISO-path>` and merges `assets.disc`. `--cue` optional if `settings.json` `CdPath` is findable. |
+| `add-texture` | Copies a PNG to `textures/<id>.png` and merges `assets.textures`. `--from-capture` accepts a file or a directory with exactly one PNG. |
+
+Default `--out` is `./mods` (cwd). Each command prints the updated `assets` snippet. WAV→SPU apply is still open — `audio/` is reserved for later.
+
 ### Roadmap
 
 1. Catalogs with stable ids — **done**
 2. PNG loaders applied via VRAM hooks — **done** (WAV / SPU still open)
 3. Folder convention + `mod.json` `assets` packs — **done** (WAV→SPU still open)
-4. GUI/CLI export/replace from the user’s disc
+4. CLI export/replace from the user’s disc — **done** (see below)
 5. Hot-reload for replacements
 ## VRAM transfer hook
 

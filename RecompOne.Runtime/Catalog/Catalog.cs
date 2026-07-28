@@ -140,7 +140,46 @@ public static class Catalog
         string level = FormatCurrentLevel();
         Console.WriteLine(
             $"[Catalog] unknown texture rect=({x},{y}) {w}x{h} hash={hash} level={level}");
+
+        if (pixels != null && count > 0 && w > 0 && h > 0 && count >= w * h)
+            TryDumpTextureCapture(x, y, w, h, hash, level, pixels.AsSpan(0, w * h));
     }
+
+    static void TryDumpTextureCapture(
+        int x, int y, int w, int h, string hash, string level, ReadOnlySpan<ushort> pixels)
+    {
+        try
+        {
+            string safeHash = hash == "n/a" ? "na" : hash;
+            string stem = $"r{x}_{y}_{w}x{h}_{safeHash}";
+            string dir = AppPaths.TextureCapturesDir;
+            Directory.CreateDirectory(dir);
+            string pngPath = Path.Combine(dir, stem + ".png");
+            if (File.Exists(pngPath)) return;
+
+            if (!PngBgr555.TryEncodeFile(pngPath, pixels, w, h))
+                return;
+
+            string metaPath = Path.Combine(dir, stem + ".json");
+            var meta =
+                $"{{\n" +
+                $"  \"rect\": {{ \"x\": {x}, \"y\": {y}, \"w\": {w}, \"h\": {h} }},\n" +
+                $"  \"pixelHash\": \"{safeHash}\",\n" +
+                $"  \"level\": \"{EscapeJson(level)}\",\n" +
+                $"  \"file\": \"{stem}.png\"\n" +
+                "}\n";
+            File.WriteAllText(metaPath, meta);
+            Console.WriteLine($"[Catalog] capture → captures/textures/{stem}.png");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Catalog] capture failed: {ex.Message}");
+        }
+    }
+
+    static string EscapeJson(string s) =>
+        s.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
 
     /// <summary>Called from SPU DMA path when discovery is on.</summary>
     internal static void ObserveSound(uint spuAddr, ReadOnlySpan<byte> data)

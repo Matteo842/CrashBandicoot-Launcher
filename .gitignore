@@ -77,6 +77,8 @@ examples/mods/**/disc/**
 !examples/mods/**/disc/**/README.md
 # Runtime mods folder at repo root only (bin/mods is already covered by bin/)
 /mods/
+# CatalogDiscovery texture dumps (local user captures — never commit game art)
+/captures/
 
 # Common Crash disc asset extensions anywhere (belt and suspenders)
 *.NSD
@@ -158,3 +160,4 @@ TODO.local.md
 run.bat
 docs/HANDOFF_MODDING_P3_ASSETS.md
 docs/HANDOFF_MODDING_P4_TOOLS.md
+docs/HANDOFF_MODDING_P5_HOTRELOAD.md

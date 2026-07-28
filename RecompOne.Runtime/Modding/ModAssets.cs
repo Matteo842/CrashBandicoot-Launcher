@@ -10,6 +10,7 @@ public sealed class ModAssets
     [JsonPropertyName("audio")] public ModAudioAsset[]? Audio { get; set; }
     [JsonPropertyName("disc")] public ModDiscAsset[]? Disc { get; set; }
 
+    [JsonIgnore]
     public bool HasAnyDeclared =>
         (Textures is { Length: > 0 }) ||
         (Audio is { Length: > 0 }) ||

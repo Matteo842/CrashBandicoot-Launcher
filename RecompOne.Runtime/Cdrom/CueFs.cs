@@ -14,14 +14,15 @@ public sealed class CueFs : IDisposable
     {
         if (DiscOverlay.TryReadFile(path, out var overlay))
             return overlay;
+        return ReadFileWithoutOverlay(path);
+    }
 
-        path = path.TrimStart('/', '\\');
-        var parts = path.Split('/', '\\');
-        var dir = Root();
-        for (int i = 0; i < parts.Length - 1; i++)
-            dir = Find(dir, StripVersion(parts[i]), true);
-        var file = Find(dir, StripVersion(parts[^1]), false);
-        return ReadExtent(file.Lba, (int)file.Size);
+    /// <summary>ISO file bytes from the real .bin only (ignores <see cref="DiscOverlay"/>).</summary>
+    public byte[] ReadFileWithoutOverlay(string path)
+    {
+        var entry = LocateEntry(path)
+            ?? throw new FileNotFoundException($"File not found: {path}");
+        return ReadExtentFromBin(entry.Lba, (int)entry.Size);
     }
 
     private static string StripVersion(string name)

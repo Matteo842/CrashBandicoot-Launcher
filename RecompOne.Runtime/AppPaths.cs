@@ -28,6 +28,9 @@ public static class AppPaths
     public static string LogsDir => Path.Combine(Root, "logs");
     /// <summary>Optional loose catalog JSON overrides (levels/textures/sounds.scus94900.json).</summary>
     public static string CatalogDir => Path.Combine(Root, "catalog");
+    /// <summary>CatalogDiscovery texture PNG dumps (local only; do not ship).</summary>
+    public static string CapturesDir => Path.Combine(Root, "captures");
+    public static string TextureCapturesDir => Path.Combine(CapturesDir, "textures");
     public static string SettingsPath => Path.Combine(Root, "settings.json");
     public static string InterfacePath => Path.Combine(Root, "interface.ini");
     public static string CardAPath => Path.Combine(SaveDir, "carda.sav");
