@@ -26,6 +26,26 @@ public sealed class SoundsCatalog
         return _byId.TryGetValue(id, out info!);
     }
 
+    /// <summary>
+    /// Reserved: WAV→SPU sound replace is not implemented yet.
+    /// Declared so modders can call a stable API; currently logs and no-ops.
+    /// </summary>
+    public void Replace(string id, string wavPath)
+    {
+        Console.WriteLine(
+            $"[Sounds] Replace('{id}', '{wavPath}') — WAV→SPU not implemented yet (ignored)");
+    }
+
+    /// <summary>Reserved: WAV→SPU not implemented yet.</summary>
+    public void Replace(string id, ReadOnlySpan<byte> wavBytes)
+    {
+        Console.WriteLine(
+            $"[Sounds] Replace('{id}', {wavBytes.Length} bytes) — WAV→SPU not implemented yet (ignored)");
+    }
+
+    /// <summary>Reserved: no-op until WAV→SPU lands.</summary>
+    public void ClearReplace(string id) { }
+
     public bool Resolve(Events.SpuDmaEvent e, out SoundInfo? info)
     {
         info = null;

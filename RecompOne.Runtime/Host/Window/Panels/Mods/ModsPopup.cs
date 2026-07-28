@@ -1,5 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
+using RecompOne.Runtime.Catalogs;
+using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Host.Window;
 
 namespace RecompOne.Runtime.Modding;
@@ -26,6 +28,27 @@ internal sealed class ModsPopup : IPanel
 
         var mods = ModLoader.LoadedMods;
         ImGui.TextUnformatted($"{mods.Count} mod(s) loaded");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"· {TextureReplacements.Count} tex · {DiscOverlay.RemapCount} disc");
+
+        if (ImGui.Button("Reload assets"))
+            ModLoader.ReloadAssets();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Re-read mod.json + PNG/disc packs without restarting.\nC# hooks are not recompiled.");
+
+        if (ModLoader.LastAssetReloadUtc is { } when)
+        {
+            ImGui.SameLine();
+            var local = when.ToLocalTime().ToString("HH:mm:ss");
+            ImGui.TextDisabled($"last reload {local} ({ModLoader.LastAssetReloadTextureCount} tex, {ModLoader.LastAssetReloadDiscCount} disc)");
+        }
+
+        if (AssetHotReload.IsWatching)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled("· watching");
+        }
+
         ImGui.Separator();
         ImGui.Spacing();
 

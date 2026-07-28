@@ -59,6 +59,9 @@ internal static class MainMenuBar
         if (ImGui.MenuItem("Mods..."))
             if (PanelManager.Get<Modding.ModsPopup>() is { } popup) popup.IsOpen = true;
 
+        if (ImGui.MenuItem("Reload assets"))
+            Modding.ModLoader.ReloadAssets();
+
         ImGui.EndMenu();
     }
 

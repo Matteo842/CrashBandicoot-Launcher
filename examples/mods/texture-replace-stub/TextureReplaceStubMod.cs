@@ -20,15 +20,9 @@ public sealed class TextureReplaceStubMod : IMod
 
     public void OnLoad()
     {
-        // Folder scan already registered PNGs; pull decoded pixels for the corner stamp.
-        if (TextureReplacements.TryGet("demo_tile_a", out var px, out int w, out int h))
-        {
-            _stamp = px;
-            _stampW = w;
-            _stampH = h;
-        }
-
+        RefreshStamp();
         Event.AddListener<VramTransferEvent>(OnVram);
+        Event.AddListener<AssetsReloadedEvent>(OnAssetsReloaded);
         Console.WriteLine(
             "[texture-replace-stub] PNG stamp on Loads ≥16×16 (magenta checker corner)" +
             (_stamp != null ? "" : " — WARNING: demo_tile_a not registered"));
@@ -37,6 +31,27 @@ public sealed class TextureReplaceStubMod : IMod
     public void OnUnload()
     {
         Event.RemoveListener<VramTransferEvent>(OnVram);
+        Event.RemoveListener<AssetsReloadedEvent>(OnAssetsReloaded);
+    }
+
+    void OnAssetsReloaded(AssetsReloadedEvent e)
+    {
+        RefreshStamp();
+        _announced = false;
+        Console.WriteLine(
+            $"[texture-replace-stub] assets reloaded ({e.TextureCount} tex) — stamp refreshed" +
+            (_stamp != null ? "" : " — WARNING: demo_tile_a missing"));
+    }
+
+    void RefreshStamp()
+    {
+        _stamp = null;
+        if (TextureReplacements.TryGet("demo_tile_a", out var px, out int w, out int h))
+        {
+            _stamp = px;
+            _stampW = w;
+            _stampH = h;
+        }
     }
 
     void OnVram(VramTransferEvent e)

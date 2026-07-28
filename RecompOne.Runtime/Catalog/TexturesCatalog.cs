@@ -1,4 +1,5 @@
 using System.Text.Json;
+using RecompOne.Runtime.Modding;
 
 namespace RecompOne.Runtime.Catalogs;
 
@@ -40,6 +41,7 @@ public sealed class TexturesCatalog
     /// <summary>
     /// Register a PNG replacement for a catalog texture id (RGBA→BGR555).
     /// Applied automatically on matching VRAM Loads (see <see cref="TextureReplacements"/>).
+    /// Overwrites any prior registration for <paramref name="id"/>.
     /// </summary>
     public void Replace(string id, ReadOnlySpan<byte> pngBytes)
     {
@@ -54,8 +56,70 @@ public sealed class TexturesCatalog
             Console.Error.WriteLine($"[Textures] Replace failed for id={id} path={pngPath}");
     }
 
+    /// <summary>
+    /// Batch-register PNG file replacements. Each entry overwrites that id.
+    /// Returns how many succeeded.
+    /// </summary>
+    public int ReplaceMany(IEnumerable<(string id, string pngPath)> entries)
+    {
+        int n = 0;
+        foreach (var (id, path) in entries)
+        {
+            if (TextureReplacements.TryRegisterPngFile(id, path)) n++;
+            else
+                Console.Error.WriteLine($"[Textures] ReplaceMany failed for id={id} path={path}");
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// Batch-register PNG bytes. Each entry overwrites that id.
+    /// Returns how many succeeded.
+    /// </summary>
+    public int ReplaceMany(IEnumerable<(string id, byte[] pngBytes)> entries)
+    {
+        int n = 0;
+        foreach (var (id, bytes) in entries)
+        {
+            if (bytes == null || !TextureReplacements.TryRegisterPng(id, bytes))
+                Console.Error.WriteLine($"[Textures] ReplaceMany failed to decode PNG for id={id}");
+            else
+                n++;
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// Register every <c>*.png</c> in <paramref name="directory"/> (non-recursive);
+    /// file stem = catalog id. Overwrites existing ids. Returns how many succeeded.
+    /// </summary>
+    public int ReplaceDirectory(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return 0;
+        int n = 0;
+        foreach (var file in Directory.EnumerateFiles(directory, "*.png", SearchOption.TopDirectoryOnly))
+        {
+            var id = Path.GetFileNameWithoutExtension(file);
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (TextureReplacements.TryRegisterPngFile(id, file)) n++;
+            else
+                Console.Error.WriteLine($"[Textures] ReplaceDirectory failed for {file}");
+        }
+        return n;
+    }
+
     /// <summary>Remove a previously registered replacement.</summary>
     public void ClearReplace(string id) => TextureReplacements.Remove(id);
+
+    /// <summary>Clear all PNG replacements (does not touch disc overlays).</summary>
+    public void ClearAllReplaces() => TextureReplacements.Clear();
+
+    /// <summary>
+    /// Hot-reload texture + disc asset packs for already-loaded mods
+    /// (see <see cref="ModLoader.ReloadAssets"/>).
+    /// </summary>
+    public bool ReloadModAssets() => ModLoader.ReloadAssets();
+
 
     internal bool TryResolve(
         int x, int y, int w, int h, ushort[]? pixels, int count, out TextureInfo info)

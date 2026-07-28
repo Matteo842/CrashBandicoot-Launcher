@@ -7,6 +7,7 @@ using System.Text.Json;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Events;
 using RecompOne.Runtime.Host;
 
 namespace RecompOne.Runtime.Modding;
@@ -15,13 +16,23 @@ public static class ModLoader
 {
     sealed record Candidate(ModInfo Info, List<(string Path, string Text)> Sources);
     static readonly List<(ModInfo Info, IMod[] Instances)> _loaded = [];
+    static readonly object _reloadGate = new();
     static readonly JsonSerializerOptions _json = new()
     {
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true
     };
-    
+
+    /// <summary>UTC of the last successful <see cref="ReloadAssets"/> (null if never).</summary>
+    public static DateTime? LastAssetReloadUtc { get; private set; }
+
+    /// <summary>Texture replacements registered by the last <see cref="ReloadAssets"/>.</summary>
+    public static int LastAssetReloadTextureCount { get; private set; }
+
+    /// <summary>Disc remaps active after the last <see cref="ReloadAssets"/>.</summary>
+    public static int LastAssetReloadDiscCount { get; private set; }
+
     public static IReadOnlyList<ModInfo> LoadedMods
     {
         get { lock (_loaded) return _loaded.Select(l => l.Info).ToArray(); }
@@ -80,6 +91,7 @@ public static class ModLoader
         if (candidates.Count == 0)
         {
             InitDiscOverlay();
+            AssetHotReload.Start();
             return;
         }
 
@@ -87,6 +99,7 @@ public static class ModLoader
         if (candidates.Count == 0)
         {
             InitDiscOverlay();
+            AssetHotReload.Start();
             return;
         }
 
@@ -94,6 +107,7 @@ public static class ModLoader
         if (ordered.Count == 0)
         {
             InitDiscOverlay();
+            AssetHotReload.Start();
             return;
         }
 
@@ -124,6 +138,103 @@ public static class ModLoader
 
         Console.WriteLine($"[Mods] loaded {_loaded.Count}/{ordered.Count} mod(s), {HookManager.HookedFunctionCount} function(s) hooked");
         InitDiscOverlay();
+        AssetHotReload.Start();
+    }
+
+    /// <summary>
+    /// Re-read <c>mod.json</c> assets for already-loaded mods, clear and re-register
+    /// PNG texture replacements and disc overlays (first-wins / load order preserved).
+    /// Does <b>not</b> recompile C# or reinstall hooks. Safe to call mid-session.
+    /// </summary>
+    /// <returns>True when reload completed (even if zero assets).</returns>
+    public static bool ReloadAssets()
+    {
+        lock (_reloadGate)
+        {
+            ModInfo[] mods;
+            lock (_loaded) mods = _loaded.Select(l => l.Info).ToArray();
+
+            foreach (var mod in mods)
+                RefreshManifestAssets(mod);
+
+            TextureReplacements.Clear();
+            int tex = 0;
+            foreach (var mod in mods)
+            {
+                try { tex += TextureReplacements.RegisterFromMod(mod); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[Mods] {mod.Id}: texture reload failed: {ex.Message}");
+                }
+                WarnAudioAssets(mod);
+            }
+
+            InitDiscOverlay();
+            int disc = DiscOverlay.RemapCount;
+
+            LastAssetReloadUtc = DateTime.UtcNow;
+            LastAssetReloadTextureCount = tex;
+            LastAssetReloadDiscCount = disc;
+
+            Console.WriteLine(
+                $"[Mods] assets reloaded: {tex} texture replace(s), {disc} disc remap(s)" +
+                $" ({mods.Length} mod(s))");
+
+            try
+            {
+                Event.Dispatch(new AssetsReloadedEvent
+                {
+                    TextureCount = tex,
+                    DiscRemapCount = disc,
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Mods] AssetsReloadedEvent failed: {ex.Message}");
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>Re-parse <c>mod.json</c> from disk/zip so <see cref="ModInfo.Assets"/> picks up edits.</summary>
+    static void RefreshManifestAssets(ModInfo info)
+    {
+        if (string.IsNullOrWhiteSpace(info.SourcePath)) return;
+        try
+        {
+            string? json = null;
+            if (Directory.Exists(info.SourcePath))
+            {
+                var path = Path.Combine(info.SourcePath, "mod.json");
+                if (!File.Exists(path)) return;
+                json = File.ReadAllText(path);
+            }
+            else if (File.Exists(info.SourcePath)
+                     && info.SourcePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using var zip = ZipFile.OpenRead(info.SourcePath);
+                var entry = zip.GetEntry("mod.json");
+                if (entry == null) return;
+                using var reader = new StreamReader(entry.Open());
+                json = reader.ReadToEnd();
+            }
+
+            if (json == null) return;
+            var fresh = JsonSerializer.Deserialize<ModInfo>(json, _json);
+            if (fresh == null) return;
+
+            // Keep id / SourcePath stable; refresh declarative pack + metadata.
+            info.Assets = fresh.Assets;
+            if (!string.IsNullOrWhiteSpace(fresh.Name)) info.Name = fresh.Name;
+            if (!string.IsNullOrWhiteSpace(fresh.Version)) info.Version = fresh.Version;
+            if (fresh.Author != null) info.Author = fresh.Author;
+            if (fresh.Dependencies != null) info.Dependencies = fresh.Dependencies;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Mods] {info.Id}: failed to refresh mod.json: {ex.Message}");
+        }
     }
 
     static void InitDiscOverlay()

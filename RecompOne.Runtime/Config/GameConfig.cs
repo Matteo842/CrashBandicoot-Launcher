@@ -81,4 +81,10 @@ public class GameConfig
     /// so catalogs can be filled without a GUI tool yet.
     /// </summary>
     public bool CatalogDiscovery { get; set; }
+
+    /// <summary>
+    /// When true (default), watch <c>mods/</c> for texture / disc / <c>mod.json</c> changes
+    /// and hot-reload asset packs without restarting. C# hooks are not recompiled.
+    /// </summary>
+    public bool AssetHotWatch { get; set; } = true;
 }

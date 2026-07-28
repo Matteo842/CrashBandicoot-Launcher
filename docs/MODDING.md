@@ -71,7 +71,7 @@ Until you save once, every discovered mod loads (`ModsConfigured = false`). Afte
 
 **Open mods folder** creates `mods/` if needed and opens it in the file explorer.
 
-In-game: Developer menu bar → **Mods → Mods…** lists what actually loaded this session.
+In-game: Developer menu bar → **Mods → Mods…** lists what actually loaded this session. **Mods → Reload assets** refreshes PNG / disc packs without restarting (see Hot-reload below).
 
 ## Compiling
 
@@ -237,9 +237,57 @@ using RecompOne.Runtime.Catalogs;
 Catalog.Textures.Replace("demo_tile_a", pngBytes);
 Catalog.Textures.Replace("demo_tile_a", @"mods/my-mod/textures/demo_tile_a.png");
 Catalog.Textures.ClearReplace("demo_tile_a");
+
+// Batch / directory helpers
+Catalog.Textures.ReplaceMany([
+    ("demo_tile_a", @"mods/my-mod/textures/demo_tile_a.png"),
+    ("demo_tile_b", @"mods/my-mod/textures/demo_tile_b.png"),
+]);
+Catalog.Textures.ReplaceDirectory(@"mods/my-mod/textures"); // stem = catalog id
+Catalog.Textures.ClearAllReplaces();
 ```
 
+`Catalog.Sounds.Replace` exists as a stable stub but **WAV→SPU is not wired yet** (logs and ignores).
+
 See [`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) and [`examples/mods/asset-pack-stub`](../examples/mods/asset-pack-stub) (synthetic magenta/cyan checkers only).
+
+### Hot-reload (asset packs)
+
+Texture PNG replacements and disc overlays can refresh **without restarting** the game. C# hooks / Roslyn recompile are **not** hot-reloaded — change `.cs` and restart.
+
+**Triggers**
+
+1. **Menu:** Developer menu bar → **Mods → Reload assets**, or the **Reload assets** button in **Mods → Mods…**
+2. **File watch (default on):** edits under `mods/<id>/textures/*.png`, `mods/<id>/disc/**`, `mod.json`, or replacing a mod `.zip` debounce (~600 ms) then reload automatically. Disable with `"AssetHotWatch": false` in `settings.json`.
+3. **API:**
+
+```csharp
+using RecompOne.Runtime.Catalogs;
+using RecompOne.Runtime.Modding;
+
+ModLoader.ReloadAssets();
+// or
+Catalog.Textures.ReloadModAssets();
+```
+
+Reload re-reads each loaded mod’s `mod.json` `assets`, clears the texture table, re-registers in **load order (first wins)**, and rebuilds `DiscOverlay`. Listen for `AssetsReloadedEvent` if your mod caches decoded pixels:
+
+```csharp
+Event.AddListener<AssetsReloadedEvent>(e =>
+{
+    // e.TextureCount / e.DiscRemapCount
+});
+```
+
+Already-uploaded VRAM is not rewritten until the game Loads that texture again (warp / reload level / re-enter screen). Disc remaps apply on the next ISO read.
+
+Look for:
+
+```
+[Mods] asset hot-watch on (mods/ textures+disc+mod.json)
+[Mods] asset change detected (changed my-mod/textures/demo_tile_a.png) — reloading packs…
+[Mods] assets reloaded: 2 texture replace(s), 0 disc remap(s) (1 mod(s))
+```
 
 ### Discovery logging
 
@@ -286,7 +334,7 @@ Default `--out` is `./mods` (cwd). Each command prints the updated `assets` snip
 2. PNG loaders applied via VRAM hooks — **done** (WAV / SPU still open)
 3. Folder convention + `mod.json` `assets` packs — **done** (WAV→SPU still open)
 4. CLI export/replace from the user’s disc — **done** (see below)
-5. Hot-reload for replacements
+5. Hot-reload for replacements — **done** (PNG + disc; C# recompile still needs restart)
 ## VRAM transfer hook
 
 Fires on GP0 **LoadImage** (CPU→VRAM), **StoreImage** (VRAM→CPU), and **MoveImage** (VRAM→VRAM). This is the path for texture-style patches — **not** `RenderPrimEvent`.
@@ -380,7 +428,7 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 
 ## Sample: Texture Replace Stub
 
-[`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) declares synthetic magenta/cyan checker PNGs under `assets.textures`. It **stamps a magenta checker** into the corner of each Load ≥16×16 so you can see PNG→BGR555 without real fingerprints. Catalog auto-replace for `demo_tile_a` / `demo_tile_b` still applies when those rects match. No copyrighted art.
+[`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) declares synthetic magenta/cyan checker PNGs under `assets.textures`. It **stamps a magenta checker** into the corner of each Load ≥16×16 so you can see PNG→BGR555 without real fingerprints. Catalog auto-replace for `demo_tile_a` / `demo_tile_b` still applies when those rects match. Listens to `AssetsReloadedEvent` so the stamp refreshes after hot-reload. No copyrighted art.
 
 ## Sample: Asset Pack Stub
 
@@ -403,5 +451,5 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 - Prefer named SDK functions (`VSync`, `PutDrawEnv`, …) over raw addresses when renames exist.
 - One **Replace** owner wins; later mods are ignored with a log line.
 - Cache invalidates when host or entry assembly MVID / sources change. Delete `mods/.cache` if a fix does not seem to apply.
-- Keep mods small and restart after edits — there is no hot-reload yet.
+- PNG / disc packs hot-reload via **Mods → Reload assets** or file watch; C# hook edits still need a restart.
 - Frame timing background: [CRASH_BANDICOOT_RECOMP.md §3](CRASH_BANDICOOT_RECOMP.md).
