@@ -37,6 +37,26 @@ public sealed class TexturesCatalog
         return true;
     }
 
+    /// <summary>
+    /// Register a PNG replacement for a catalog texture id (RGBA→BGR555).
+    /// Applied automatically on matching VRAM Loads (see <see cref="TextureReplacements"/>).
+    /// </summary>
+    public void Replace(string id, ReadOnlySpan<byte> pngBytes)
+    {
+        if (!TextureReplacements.TryRegisterPng(id, pngBytes))
+            Console.Error.WriteLine($"[Textures] Replace failed to decode PNG for id={id}");
+    }
+
+    /// <summary>Register a PNG file replacement for a catalog texture id.</summary>
+    public void Replace(string id, string pngPath)
+    {
+        if (!TextureReplacements.TryRegisterPngFile(id, pngPath))
+            Console.Error.WriteLine($"[Textures] Replace failed for id={id} path={pngPath}");
+    }
+
+    /// <summary>Remove a previously registered replacement.</summary>
+    public void ClearReplace(string id) => TextureReplacements.Remove(id);
+
     internal bool TryResolve(
         int x, int y, int w, int h, ushort[]? pixels, int count, out TextureInfo info)
     {

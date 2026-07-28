@@ -2,7 +2,7 @@
 
 Mods are C# packages under a `mods/` folder next to the exe. At game start the runtime discovers them, optionally filters by launcher enable state, compiles with Roslyn, and installs MonoMod hooks before the recompiled EXE runs.
 
-Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`, `catalog-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
+Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`, `catalog-stub`, `texture-replace-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
 
 ## Layout
 
@@ -14,6 +14,8 @@ mods/
     Nested/More.cs
     disc/                 # optional ISO path overlays (see Disc remap)
       S0/MYFILE.NSD
+    textures/             # optional PNG replaces keyed by catalog id (see Texture replace)
+      demo_tile_a.png
   other-mod.zip          # zip root must contain mod.json
   .cache/                # compiled DLLs (auto-managed)
 ```
@@ -33,7 +35,7 @@ mods/
 - **id** — unique, used by `ActiveMods` and the cache filename.
 - **dependencies** — other mod ids that must load first (topo-sorted; missing deps skip the mod).
 
-Asset-only mods are allowed: if there are no `.cs` sources but a `disc/` folder (or zip entries under `disc/`) is present, the mod still loads and contributes disc remaps.
+Asset-only mods are allowed: if there are no `.cs` sources but a `disc/` and/or `textures/` folder (or zip entries under those paths) is present, the mod still loads and contributes disc remaps / PNG texture replacements.
 
 ## Enable / disable (launcher)
 
@@ -148,7 +150,7 @@ bool ui = Catalog.Levels.IsUiOrCinema(id); // titleMap | complete | cinema
 
 Texture entries match VRAM **Load** uploads by optional `pixelHash` (SHA256 prefix of BGR555 pixels) and/or destination rect `(x,y,w,h)`, optionally scoped with `levelIds`. Sound entries match SPU DMA by optional `payloadHash` and/or `(spuAddr, length)`.
 
-Shipped DBs start **empty** — use discovery (below) or a future export tool to fill them.
+Shipped texture DB seeds two **synthetic demo** rects (`demo_tile_a` / `demo_tile_b` at `(512,0)` / `(576,0)` 64×64) for the PNG replace spike — **not** real game art fingerprints. Prefer filling more entries from discovery (below) and tightening demos with `pixelHash` once you have logs. Sounds DB starts empty.
 
 ```json
 {
@@ -185,6 +187,28 @@ if (Catalog.Sounds.Resolve(e, out var snd) && snd != null)
     Console.WriteLine($"matched {snd.Id}");
 ```
 
+### Texture replace (PNG → BGR555)
+
+When a VRAM **Load** resolves to a catalog id that has a registered PNG, the runtime decodes RGBA→BGR555 (nearest-neighbor scale to the Load rect) and overwrites `Pixels` **before** mod listeners and `WriteVram`. Discovery logs still see the **original** upload.
+
+**Folder convention** (auto-scanned when the mod loads; first mod wins per id):
+
+```
+mods/my-mod/textures/<catalog-id>.png
+```
+
+**API** (overwrites a prior registration for that id):
+
+```csharp
+using RecompOne.Runtime.Catalogs;
+
+Catalog.Textures.Replace("demo_tile_a", pngBytes);
+Catalog.Textures.Replace("demo_tile_a", @"mods/my-mod/textures/demo_tile_a.png");
+Catalog.Textures.ClearReplace("demo_tile_a");
+```
+
+See [`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) (synthetic magenta/cyan checkers only).
+
 ### Discovery logging
 
 Set `"CatalogDiscovery": true` in `settings.json` (or `GameConfig.CatalogDiscovery`). Unknown VRAM Loads / SPU DMA uploads log once per fingerprint:
@@ -196,14 +220,13 @@ Set `"CatalogDiscovery": true` in `settings.json` (or `GameConfig.CatalogDiscove
 
 Paste those fingerprints into the JSON catalogs. Caps at 256 unique lines per session.
 
-### Roadmap (not in this release)
+### Roadmap
 
 1. Catalogs with stable ids — **done**
-2. PNG / WAV loaders applied via VRAM / SPU hooks
-3. Folder convention + `mod.json` assets (pack without C#)
+2. PNG loaders applied via VRAM hooks — **done** (WAV / SPU still open)
+3. Folder convention for textures — **done** (broader `mod.json` asset packs still open)
 4. GUI/CLI export/replace from the user’s disc
-5. High-level API (`Textures.Replace("crate_wood", …)`) + hot-reload
-
+5. Hot-reload for replacements
 ## VRAM transfer hook
 
 Fires on GP0 **LoadImage** (CPU→VRAM), **StoreImage** (VRAM→CPU), and **MoveImage** (VRAM→VRAM). This is the path for texture-style patches — **not** `RenderPrimEvent`.
@@ -285,7 +308,11 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 
 ## Sample: Catalog Stub
 
-[`examples/mods/catalog-stub`](../examples/mods/catalog-stub) logs level slug/name changes and whether VRAM Loads / SPU DMA resolve to a catalog id. With empty texture/sound DBs you will see `unresolved` lines — useful while filling catalogs. Does not mutate pixels or audio.
+[`examples/mods/catalog-stub`](../examples/mods/catalog-stub) logs level slug/name changes and whether VRAM Loads / SPU DMA resolve to a catalog id. Demo texture ids may match; sounds stay unresolved until filled. Does not mutate pixels or audio.
+
+## Sample: Texture Replace Stub
+
+[`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) drops synthetic magenta/cyan checker PNGs under `textures/`. It **stamps a magenta checker** into the corner of each Load ≥16×16 so you can see PNG→BGR555 without real fingerprints. Catalog auto-replace for `demo_tile_a` / `demo_tile_b` still applies when those rects match. No copyrighted art.
 
 ## Sample: Disc Overlay Stub
 

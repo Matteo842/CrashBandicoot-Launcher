@@ -9,6 +9,13 @@ public static class VramTransfers
 
     public static bool HasListeners => Event.HasAnyListeners<VramTransferEvent>();
 
+    /// <summary>
+    /// Soft/HLE path must buffer CPU→VRAM Loads when mods listen, discovery is on,
+    /// or PNG replacements are registered.
+    /// </summary>
+    public static bool NeedsLoadIntercept =>
+        HasListeners || Catalog.DiscoveryEnabled || TextureReplacements.HasAny;
+
     public static void NotifyLoad(int x, int y, int w, int h, ushort[] pixels, int count)
         => Dispatch(VramTransfer.Load, x, y, w, h, 0, 0, pixels, count);
 
@@ -23,7 +30,16 @@ public static class VramTransfers
         ushort[]? pixels, int count)
     {
         bool discover = dir == VramTransfer.Load && Catalog.DiscoveryEnabled;
-        if (!HasListeners && !discover) return;
+        bool replace = dir == VramTransfer.Load && TextureReplacements.HasAny;
+        if (!HasListeners && !discover && !replace) return;
+
+        // Discovery on original pixels (before PNG replace).
+        if (discover)
+            Catalog.ObserveTextureLoad(x, y, w, h, pixels, count);
+
+        // Catalog id → registered PNG (mutates buffer before mod listeners / WriteVram).
+        if (replace)
+            TextureReplacements.TryApply(x, y, w, h, pixels, count);
 
         if (HasListeners)
         {
@@ -41,8 +57,5 @@ public static class VramTransfers
             e.PixelCount = count;
             Event.Dispatch(e);
         }
-
-        if (discover)
-            Catalog.ObserveTextureLoad(x, y, w, h, pixels, count);
     }
 }

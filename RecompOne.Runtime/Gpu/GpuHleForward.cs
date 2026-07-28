@@ -98,8 +98,9 @@ public sealed partial class Gpu
 
     void HleLoadBegin()
     {
-        // Buffer when HLE/GL is on, or when a mod listens for VramTransferEvent.
-        _hleLoadActive = HleOn || Events.VramTransfers.HasListeners;
+        // Buffer when HLE/GL is on, or when VRAM Load intercept is needed
+        // (mod listeners, catalog discovery, or PNG texture replacements).
+        _hleLoadActive = HleOn || Events.VramTransfers.NeedsLoadIntercept;
         if (!_hleLoadActive) return;
         int n = _loadW * _loadH;
         if (_hleLoad.Length < n) _hleLoad = new ushort[n];

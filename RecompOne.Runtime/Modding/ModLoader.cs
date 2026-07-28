@@ -73,6 +73,7 @@ public static class ModLoader
         root ??= AppPaths.ModsDir;
         Directory.CreateDirectory(root);
         Catalog.Initialize();
+        TextureReplacements.Clear();
         DiscOverlay.Reset();
 
         var candidates = Discover(root);
@@ -321,14 +322,21 @@ public static class ModLoader
         {
             if (mod.Sources.Count == 0)
             {
-                if (!HasDiscFolder(mod.Info.SourcePath))
+                bool hasDisc = HasDiscFolder(mod.Info.SourcePath);
+                bool hasTex = HasTexturesFolder(mod.Info.SourcePath);
+                if (!hasDisc && !hasTex)
                 {
                     Console.Error.WriteLine($"[Mods] {mod.Info.Id}: no source files, skipping");
                     return;
                 }
 
                 lock (_loaded) _loaded.Add((mod.Info, []));
-                Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: asset-only (disc overlay)");
+                int assetTex = TextureReplacements.RegisterFromModFolder(mod.Info.SourcePath);
+                string kind = hasDisc && hasTex ? "disc+textures"
+                    : hasTex ? "textures"
+                    : "disc overlay";
+                Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: asset-only ({kind})" +
+                    (assetTex > 0 ? $", {assetTex} texture replace(s)" : ""));
                 return;
             }
 
@@ -364,8 +372,10 @@ public static class ModLoader
             int hooks = RegisterHooks(mod.Info, asm);
             var instances = CreateInstances(mod.Info, asm);
             lock (_loaded) _loaded.Add((mod.Info, instances));
+            int codeTex = TextureReplacements.RegisterFromModFolder(mod.Info.SourcePath);
             foreach (var inst in instances) inst.OnLoad();
-            Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: {hooks} hook(s)");
+            Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: {hooks} hook(s)" +
+                (codeTex > 0 ? $", {codeTex} texture replace(s)" : ""));
         }
         catch (Exception ex)
         {
@@ -434,19 +444,30 @@ public static class ModLoader
     }
 
     static bool HasDiscFolder(string sourcePath)
+        => HasAssetFolder(sourcePath, "disc");
+
+    static bool HasTexturesFolder(string sourcePath)
+        => HasAssetFolder(sourcePath, "textures");
+
+    static bool HasAssetFolder(string sourcePath, string folder)
     {
         if (string.IsNullOrWhiteSpace(sourcePath)) return false;
         if (Directory.Exists(sourcePath))
-            return Directory.Exists(Path.Combine(sourcePath, "disc"));
+        {
+            var dir = Path.Combine(sourcePath, folder);
+            if (!Directory.Exists(dir)) return false;
+            return Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any();
+        }
         if (!File.Exists(sourcePath) || !sourcePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             return false;
+        string prefix = folder + "/";
         try
         {
             using var zip = ZipFile.OpenRead(sourcePath);
             return zip.Entries.Any(e =>
             {
                 var n = e.FullName.Replace('\\', '/');
-                return n.StartsWith("disc/", StringComparison.OrdinalIgnoreCase) && !n.EndsWith('/');
+                return n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !n.EndsWith('/');
             });
         }
         catch

@@ -1,4 +1,15 @@
 {
   "game": "SCUS-94900",
-  "textures": []
+  "textures": [
+    {
+      "id": "demo_tile_a",
+      "match": { "x": 512, "y": 0, "w": 64, "h": 64 },
+      "pixelHash": null
+    },
+    {
+      "id": "demo_tile_b",
+      "match": { "x": 576, "y": 0, "w": 64, "h": 64 },
+      "pixelHash": null
+    }
+  ]
 }
