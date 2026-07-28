@@ -83,6 +83,13 @@ public static class DiscOverlay
         var source = mod.SourcePath;
         if (string.IsNullOrWhiteSpace(source)) return;
 
+        // Declarative pack: only listed disc entries (no disc/ folder scan).
+        if (mod.Assets != null)
+        {
+            RegisterFromManifest(fs, mod);
+            return;
+        }
+
         if (Directory.Exists(source))
         {
             var discRoot = Path.Combine(source, "disc");
@@ -121,6 +128,49 @@ public static class DiscOverlay
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[Disc] {mod.Id}: failed to read zip disc overlay: {ex.Message}");
+        }
+    }
+
+    static void RegisterFromManifest(CueFs fs, ModInfo mod)
+    {
+        var list = mod.Assets?.Disc;
+        if (list == null || list.Length == 0) return;
+
+        foreach (var entry in list)
+        {
+            var isoRel = string.IsNullOrWhiteSpace(entry.Path) ? "" : entry.Path.Trim();
+            if (isoRel.Length == 0)
+            {
+                Console.Error.WriteLine($"[Disc] {mod.Id}: disc asset missing path, skipped");
+                continue;
+            }
+
+            if (Directory.Exists(mod.SourcePath))
+            {
+                var rel = ModAssetFiles.NormalizeRel(entry.File);
+                if (rel.Length == 0)
+                {
+                    Console.Error.WriteLine($"[Disc] {mod.Id}: invalid disc file '{entry.File}' for '{isoRel}'");
+                    continue;
+                }
+                var full = Path.GetFullPath(Path.Combine(mod.SourcePath, rel.Replace('/', Path.DirectorySeparatorChar)));
+                var root = Path.GetFullPath(mod.SourcePath);
+                if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || !File.Exists(full))
+                {
+                    Console.Error.WriteLine($"[Disc] {mod.Id}: missing disc file '{entry.File}' for '{isoRel}'");
+                    continue;
+                }
+                TryRegister(fs, mod.Id, isoRel, hostPath: full, cached: null);
+                continue;
+            }
+
+            if (!ModAssetFiles.TryRead(mod.SourcePath, entry.File, out var bytes, out _))
+            {
+                Console.Error.WriteLine($"[Disc] {mod.Id}: missing disc file '{entry.File}' for '{isoRel}'");
+                continue;
+            }
+            TryRegister(fs, mod.Id, isoRel, hostPath: null, cached: bytes);
         }
     }
 

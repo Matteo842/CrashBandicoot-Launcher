@@ -2,7 +2,7 @@
 
 Mods are C# packages under a `mods/` folder next to the exe. At game start the runtime discovers them, optionally filters by launcher enable state, compiles with Roslyn, and installs MonoMod hooks before the recompiled EXE runs.
 
-Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`, `catalog-stub`, `texture-replace-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
+Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-overlay-stub`, `vram-transfer-stub`, `spu-dma-stub`, `catalog-stub`, `texture-replace-stub`, `asset-pack-stub`). Release builds copy them into `mods/`; `AppPaths.EnsureCreated` also seeds from `examples/mods/` when present, without overwriting existing folders.
 
 ## Layout
 
@@ -10,12 +10,14 @@ Sample mods live in [`examples/mods/`](../examples/mods/) (`auto-spin`, `disc-ov
 mods/
   my-mod/
     mod.json
-    Something.cs
+    Something.cs          # optional — asset-only packs need no C#
     Nested/More.cs
-    disc/                 # optional ISO path overlays (see Disc remap)
-      S0/MYFILE.NSD
-    textures/             # optional PNG replaces keyed by catalog id (see Texture replace)
+    textures/             # PNG replaces (legacy scan or assets.textures)
       demo_tile_a.png
+    audio/                # reserved — WAV→SPU not wired yet
+      spin.wav
+    disc/                 # ISO path overlays (legacy scan or assets.disc)
+      S0/MYFILE.NSD
   other-mod.zip          # zip root must contain mod.json
   .cache/                # compiled DLLs (auto-managed)
 ```
@@ -28,14 +30,36 @@ mods/
   "name": "My Mod",
   "version": "1.0.0",
   "author": "you",
-  "dependencies": ["other-mod-id"]
+  "dependencies": ["other-mod-id"],
+  "assets": {
+    "textures": [{ "id": "demo_tile_a", "file": "textures/demo_tile_a.png" }],
+    "audio": [{ "id": "spin", "file": "audio/spin.wav" }],
+    "disc": [{ "path": "S0/FOO.NSD", "file": "disc/S0/FOO.NSD" }]
+  }
 }
 ```
 
 - **id** — unique, used by `ActiveMods` and the cache filename.
 - **dependencies** — other mod ids that must load first (topo-sorted; missing deps skip the mod).
+- **assets** — optional declarative pack (see below).
 
-Asset-only mods are allowed: if there are no `.cs` sources but a `disc/` and/or `textures/` folder (or zip entries under those paths) is present, the mod still loads and contributes disc remaps / PNG texture replacements.
+Asset-only mods are allowed: no `.cs` sources is fine when the mod contributes textures and/or disc overlays (via `assets` or legacy folders).
+
+### Asset packs (`assets`)
+
+**Rule:** if `assets` is **absent**, the runtime keeps the legacy folder scan (`textures/*.png` by file stem, entire `disc/` tree). If `assets` is **present**, only the listed entries are registered — undeclared files under `textures/` / `disc/` are ignored. Empty arrays mean “nothing for that type.”
+
+| Field | Meaning |
+|-------|---------|
+| `textures[].id` | Catalog texture id |
+| `textures[].file` | Path relative to the mod root (folder or zip entry) |
+| `disc[].path` | ISO-relative path to remap |
+| `disc[].file` | Host file relative to the mod root |
+| `audio[].id` / `file` | Catalog sound id + relative WAV — **schema only**; WAV→SPU is not implemented yet (logged and ignored) |
+
+Multi-mod precedence is unchanged: load order / **first wins** per texture id and per disc path. Paths with `..` are rejected.
+
+See [`examples/mods/asset-pack-stub`](../examples/mods/asset-pack-stub) (no C#) and [`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) (`assets` + a small stamp hook).
 
 ## Enable / disable (launcher)
 
@@ -191,7 +215,15 @@ if (Catalog.Sounds.Resolve(e, out var snd) && snd != null)
 
 When a VRAM **Load** resolves to a catalog id that has a registered PNG, the runtime decodes RGBA→BGR555 (nearest-neighbor scale to the Load rect) and overwrites `Pixels` **before** mod listeners and `WriteVram`. Discovery logs still see the **original** upload.
 
-**Folder convention** (auto-scanned when the mod loads; first mod wins per id):
+**Preferred — `mod.json` `assets.textures`:**
+
+```json
+"assets": {
+  "textures": [{ "id": "demo_tile_a", "file": "textures/demo_tile_a.png" }]
+}
+```
+
+**Legacy folder scan** (only when `assets` is absent; first mod wins per id):
 
 ```
 mods/my-mod/textures/<catalog-id>.png
@@ -207,7 +239,7 @@ Catalog.Textures.Replace("demo_tile_a", @"mods/my-mod/textures/demo_tile_a.png")
 Catalog.Textures.ClearReplace("demo_tile_a");
 ```
 
-See [`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) (synthetic magenta/cyan checkers only).
+See [`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) and [`examples/mods/asset-pack-stub`](../examples/mods/asset-pack-stub) (synthetic magenta/cyan checkers only).
 
 ### Discovery logging
 
@@ -224,7 +256,7 @@ Paste those fingerprints into the JSON catalogs. Caps at 256 unique lines per se
 
 1. Catalogs with stable ids — **done**
 2. PNG loaders applied via VRAM hooks — **done** (WAV / SPU still open)
-3. Folder convention for textures — **done** (broader `mod.json` asset packs still open)
+3. Folder convention + `mod.json` `assets` packs — **done** (WAV→SPU still open)
 4. GUI/CLI export/replace from the user’s disc
 5. Hot-reload for replacements
 ## VRAM transfer hook
@@ -281,11 +313,19 @@ Replace disc file reads without patching the user's `.bin` / `.cue`. Host files 
 mods/<mod-id>/disc/<ISO-relative-path>
 ```
 
+Or declare them in `mod.json`:
+
+```json
+"assets": {
+  "disc": [{ "path": "S0/S000001E.NSD", "file": "disc/S0/S000001E.NSD" }]
+}
+```
+
 Example: `mods/my-patch/disc/S0/S000001E.NSD` redirects ISO path `S0/S000001E.NSD` (`;1` optional, case-insensitive).
 
 **How it works**
 
-1. After mods load, the runtime indexes each loaded mod's `disc/` tree (folders, or `disc/…` inside a `.zip`).
+1. After mods load, the runtime indexes each loaded mod's disc overlays — either `assets.disc` entries, or (when `assets` is absent) the entire `disc/` tree (folders, or `disc/…` inside a `.zip`).
 2. Each host file is resolved with `CueFs.Locate` on the user's disc. If the path is missing, it is skipped (`[Disc] … not on disc, skipped`).
 3. Later `CdSearchFile` / sector reads / `ReadFile` (including BIOS open and boot) serve the host file when the LBA or path matches.
 4. **First match wins** using the same order as mod load (dependency topo-sort, then id). Later mods cannot override an already-remapped path (logged as `skip … already remapped`).
@@ -312,11 +352,15 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 
 ## Sample: Texture Replace Stub
 
-[`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) drops synthetic magenta/cyan checker PNGs under `textures/`. It **stamps a magenta checker** into the corner of each Load ≥16×16 so you can see PNG→BGR555 without real fingerprints. Catalog auto-replace for `demo_tile_a` / `demo_tile_b` still applies when those rects match. No copyrighted art.
+[`examples/mods/texture-replace-stub`](../examples/mods/texture-replace-stub) declares synthetic magenta/cyan checker PNGs under `assets.textures`. It **stamps a magenta checker** into the corner of each Load ≥16×16 so you can see PNG→BGR555 without real fingerprints. Catalog auto-replace for `demo_tile_a` / `demo_tile_b` still applies when those rects match. No copyrighted art.
+
+## Sample: Asset Pack Stub
+
+[`examples/mods/asset-pack-stub`](../examples/mods/asset-pack-stub) is **asset-only** (no C#): the same demo PNGs via `mod.json` `assets`. Use it as a template for declarative texture packs.
 
 ## Sample: Disc Overlay Stub
 
-[`examples/mods/disc-overlay-stub`](../examples/mods/disc-overlay-stub) is asset-only (no C#). Put your own replacements under `disc/` mirroring ISO paths; see that folder's README.
+[`examples/mods/disc-overlay-stub`](../examples/mods/disc-overlay-stub) is asset-only (no C#). Put your own replacements under `disc/` mirroring ISO paths; see that folder's README. Uses legacy folder scan (no `assets` key).
 
 ## Sample: VRAM Transfer Stub
 

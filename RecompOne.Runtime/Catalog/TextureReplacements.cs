@@ -1,3 +1,5 @@
+using RecompOne.Runtime.Modding;
+
 namespace RecompOne.Runtime.Catalogs;
 
 /// <summary>
@@ -164,6 +166,58 @@ public static class TextureReplacements
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// Register texture replacements for a loaded mod.
+    /// With <see cref="ModInfo.Assets"/>: only declared entries.
+    /// Without: legacy scan of <c>textures/*.png</c> (stem = catalog id).
+    /// First mod wins per id.
+    /// </summary>
+    public static int RegisterFromMod(ModInfo mod)
+    {
+        if (mod.Assets != null)
+            return RegisterFromManifest(mod);
+        return RegisterFromModFolder(mod.SourcePath);
+    }
+
+    static int RegisterFromManifest(ModInfo mod)
+    {
+        var list = mod.Assets?.Textures;
+        if (list == null || list.Length == 0) return 0;
+
+        int n = 0;
+        foreach (var entry in list)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Id))
+            {
+                Console.Error.WriteLine($"[Textures] {mod.Id}: texture asset missing id, skipped");
+                continue;
+            }
+            if (!ModAssetFiles.TryRead(mod.SourcePath, entry.File, out var bytes, out var display))
+            {
+                Console.Error.WriteLine($"[Textures] {mod.Id}: missing texture file '{entry.File}' for id '{entry.Id}'");
+                continue;
+            }
+            if (TryRegisterPngFirst(entry.Id, bytes, display))
+            {
+                n++;
+                Console.WriteLine($"[Textures] replace ← {display} (id={entry.Id})");
+            }
+            else
+            {
+                lock (Gate)
+                {
+                    if (ById.ContainsKey(entry.Id))
+                    {
+                        Console.WriteLine($"[Textures] skip '{entry.Id}' from {mod.Id}: already registered");
+                        continue;
+                    }
+                }
+                Console.Error.WriteLine($"[Textures] {mod.Id}: failed to decode '{entry.File}'");
+            }
+        }
+        return n;
     }
 
     /// <summary>Scan <c>textures/*.png</c> under a mod folder (or zip) and register by file stem = catalog id.</summary>

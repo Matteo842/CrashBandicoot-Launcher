@@ -19,6 +19,13 @@ public sealed class ModInfo
     /// <summary>Ids of mods that must load before this one</summary>
     [JsonPropertyName("dependencies")] public string[] Dependencies { get; set; } = [];
 
+    /// <summary>
+    /// Optional declarative asset pack. When present, only listed textures / disc / audio
+    /// are registered (no <c>textures/</c> or <c>disc/</c> folder scan). When null/absent,
+    /// legacy folder scan applies.
+    /// </summary>
+    [JsonPropertyName("assets")] public ModAssets? Assets { get; set; }
+
     /// <summary>Folder or zip this mod was loaded from</summary>
     [JsonIgnore] public string SourcePath { get; internal set; } = "";
 }

@@ -322,19 +322,16 @@ public static class ModLoader
         {
             if (mod.Sources.Count == 0)
             {
-                bool hasDisc = HasDiscFolder(mod.Info.SourcePath);
-                bool hasTex = HasTexturesFolder(mod.Info.SourcePath);
-                if (!hasDisc && !hasTex)
+                if (!HasLoadableAssets(mod.Info))
                 {
                     Console.Error.WriteLine($"[Mods] {mod.Info.Id}: no source files, skipping");
                     return;
                 }
 
                 lock (_loaded) _loaded.Add((mod.Info, []));
-                int assetTex = TextureReplacements.RegisterFromModFolder(mod.Info.SourcePath);
-                string kind = hasDisc && hasTex ? "disc+textures"
-                    : hasTex ? "textures"
-                    : "disc overlay";
+                int assetTex = TextureReplacements.RegisterFromMod(mod.Info);
+                WarnAudioAssets(mod.Info);
+                string kind = DescribeAssetKind(mod.Info);
                 Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: asset-only ({kind})" +
                     (assetTex > 0 ? $", {assetTex} texture replace(s)" : ""));
                 return;
@@ -372,7 +369,8 @@ public static class ModLoader
             int hooks = RegisterHooks(mod.Info, asm);
             var instances = CreateInstances(mod.Info, asm);
             lock (_loaded) _loaded.Add((mod.Info, instances));
-            int codeTex = TextureReplacements.RegisterFromModFolder(mod.Info.SourcePath);
+            int codeTex = TextureReplacements.RegisterFromMod(mod.Info);
+            WarnAudioAssets(mod.Info);
             foreach (var inst in instances) inst.OnLoad();
             Console.WriteLine($"[Mods] {mod.Info.Id} v{mod.Info.Version}: {hooks} hook(s)" +
                 (codeTex > 0 ? $", {codeTex} texture replace(s)" : ""));
@@ -441,6 +439,42 @@ public static class ModLoader
             }
         }
         return instances.ToArray();
+    }
+
+    static bool HasLoadableAssets(ModInfo info)
+    {
+        if (info.Assets != null)
+            return info.Assets.HasAnyDeclared;
+        return HasDiscFolder(info.SourcePath) || HasTexturesFolder(info.SourcePath);
+    }
+
+    static string DescribeAssetKind(ModInfo info)
+    {
+        if (info.Assets != null)
+        {
+            bool t = info.Assets.Textures is { Length: > 0 };
+            bool d = info.Assets.Disc is { Length: > 0 };
+            bool a = info.Assets.Audio is { Length: > 0 };
+            var parts = new List<string>();
+            if (t) parts.Add("textures");
+            if (d) parts.Add("disc");
+            if (a) parts.Add("audio");
+            return parts.Count > 0 ? "manifest: " + string.Join('+', parts) : "manifest";
+        }
+
+        bool hasDisc = HasDiscFolder(info.SourcePath);
+        bool hasTex = HasTexturesFolder(info.SourcePath);
+        if (hasDisc && hasTex) return "disc+textures";
+        if (hasTex) return "textures";
+        return "disc overlay";
+    }
+
+    static void WarnAudioAssets(ModInfo info)
+    {
+        var audio = info.Assets?.Audio;
+        if (audio == null || audio.Length == 0) return;
+        Console.WriteLine(
+            $"[Mods] {info.Id}: {audio.Length} audio asset(s) declared — WAV→SPU not implemented yet (ignored)");
     }
 
     static bool HasDiscFolder(string sourcePath)

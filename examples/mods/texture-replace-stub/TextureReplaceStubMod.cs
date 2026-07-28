@@ -3,7 +3,7 @@ using RecompOne.Runtime.Events;
 using RecompOne.Runtime.Modding;
 
 /// <summary>
-/// Proves PNG→BGR555: folder scan registers textures/*.png. Stamps a magenta
+/// Proves PNG→BGR555 via mod.json <c>assets.textures</c> (declared-only). Stamps a magenta
 /// checker corner into each large VRAM Load so you can see it without needing
 /// catalog rect fingerprints. Full-rect auto-replace still runs when a Load
 /// resolves to demo_tile_a / demo_tile_b. Zero copyrighted art.

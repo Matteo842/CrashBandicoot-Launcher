@@ -1,7 +1,7 @@
 {
-  "id": "texture-replace-stub",
-  "name": "Texture Replace Stub",
-  "version": "1.2.0",
+  "id": "asset-pack-stub",
+  "name": "Asset Pack Stub",
+  "version": "1.0.0",
   "author": "CrashBandicoot.Launcher",
   "dependencies": [],
   "assets": {
