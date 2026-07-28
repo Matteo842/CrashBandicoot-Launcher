@@ -78,6 +78,9 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     Panel? _prepBarFill;
     Panel? _sheetHost;
     Panel? _activeSheet;
+    bool _sheetFill;
+    /// <summary>Whether the Samples & stubs group is expanded in the Mods sheet.</summary>
+    bool _modsStubExpanded;
 
     // Settings / controls / cheats / mods state buffers
     readonly Dictionary<string, TextBox> _keyBoxes = new(StringComparer.Ordinal);
@@ -1181,12 +1184,14 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _sheetHost.Controls.Clear();
         _sheetHost.Visible = false;
         _activeSheet = null;
+        _sheetFill = false;
         if (Visible) _stage.Focus();
     }
 
     void OpenSheet(Panel card)
     {
         if (_sheetHost == null) return;
+        _sheetFill = false;
         _sheetHost.Controls.Clear();
         _sheetHost.Controls.Add(card);
         CenterChild(_sheetHost, card);
@@ -1195,7 +1200,6 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _activeSheet = card;
         _sheetHost.Visible = true;
         _sheetHost.BringToFront();
-        // Focus first interactive control for pad/keyboard navigation.
         BeginInvoke(() =>
         {
             if (_activeSheet == null) return;
@@ -1204,10 +1208,42 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         });
     }
 
+    /// <summary>Open a sheet that fills the launcher window (small margin).</summary>
+    void OpenSheetFill(Panel card)
+    {
+        if (_sheetHost == null) return;
+        _sheetFill = true;
+        _sheetHost.Controls.Clear();
+        _sheetHost.Controls.Add(card);
+        FitSheetFill(card);
+        _sheetHost.Resize -= SheetResize;
+        _sheetHost.Resize += SheetResize;
+        _activeSheet = card;
+        _sheetHost.Visible = true;
+        _sheetHost.BringToFront();
+        BeginInvoke(() =>
+        {
+            if (_activeSheet == null) return;
+            if (!_activeSheet.SelectNextControl(null, forward: true, tabStopOnly: true, nested: true, wrap: true))
+                _activeSheet.Focus();
+        });
+    }
+
+    void FitSheetFill(Panel card)
+    {
+        if (_sheetHost == null) return;
+        const int m = 10;
+        card.Location = new Point(m, m);
+        card.Size = new Size(
+            Math.Max(480, _sheetHost.ClientSize.Width - m * 2),
+            Math.Max(360, _sheetHost.ClientSize.Height - m * 2));
+    }
+
     void SheetResize(object? sender, EventArgs e)
     {
-        if (_sheetHost != null && _activeSheet != null)
-            CenterChild(_sheetHost, _activeSheet);
+        if (_sheetHost == null || _activeSheet == null) return;
+        if (_sheetFill) FitSheetFill(_activeSheet);
+        else CenterChild(_sheetHost, _activeSheet);
     }
 
     void ShowAbout()
@@ -1411,78 +1447,142 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void ShowMods()
     {
-        var card = MakeCard(560, 520);
-        card.AutoScroll = true;
-        card.Controls.Add(MakeTitle("Mods"));
-        var y = 110;
-        card.Controls.Add(Hint(
-            "Drop mods into the mods folder next to the exe. Enable/disable here; restart the game to apply.",
-            ref y));
+        var card = MakeCard(960, 640);
+        card.AutoScroll = false;
+
+        var title = MakeTitle("Mods");
+        card.Controls.Add(title);
+
+        var hint = new Label
+        {
+            Text = "Drop mods into the mods folder next to the exe. Enable/disable here; restart the game to apply hooks. Asset packs can hot-reload in-game.",
+            ForeColor = Color.FromArgb(160, NativeTheme.Sand),
+            Font = NativeTheme.MakeNunito(14),
+            Location = new Point(36, 88),
+            Size = new Size(880, 36),
+            BackColor = Color.Transparent,
+        };
+        card.Controls.Add(hint);
+
+        var list = new DoubleBufferedPanel
+        {
+            Location = new Point(28, 132),
+            Size = new Size(900, 420),
+            AutoScroll = true,
+            BackColor = Color.Transparent,
+        };
+        // Prefer vertical scroll only — width is clamped below so H-bar never appears.
+        list.HorizontalScroll.Maximum = 0;
+        card.Controls.Add(list);
 
         _modChecks.Clear();
-        var hasAny = false;
+
+        // Parse discovered mods into groups.
+        var entries = new List<ModListEntry>();
         if (_pendingDiscoveredMods.ValueKind == JsonValueKind.Array)
         {
             foreach (var m in _pendingDiscoveredMods.EnumerateArray())
             {
-                hasAny = true;
                 var id = m.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(id)) continue;
                 var name = m.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? id : id;
                 var version = m.TryGetProperty("version", out var verEl) ? verEl.GetString() ?? "" : "";
                 var author = m.TryGetProperty("author", out var authEl) ? authEl.GetString() ?? "" : "";
+                var category = m.TryGetProperty("category", out var catEl) ? catEl.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(category))
+                    category = InferModCategory(id, name);
                 var enabled = !m.TryGetProperty("enabled", out var en) || en.ValueKind == JsonValueKind.True;
-
-                var label = string.IsNullOrWhiteSpace(version) ? name : $"{name}  v{version}";
-                if (!string.IsNullOrWhiteSpace(author))
-                    label += $"  —  {author}";
-
-                var check = MakeCheck(label);
-                check.Location = new Point(36, y);
-                check.Width = 480;
-                check.Checked = enabled;
-                if (!string.IsNullOrWhiteSpace(id))
-                    _modChecks[id] = check;
-                card.Controls.Add(check);
-                y += 36;
-
-                if (!string.IsNullOrWhiteSpace(id) && !string.Equals(name, id, StringComparison.Ordinal))
-                {
-                    card.Controls.Add(new Label
-                    {
-                        Text = id,
-                        ForeColor = Color.FromArgb(140, NativeTheme.Sand),
-                        Font = NativeTheme.MakeNunito(12),
-                        Location = new Point(64, y - 6),
-                        Size = new Size(440, 18),
-                        BackColor = Color.Transparent,
-                    });
-                    y += 16;
-                }
+                entries.Add(new ModListEntry(id, name, version, author, category.Trim().ToLowerInvariant(), enabled));
             }
         }
 
-        if (!hasAny)
+        var groups = BuildModGroups(entries);
+        var expanded = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in groups)
+            expanded[g.Key] = g.Key != "stub" || _modsStubExpanded;
+
+        void RebuildList()
         {
-            card.Controls.Add(new Label
+            var preserved = _modChecks
+                .Where(kv => kv.Value is { IsDisposed: false })
+                .ToDictionary(kv => kv.Key, kv => kv.Value.Checked, StringComparer.OrdinalIgnoreCase);
+            _modChecks.Clear();
+            list.Controls.Clear();
+            list.AutoScrollPosition = Point.Empty;
+
+            // Pad + always reserve the vertical scrollbar gutter so when V-scroll
+            // appears ClientSize shrinks but children still fit (no H-scroll).
+            const int pad = 10;
+            int gutter = SystemInformation.VerticalScrollBarWidth + 2;
+            int innerW = Math.Max(200, list.Width - pad * 2 - gutter);
+            int y = 4;
+
+            if (groups.Count == 0)
             {
-                Text = "(no mods found — open the folder and add a mod.json package)",
-                ForeColor = Color.FromArgb(160, NativeTheme.Sand),
-                Font = NativeTheme.MakeNunito(15),
-                Location = new Point(36, y),
-                Size = new Size(480, 48),
+                list.Controls.Add(new Label
+                {
+                    Text = "(no mods found — open the folder and add a mod.json package)",
+                    ForeColor = Color.FromArgb(160, NativeTheme.Sand),
+                    Font = NativeTheme.MakeNunito(16),
+                    Location = new Point(pad, y + 8),
+                    Size = new Size(innerW, 48),
+                    BackColor = Color.Transparent,
+                });
+                SuppressHorizontalScroll(list);
+                return;
+            }
+
+            foreach (var g in groups)
+            {
+                bool open = expanded.TryGetValue(g.Key, out var isOpen) && isOpen;
+                var header = MakeModCategoryHeader(g.Title, g.Entries.Count, open, innerW);
+                header.Location = new Point(pad, y);
+                string key = g.Key;
+                void Toggle()
+                {
+                    expanded[key] = !expanded[key];
+                    if (key == "stub")
+                        _modsStubExpanded = expanded[key];
+                    RebuildList();
+                }
+                header.Click += (_, _) => Toggle();
+                foreach (Control child in header.Controls)
+                    child.Click += (_, _) => Toggle();
+                list.Controls.Add(header);
+                y += header.Height + 10;
+
+                if (!open)
+                {
+                    y += 14;
+                    continue;
+                }
+
+                foreach (var mod in g.Entries)
+                {
+                    bool enabled = preserved.TryGetValue(mod.Id, out var c) ? c : mod.Enabled;
+                    var row = MakeModRow(mod, innerW, enabled);
+                    row.Location = new Point(pad, y);
+                    list.Controls.Add(row);
+                    y += row.Height + 14;
+                }
+
+                y += 18;
+            }
+
+            list.Controls.Add(new Panel
+            {
+                Location = new Point(0, y),
+                Size = new Size(1, 8),
                 BackColor = Color.Transparent,
             });
-            y += 56;
+            SuppressHorizontalScroll(list);
         }
 
-        y += 8;
-        var open = MakePrimaryBtn("Open mods folder");
-        open.Size = new Size(200, 42);
-        open.Location = new Point(36, y);
-        open.Click += (_, _) => Emit(new { type = "openMods" });
+        var openBtn = MakePrimaryBtn("Open mods folder");
+        openBtn.Size = new Size(200, 42);
+        openBtn.Click += (_, _) => Emit(new { type = "openMods" });
 
         var save = MakePrimaryBtn("Save");
-        save.Location = new Point(250, y);
         save.Click += (_, _) =>
         {
             var enabled = _modChecks
@@ -1493,14 +1593,174 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(400, y);
         back.Click += (_, _) => CloseSheet();
-        card.Controls.Add(open);
+        card.Controls.Add(openBtn);
         card.Controls.Add(save);
         card.Controls.Add(back);
-        card.Height = Math.Min(720, y + 80);
-        OpenSheet(card);
+
+        void LayoutModsSheet()
+        {
+            const int marginX = 36;
+            const int footerH = 64;
+            title.Location = new Point(marginX, 22);
+            hint.Location = new Point(marginX, 88);
+            hint.Width = Math.Max(280, card.ClientSize.Width - marginX * 2);
+
+            int listTop = 132;
+            list.Location = new Point(28, listTop);
+            list.Size = new Size(
+                Math.Max(320, card.ClientSize.Width - 56),
+                Math.Max(160, card.ClientSize.Height - listTop - footerH - 16));
+
+            int by = card.ClientSize.Height - footerH + 8;
+            openBtn.Location = new Point(marginX, by);
+            save.Location = new Point(card.ClientSize.Width - marginX - 160 - 12 - 160, by);
+            back.Location = new Point(card.ClientSize.Width - marginX - 160, by);
+
+            RebuildList();
+        }
+
+        card.Resize += (_, _) => LayoutModsSheet();
+        OpenSheetFill(card);
+        LayoutModsSheet();
         Emit(new { type = "getState" });
+    }
+
+    sealed record ModListEntry(string Id, string Name, string Version, string Author, string Category, bool Enabled);
+
+    sealed record ModGroup(string Key, string Title, List<ModListEntry> Entries);
+
+    static string InferModCategory(string id, string name)
+    {
+        if (id.Equals("auto-spin", StringComparison.OrdinalIgnoreCase))
+            return "gameplay";
+        if (id.EndsWith("-stub", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Stub", StringComparison.OrdinalIgnoreCase))
+            return "stub";
+        return "installed";
+    }
+
+    static string CategoryTitle(string key) => key switch
+    {
+        "gameplay" => "Gameplay",
+        "assets" => "Assets",
+        "installed" => "Installed",
+        "stub" => "Samples & stubs",
+        _ => string.IsNullOrWhiteSpace(key)
+            ? "Installed"
+            : char.ToUpperInvariant(key[0]) + key[1..],
+    };
+
+    static List<ModGroup> BuildModGroups(List<ModListEntry> entries)
+    {
+        static int Rank(string key) => key switch
+        {
+            "gameplay" => 0,
+            "assets" => 1,
+            "installed" => 2,
+            "stub" => 100,
+            _ => 50,
+        };
+
+        return entries
+            .GroupBy(e => e.Category, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => Rank(g.Key.ToLowerInvariant()))
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ModGroup(
+                g.Key.ToLowerInvariant(),
+                CategoryTitle(g.Key.ToLowerInvariant()),
+                g.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList()))
+            .ToList();
+    }
+
+    static void SuppressHorizontalScroll(ScrollableControl panel)
+    {
+        // Children are width-clamped; force the virtual canvas not to grow sideways.
+        panel.HorizontalScroll.Value = 0;
+        panel.HorizontalScroll.Visible = false;
+        panel.HorizontalScroll.Enabled = false;
+        var min = panel.AutoScrollMinSize;
+        if (min.Width != 0)
+            panel.AutoScrollMinSize = new Size(0, min.Height);
+    }
+
+    Panel MakeModCategoryHeader(string title, int count, bool expanded, int width)
+    {
+        var p = new DoubleBufferedPanel
+        {
+            Size = new Size(width, 40),
+            Cursor = Cursors.Hand,
+            BackColor = Color.FromArgb(36, NativeTheme.CardTop),
+            TabStop = true,
+        };
+        var arrow = expanded ? "▼" : "▶";
+        p.Controls.Add(new Label
+        {
+            Text = $"{arrow}  {title.ToUpperInvariant()}",
+            Font = NativeTheme.MakeNunito(16, extraBold: true),
+            ForeColor = NativeTheme.Wumpa,
+            Location = new Point(14, 8),
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand,
+        });
+        p.Controls.Add(new Label
+        {
+            Text = count == 1 ? "1 mod" : $"{count} mods",
+            Font = NativeTheme.MakeNunito(13),
+            ForeColor = Color.FromArgb(150, NativeTheme.Sand),
+            Location = new Point(Math.Max(80, width - 96), 10),
+            Size = new Size(84, 22),
+            TextAlign = ContentAlignment.MiddleRight,
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand,
+        });
+        p.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Color.FromArgb(70, 255, 160, 40), 1f);
+            e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
+        };
+        return p;
+    }
+
+    Panel MakeModRow(ModListEntry mod, int width, bool enabled)
+    {
+        var row = new DoubleBufferedPanel
+        {
+            Size = new Size(width, 64),
+            BackColor = Color.FromArgb(28, 18, 14),
+        };
+        row.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Color.FromArgb(55, 255, 180, 80), 1f);
+            e.Graphics.DrawRectangle(pen, 0, 0, row.Width - 1, row.Height - 1);
+        };
+
+        var label = string.IsNullOrWhiteSpace(mod.Version) ? mod.Name : $"{mod.Name}  v{mod.Version}";
+        if (!string.IsNullOrWhiteSpace(mod.Author))
+            label += $"  —  {mod.Author}";
+
+        var check = MakeCheck(label);
+        check.Font = NativeTheme.MakeNunito(17);
+        check.AutoSize = false;
+        check.Location = new Point(16, 10);
+        check.Size = new Size(Math.Max(120, width - 32), 28);
+        check.Checked = enabled;
+        _modChecks[mod.Id] = check;
+        row.Controls.Add(check);
+
+        row.Controls.Add(new Label
+        {
+            Text = mod.Id,
+            ForeColor = Color.FromArgb(130, NativeTheme.Sand),
+            Font = NativeTheme.MakeNunito(12),
+            Location = new Point(50, 38),
+            Size = new Size(Math.Max(80, width - 66), 18),
+            BackColor = Color.Transparent,
+            AutoEllipsis = true,
+        });
+
+        return row;
     }
 
     void ShowCheat()

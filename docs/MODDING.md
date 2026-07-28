@@ -30,6 +30,7 @@ mods/
   "name": "My Mod",
   "version": "1.0.0",
   "author": "you",
+  "category": "gameplay",
   "dependencies": ["other-mod-id"],
   "assets": {
     "textures": [{ "id": "demo_tile_a", "file": "textures/demo_tile_a.png" }],
@@ -40,6 +41,7 @@ mods/
 ```
 
 - **id** — unique, used by `ActiveMods` and the cache filename.
+- **category** — optional launcher group (`gameplay`, `assets`, `stub`, …). Samples shipped with the game use `stub` (collapsed by default in the Mods menu). If omitted, ids ending in `-stub` (or names containing “Stub”) count as stubs; everything else is **Installed**.
 - **dependencies** — other mod ids that must load first (topo-sorted; missing deps skip the mod).
 - **assets** — optional declarative pack (see below).
 
@@ -63,7 +65,7 @@ See [`examples/mods/asset-pack-stub`](../examples/mods/asset-pack-stub) (no C#) 
 
 ## Enable / disable (launcher)
 
-1. Open **MODS** in the launcher.
+1. Open **MODS** in the launcher (full-window sheet, grouped by category).
 2. Toggle checkboxes, **Save**.
 3. Restart the game (hooks install only at start).
 

@@ -3,6 +3,7 @@
   "name": "Texture Replace Stub",
   "version": "1.2.0",
   "author": "CrashBandicoot.Launcher",
+  "category": "stub",
   "dependencies": [],
   "assets": {
     "textures": [

@@ -3,5 +3,6 @@
   "name": "VRAM Transfer Stub",
   "version": "1.1.0",
   "author": "CrashBandicoot.Launcher",
+  "category": "stub",
   "dependencies": []
 }

@@ -199,6 +199,7 @@ public sealed class LauncherHost : Form
             name = m.Name,
             version = m.Version,
             author = m.Author,
+            category = m.ResolvedCategory,
             enabled = !modsConfigured || activeSet.Contains(m.Id),
         }).ToArray();
 
