@@ -162,7 +162,8 @@ public class ViewConfig
     }
 
     /// <summary>
-    /// Expand horizontal FOV to 16:9 (side margins). Does not stretch the 4:3 image.
+    /// Widescreen hack: GTE FOV expand + wide present. On Crash 1 this stretches
+    /// pre-rendered 4:3 backgrounds — there is no extra scenery to reveal.
     /// </summary>
     public bool Widescreen
     {

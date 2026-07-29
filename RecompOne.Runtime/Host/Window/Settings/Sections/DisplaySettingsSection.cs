@@ -47,7 +47,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Expands the view — does not stretch");
+        ImGui.TextDisabled("Hack: stretches 4:3 (no extra scenery)");
 
         bool integer = ConfigManager.View.IntegerScale;
         if (ImGui.Checkbox("Integer scaling", ref integer))

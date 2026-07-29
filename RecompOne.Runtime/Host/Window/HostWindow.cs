@@ -336,8 +336,9 @@ internal static class HostWindow
     }
 
     /// <summary>
-    /// Enable 16:9 horizontal FOV expansion (side margins). Off keeps classic 4:3 without stretch.
-    /// Cinema levels (Crash 1 Intro/Ending) keep 4:3 framing with black pillars while widescreen is on.
+    /// Enable 16:9 widescreen hack (GTE FOV expand + side margins). On Crash 1 this
+    /// stretches pre-rendered backgrounds rather than revealing extra scenery.
+    /// Cinema levels (Intro/Ending) keep 4:3 framing with black pillars while on.
     /// </summary>
     public static void ApplyWidescreen(bool on)
     {

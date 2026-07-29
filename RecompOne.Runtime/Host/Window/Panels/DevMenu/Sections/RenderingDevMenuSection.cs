@@ -27,7 +27,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             if (ImGui.Button(GraphicsPresets.Labels[i], new Vector2(-1, 0)))
                 GraphicsPresets.Apply(i);
         }
-        ImGuiEx.TextDisabled("One-click look — live, no restart");
+        ImGuiEx.TextDisabled("Live apply, no restart");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -40,7 +40,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Expands FOV — does not stretch");
+        ImGuiEx.TextDisabled("Hack: stretches 4:3");
 
         bool dedither = ConfigManager.View.Dedither;
         if (ImGui.Checkbox("Dedither", ref dedither))
@@ -68,7 +68,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             ConfigManager.View.IntegerScale = integer;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Whole-pixel upscale — sharp, with black bars");
+        ImGuiEx.TextDisabled("Sharp upscale, black bars");
 
         bool nearest = ConfigManager.View.PresentNearest;
         if (ImGui.Checkbox("Crisp pixels (nearest)", ref nearest))
@@ -77,7 +77,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             Hle.GpuHle.PresentNearest = nearest;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Nearest present filter — no blurry upscale");
+        ImGuiEx.TextDisabled("No blurry upscale");
 
         bool vsync = ConfigManager.View.VSync;
         if (ImGui.Checkbox("VSync", ref vsync))
@@ -86,7 +86,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             HostWindow.ApplyVSync(vsync);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Reduces tearing; may add a frame of latency");
+        ImGuiEx.TextDisabled("Less tearing, slight lag");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -102,9 +102,9 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             ConfigManager.SaveView(PanelManager.Panels);
             NoticePopup.Show("You need to restart the application to apply this configuration");
         }
-        ImGuiEx.TextDisabled("Higher scales use more GPU VRAM (see Engine)");
+        ImGuiEx.TextDisabled("Higher = more VRAM (Engine)");
         if (ConfigManager.View.InternalResolution != Hle.GlVram.Scale)
-            ImGuiEx.TextDisabled("restart required to apply");
+            ImGuiEx.TextDisabled("Restart required");
 
         int filter = ConfigManager.View.TextureFilter;
         if (ImGui.Combo("Texture filter", ref filter, ViewConfig.TextureFilterLabels, ViewConfig.TextureFilterLabels.Length))
@@ -126,7 +126,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             }
         }
 
-        ImGuiEx.TextDisabled("Filters auto-off on menus & cutscenes");
+        ImGuiEx.TextDisabled("Off on menus & cutscenes");
 
         ImGui.Spacing();
         ImGui.Separator();

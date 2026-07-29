@@ -18,7 +18,7 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Expands FOV — does not stretch");
+        ImGuiEx.TextDisabled("Hack: stretches 4:3");
 
         bool dedither = ConfigManager.View.Dedither;
         if (ImGui.Checkbox("Dedither", ref dedither))
@@ -27,7 +27,7 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             Hle.GpuHle.Dedither = dedither;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Removes PS1 dither noise");
+        ImGuiEx.TextDisabled("Removes dither noise");
 
         bool dejitter = ConfigManager.View.Dejitter;
         if (ImGui.Checkbox("Dejitter", ref dejitter))
@@ -36,7 +36,7 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             Hle.GpuHle.Dejitter = dejitter;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Reduces polygon wobble (GTE subpixel)");
+        ImGuiEx.TextDisabled("Less polygon wobble");
 
         bool showBar = !ConfigManager.View.HideTopBar;
         if (ImGui.Checkbox("Show Menu Bar", ref showBar))
@@ -44,7 +44,7 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             ConfigManager.View.HideTopBar = !showBar;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("F1 also toggles the menu bar");
-        ImGuiEx.TextDisabled("Graphics presets / integer scale / VSync → Rendering");
+        ImGuiEx.TextDisabled("Also F1");
+        ImGuiEx.TextDisabled("More options: Rendering");
     }
 }

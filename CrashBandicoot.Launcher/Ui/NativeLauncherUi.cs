@@ -1365,7 +1365,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _widescreen.Location = new Point(36, y);
         card.Controls.Add(_widescreen);
         y += 32;
-        card.Controls.Add(Hint("Expands the field of view — does not stretch the image.", ref y));
+        card.Controls.Add(Hint("Widescreen hack — stretches the 4:3 frame. Crash 1 cannot show extra scenery (pre-rendered backgrounds).", ref y));
 
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [
