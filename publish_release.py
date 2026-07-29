@@ -267,7 +267,7 @@ def copy_example_mods(out_dir: Path) -> None:
                 shutil.copytree(child, dest)
             elif child.is_file():
                 shutil.copy2(child, dest)
-        print(f"[publish] sample mods → {dest_root.relative_to(out_dir)}")
+        print(f"[publish] sample mods -> {dest_root.relative_to(out_dir)}")
 
 
 def main() -> None:
