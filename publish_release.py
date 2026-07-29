@@ -243,7 +243,7 @@ def publish(out_dir: Path, rid: str) -> None:
         print("  3. Expect next to the exe: settings.json, save\\, game\\, mods\\")
     else:
         print(f"  1. Copy/run:  {binary} --run /path/to/game.cue")
-        print("  2. Needs OpenGL 4.3+ + system OpenAL Soft (e.g. libopenal1)")
+        print("  2. Needs OpenGL 4.3+ (OpenAL Soft is bundled)")
         print("  3. Expect next to the binary: settings.json, save/, game/, mods/")
         print("  Note: graphical launcher UI is Windows-only; Linux is CLI + game window.")
 

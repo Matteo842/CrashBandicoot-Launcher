@@ -39,11 +39,12 @@ If someone offers you this project **bundled with a ROM/ISO**, that is not from 
 
 - Windows 10/11 x64  
 - A **legal** dump of *Crash Bandicoot* NTSC-U (`SCUS_949.00` / SCUS-94900) as `.cue` + matching `.bin` in the same folder  
+- Audio uses **OpenAL Soft** bundled with the release (`soft_oal.dll`) — no separate OpenAL install required  
 
 ### Linux
 
 - x64 Linux with **OpenGL 4.3+** (Mesa / NVIDIA / AMD — a real GPU or working VM 3D accel)  
-- **OpenAL Soft** system library (e.g. Debian/Ubuntu: `libopenal1`)  
+- Audio uses **OpenAL Soft** bundled with the release (`libopenal.so`) — no `libopenal1` / system OpenAL install required  
 - Same legal `.cue` + `.bin` dump as above  
 
 On Linux there is **no graphical launcher menu** yet — use the CLI (`--prepare` / `--run`). The game opens in a standalone Silk/GLFW window. The painted WinForms UI remains Windows-only.
@@ -51,7 +52,7 @@ On Linux there is **no graphical launcher menu** yet — use the CLI (`--prepare
 **VMware / weak GL:** if you get an instant `Segmentation fault` right after `launching … game.recomp.dll`, the VM likely cannot create an OpenGL 4.3 context. Check with `glxinfo -B`, enable 3D acceleration, or try software GL for a smoke test:
 
 ```bash
-sudo apt install mesa-utils libopenal1
+sudo apt install mesa-utils
 LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot --run /path/to/game.cue
 ```
 
