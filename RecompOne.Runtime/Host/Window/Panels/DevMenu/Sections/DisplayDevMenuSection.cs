@@ -18,7 +18,7 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Hack: stretches 4:3");
+        ImGuiEx.TextDisabled("Hack: stretches 4:3 (gameplay only)");
 
         bool dedither = ConfigManager.View.Dedither;
         if (ImGui.Checkbox("Dedither", ref dedither))

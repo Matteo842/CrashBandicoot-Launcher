@@ -26,26 +26,19 @@ public static class GpuHle
     public static bool PresentNearest { get; set; }
 
     /// <summary>
-    /// When widescreen is on, expand GTE horizontal FOV into side margins and present them.
-    /// Off for Crash 1 non-gameplay levels (title/menu/map, intro, ending, completion):
-    /// those keep clean 4:3 with black pillars — FOV expand only shows unfinished sides / stale RT junk.
+    /// When widescreen is on, expand GTE FOV into side margins during gameplay only.
+    /// Off on title/menu/map/cinema — those expose unfinished sides / stale RT junk.
     /// </summary>
     public static bool WideFovActive { get; private set; }
 
-    /// <summary>
-    /// Texture filters are off on title/menu/map and cinema levels — CLUT UI / FMV-adjacent
-    /// scenes break badly under bilinear (grid artifacts on the main menu).
-    /// </summary>
+    /// <summary>Texture filters follow the user setting on all levels (including menus).</summary>
     public static bool TextureFiltersActive { get; private set; }
 
-    /// <summary>Same gate as texture filters — menus/cinemas keep original dither.</summary>
+    /// <summary>Dedither follows the user setting on all levels.</summary>
     public static bool DeditherActive { get; private set; }
 
-    /// <summary>Same gate — 2D UI is not GTE-projected; skip cache lookups there.</summary>
+    /// <summary>Dejitter follows the user setting (no-op where geometry is not GTE-projected).</summary>
     public static bool DejitterActive { get; private set; }
-
-    // SCUS-94900: current level ID — see Catalog.Levels (cbhacks Memory Map).
-    static bool IsUiOrCinemaLevel(uint level) => Catalog.Levels.IsUiOrCinema(level);
 
     /// <summary>Call once per frame (e.g. PutDrawEnv) before GTE draws.</summary>
     public static void RefreshWideFov()
@@ -53,14 +46,14 @@ public static class GpuHle
         bool uiOrCinema = false;
         var m = Runtime.Mem;
         if (m != null)
-            uiOrCinema = IsUiOrCinemaLevel(m.ReadU32(Catalog.LevelIdAddr));
+            uiOrCinema = Catalog.Levels.IsUiOrCinema(m.ReadU32(Catalog.LevelIdAddr));
 
+        // Gameplay only — menus/map/cinema keep clean 4:3 with black pillars.
         WideFovActive = WideAspect > 0f && !uiOrCinema;
 
-        // All visual filters share this gate — menus/cinemas stay original.
-        TextureFiltersActive = TextureFilter > 0 && !uiOrCinema;
-        DeditherActive = Dedither && !uiOrCinema;
-        DejitterActive = Dejitter && !uiOrCinema;
+        TextureFiltersActive = TextureFilter > 0;
+        DeditherActive = Dedither;
+        DejitterActive = Dejitter;
     }
 
     /// <summary>Effective filter mode for the GPU (0 when gated off).</summary>

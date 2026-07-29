@@ -38,7 +38,7 @@ public static class LibGpu
         var gpu = Runtime.Gpu;
         if (gpu == null) { c.V0 = c.A0; return; }
 
-        // Keep cinema FOV gate in sync before this frame's draws / GTE work.
+        // Keep widescreen / filter flags in sync before this frame's draws / GTE work.
         GpuHle.RefreshWideFov();
 
         uint env = c.A0;

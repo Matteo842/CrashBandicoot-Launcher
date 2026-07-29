@@ -106,8 +106,7 @@ public class ViewConfig
     public const int TextureFilterSoftSmooth = 3;
 
     /// <summary>
-    /// Active texture filter. Live — no restart.
-    /// Auto-disabled on title/menu/map and cinema levels.
+    /// Active texture filter. Live — no restart. Applies on all levels including menus.
     /// </summary>
     public int TextureFilter
     {
@@ -162,8 +161,8 @@ public class ViewConfig
     }
 
     /// <summary>
-    /// Widescreen hack: GTE FOV expand + wide present. On Crash 1 this stretches
-    /// pre-rendered 4:3 backgrounds — there is no extra scenery to reveal.
+    /// Widescreen hack (gameplay only): GTE FOV expand + wide present. Off on menus/map/cinema.
+    /// On Crash 1 this stretches pre-rendered 4:3 backgrounds — no extra scenery to reveal.
     /// </summary>
     public bool Widescreen
     {

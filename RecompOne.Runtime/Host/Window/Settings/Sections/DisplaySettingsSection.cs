@@ -47,7 +47,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Hack: stretches 4:3 (no extra scenery)");
+        ImGui.TextDisabled("Hack: stretches 4:3 (gameplay only)");
 
         bool integer = ConfigManager.View.IntegerScale;
         if (ImGui.Checkbox("Integer scaling", ref integer))
@@ -129,7 +129,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Reduces polygon wobble (GTE subpixel)");
 
-        ImGui.TextDisabled("Filters auto-off on menus & cutscenes");
+        ImGui.TextDisabled("Applies on all levels (menus included)");
     }
 
     static int IndexOfScale(int scale)

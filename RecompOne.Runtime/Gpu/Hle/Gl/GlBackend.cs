@@ -512,8 +512,7 @@ public sealed class GlBackend : IGpuBackend
             }
 
         // Only show side margins while FOV expand is filling them. Otherwise present the
-        // 4:3 core alone (clean black pillars) — avoids flickering stale gutter pixels on
-        // intro / title / menu before gameplay.
+        // 4:3 core alone (clean black pillars) — avoids flickering stale gutter pixels.
         bool showWide = src is { Margin: > 0 } && GpuHle.WideFovActive;
         int w1x = showWide ? w + src!.Margin * 2 : w;
         int h1x = h;
@@ -554,7 +553,7 @@ public sealed class GlBackend : IGpuBackend
             }
             else if (src.Margin > 0)
             {
-                // Wide RT exists but cinema/menu: crop to 4:3 core only.
+                // Wide RT exists but WideFov off: crop to 4:3 core only.
                 ox = src.Margin + dispX - src.X;
                 ow = w;
                 texW = src.Wide1x;

@@ -1365,7 +1365,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _widescreen.Location = new Point(36, y);
         card.Controls.Add(_widescreen);
         y += 32;
-        card.Controls.Add(Hint("Widescreen hack — stretches the 4:3 frame. Crash 1 cannot show extra scenery (pre-rendered backgrounds).", ref y));
+        card.Controls.Add(Hint("Widescreen hack (gameplay only) — stretches the 4:3 frame. Off on menus, map, and cutscenes.", ref y));
 
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [
@@ -1413,7 +1413,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _dejitter.Location = new Point(36, y);
         card.Controls.Add(_dejitter);
         y += 34;
-        card.Controls.Add(Hint("Texture filters, dedither & dejitter auto-off on menus & cutscenes.", ref y));
+        card.Controls.Add(Hint("Texture filters, dedither and dejitter apply everywhere, including menus.", ref y));
 
         var save = MakePrimaryBtn("Save");
         save.Location = new Point(36, y + 10);

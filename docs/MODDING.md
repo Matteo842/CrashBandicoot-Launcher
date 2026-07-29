@@ -158,7 +158,7 @@ Crash 1 (SCUS-94900) level table is seeded from [cbhacks Level ID](https://wiki.
 
 `kind`: `gameplay` | `titleMap` | `complete` | `cinema` | `bonus` | `unused` | `empty`.
 
-Widescreen / filters / auto-spin treat `titleMap`, `complete`, and `cinema` as non-gameplay (same gate as before).
+Widescreen is gameplay-only (`titleMap` / `complete` / `cinema` stay 4:3). Filters / dedither apply on all levels. Auto-spin uses the same non-gameplay gate.
 
 ```csharp
 using RecompOne.Runtime.Catalogs;

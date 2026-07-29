@@ -34,7 +34,7 @@ public sealed class AutoSpinMod : IMod
     static bool InGameplayLevel(IMemory m)
     {
         uint level = m.ReadU32(Catalog.LevelIdAddr);
-        // Same gate as GpuHle widescreen / filters (titleMap / complete / cinema).
+        // Keep off on titleMap / complete / cinema so Cross can confirm on the map.
         return !Catalog.Levels.IsUiOrCinema(level);
     }
 }

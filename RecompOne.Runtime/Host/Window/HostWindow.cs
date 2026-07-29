@@ -336,9 +336,9 @@ internal static class HostWindow
     }
 
     /// <summary>
-    /// Enable 16:9 widescreen hack (GTE FOV expand + side margins). On Crash 1 this
-    /// stretches pre-rendered backgrounds rather than revealing extra scenery.
-    /// Cinema levels (Intro/Ending) keep 4:3 framing with black pillars while on.
+    /// Enable 16:9 widescreen hack (GTE FOV expand + side margins) in gameplay levels.
+    /// Title/menu/map/cinema stay 4:3 with black pillars (avoids side junk).
+    /// On Crash 1 this stretches pre-rendered backgrounds rather than revealing extra scenery.
     /// </summary>
     public static void ApplyWidescreen(bool on)
     {
