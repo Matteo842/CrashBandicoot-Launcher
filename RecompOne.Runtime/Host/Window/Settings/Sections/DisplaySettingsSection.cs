@@ -129,7 +129,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Reduces polygon wobble (GTE subpixel)");
 
-        ImGui.TextDisabled("Applies on all levels (menus included)");
+        ImGui.TextDisabled("Filters off on menus & cutscenes; dedither applies everywhere");
     }
 
     static int IndexOfScale(int scale)

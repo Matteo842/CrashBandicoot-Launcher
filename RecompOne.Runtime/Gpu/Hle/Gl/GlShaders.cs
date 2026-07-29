@@ -171,12 +171,21 @@ internal static class GlShaders
             return fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
         }
 
+        // Keep bilinear taps inside the same 16x16 UV cell. Crash packs unrelated
+        // tiles in VRAM; crossing the boundary pulls green/junk and draws a grid.
+        ivec2 tileTap(ivec2 base, ivec2 off) {
+            ivec2 t = base + off;
+            if ((base.x >> 4) != (t.x >> 4) || (base.y >> 4) != (t.y >> 4))
+                return base;
+            return t;
+        }
+
         vec4 sampleBilinearF(vec2 uvf, vec2 f) {
             ivec2 i00 = ivec2(floor(uvf));
             vec4 c00 = sampleNearest(i00);
-            vec4 c10 = sampleNearest(i00 + ivec2(1, 0));
-            vec4 c01 = sampleNearest(i00 + ivec2(0, 1));
-            vec4 c11 = sampleNearest(i00 + ivec2(1, 1));
+            vec4 c10 = sampleNearest(tileTap(i00, ivec2(1, 0)));
+            vec4 c01 = sampleNearest(tileTap(i00, ivec2(0, 1)));
+            vec4 c11 = sampleNearest(tileTap(i00, ivec2(1, 1)));
 
             // Skip transparent PS1 key color so sprite edges don't go muddy.
             float w00 = (1.0 - f.x) * (1.0 - f.y) * (isTransparent(c00) ? 0.0 : 1.0);
@@ -194,14 +203,14 @@ internal static class GlShaders
         }
 
         vec4 sampleSharpBilinear(vec2 uvf) {
-            // Pull weights toward texel centers — less soap than plain bilinear.
+            // Pull weights toward texel centers - less soap than plain bilinear.
             vec2 f = fract(uvf);
             f = clamp((f - 0.5) * 2.0 + 0.5, 0.0, 1.0);
             return sampleBilinearF(uvf, f);
         }
 
         vec4 sampleSoftSmooth(vec2 uvf) {
-            // Soften bilinear weights (no 3x3 — that bled across atlas seams = green lines).
+            // Soften bilinear weights (no 3x3 - that bled across atlas seams).
             vec2 f = fract(uvf);
             f = f * f * (3.0 - 2.0 * f);
             return sampleBilinearF(uvf, f);

@@ -126,7 +126,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             }
         }
 
-        ImGuiEx.TextDisabled("Applies everywhere");
+        ImGuiEx.TextDisabled("Off on menus & cutscenes");
 
         ImGui.Spacing();
         ImGui.Separator();

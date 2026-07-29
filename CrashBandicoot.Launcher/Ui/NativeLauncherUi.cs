@@ -1413,7 +1413,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _dejitter.Location = new Point(36, y);
         card.Controls.Add(_dejitter);
         y += 34;
-        card.Controls.Add(Hint("Texture filters, dedither and dejitter apply everywhere, including menus.", ref y));
+        card.Controls.Add(Hint("Texture filters auto-off on menus & cutscenes. Dedither and dejitter apply everywhere.", ref y));
 
         var save = MakePrimaryBtn("Save");
         save.Location = new Point(36, y + 10);

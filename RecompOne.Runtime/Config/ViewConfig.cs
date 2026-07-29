@@ -106,7 +106,8 @@ public class ViewConfig
     public const int TextureFilterSoftSmooth = 3;
 
     /// <summary>
-    /// Active texture filter. Live — no restart. Applies on all levels including menus.
+    /// Active texture filter. Live — no restart.
+    /// Auto-disabled on title/menu/map and cinema levels.
     /// </summary>
     public int TextureFilter
     {

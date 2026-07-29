@@ -31,7 +31,10 @@ public static class GpuHle
     /// </summary>
     public static bool WideFovActive { get; private set; }
 
-    /// <summary>Texture filters follow the user setting on all levels (including menus).</summary>
+    /// <summary>
+    /// Texture filters are off on title/menu/map and cinema — CLUT UI / FMV-adjacent
+    /// scenes break into a tile grid under bilinear.
+    /// </summary>
     public static bool TextureFiltersActive { get; private set; }
 
     /// <summary>Dedither follows the user setting on all levels.</summary>
@@ -51,7 +54,8 @@ public static class GpuHle
         // Gameplay only — menus/map/cinema keep clean 4:3 with black pillars.
         WideFovActive = WideAspect > 0f && !uiOrCinema;
 
-        TextureFiltersActive = TextureFilter > 0;
+        // Filters stay off on UI/cinema (tile-grid artifacts). Dedither/dejitter stay on.
+        TextureFiltersActive = TextureFilter > 0 && !uiOrCinema;
         DeditherActive = Dedither;
         DejitterActive = Dejitter;
     }
