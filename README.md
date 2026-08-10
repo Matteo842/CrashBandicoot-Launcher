@@ -1,3 +1,8 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Latest Release](https://img.shields.io/github/v/release/Matteo842/CrashBandicoot-Launcher)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Matteo842/CrashBandicoot-Launcher/total.svg)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases)
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/V7V61GBYAX)
+
 # Crash Bandicoot Launcher (unofficial)
 
 > **Unofficial fan project.** Not affiliated with, endorsed by, or connected to Sony Interactive Entertainment, Activision, Naughty Dog, or any rights holder of *Crash Bandicoot*.  
