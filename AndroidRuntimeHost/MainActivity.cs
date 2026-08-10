@@ -16,7 +16,7 @@ using Color = Android.Graphics.Color;
 namespace CrashBandicoot.AndroidRuntime;
 
 [Activity(
-    Label = "Crash Runtime Preview",
+    Label = "Crash Bandicoot Launcher",
     MainLauncher = true,
     Exported = true,
     ScreenOrientation = ScreenOrientation.Landscape,
@@ -26,10 +26,9 @@ public sealed class MainActivity : Activity
     const int PickDiscFolderRequest = 949;
     const string DiscTreePreference = "disc_tree";
 
+    LauncherScreen _launcher = null!;
     TextView _status = null!;
     ImageView _screen = null!;
-    Button _selectButton = null!;
-    Button _startButton = null!;
     ProgressBar _progress = null!;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
@@ -38,20 +37,16 @@ public sealed class MainActivity : Activity
     {
         base.OnCreate(savedInstanceState);
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
-        BuildUi();
-
-        var incomingTree = Intent?.Data;
-        if (incomingTree != null)
+        if (Window != null)
         {
-            _treeUri = incomingTree;
-            GetPreferences(FileCreationMode.Private).Edit()!
-                .PutString(DiscTreePreference, incomingTree.ToString())!
-                .Apply();
-            ScanSelectedFolder();
-            if (_disc != null)
-                _ = StartGameAsync();
-            return;
+            Window.SetStatusBarColor(Color.Rgb(6, 16, 24));
+            Window.SetNavigationBarColor(Color.Rgb(6, 16, 24));
+            Window.DecorView.SystemUiFlags = SystemUiFlags.LayoutStable |
+                                             SystemUiFlags.LayoutHideNavigation |
+                                             SystemUiFlags.ImmersiveSticky;
         }
+
+        ShowLauncherUi();
 
         var saved = GetPreferences(FileCreationMode.Private).GetString(DiscTreePreference, null);
         if (!string.IsNullOrWhiteSpace(saved))
@@ -61,7 +56,18 @@ public sealed class MainActivity : Activity
         }
     }
 
-    void BuildUi()
+    void ShowLauncherUi()
+    {
+        _launcher = new LauncherScreen(this);
+        _launcher.SelectDiscRequested += PickDiscFolder;
+        _launcher.StartGameRequested += () => _ = StartGameAsync();
+        SetContentView(_launcher);
+
+        if (_disc != null)
+            ShowDiscReady();
+    }
+
+    void ShowGameUi()
     {
         var root = new LinearLayout(this)
         {
@@ -90,19 +96,6 @@ public sealed class MainActivity : Activity
 
         _progress = new ProgressBar(this) { Indeterminate = true, Visibility = ViewStates.Gone };
         root.AddView(_progress, new LinearLayout.LayoutParams(Dp(42), Dp(42)));
-
-        var buttons = new LinearLayout(this)
-        {
-            Orientation = Orientation.Horizontal,
-        };
-        buttons.SetGravity(GravityFlags.Center);
-        _selectButton = new Button(this) { Text = "SELEZIONA DISCO" };
-        _startButton = new Button(this) { Text = "AVVIA GIOCO", Enabled = false };
-        _selectButton.Click += (_, _) => PickDiscFolder();
-        _startButton.Click += async (_, _) => await StartGameAsync();
-        buttons.AddView(_selectButton);
-        buttons.AddView(_startButton);
-        root.AddView(buttons);
         SetContentView(root);
     }
 
@@ -146,19 +139,32 @@ public sealed class MainActivity : Activity
             _disc = _treeUri == null ? null : FindDiscDocuments(_treeUri);
             if (_disc == null)
             {
-                _startButton.Enabled = false;
-                SetStatus("Nella cartella servono un file .cue e il relativo .bin.");
+                _launcher.ShowDisc(
+                    ready: false,
+                    "Disco non valido",
+                    "Nella cartella servono un file .cue e il relativo .bin.");
                 return;
             }
 
-            _startButton.Enabled = true;
-            SetStatus($"Disco trovato: {_disc.CueName} + {_disc.BinName}");
+            ShowDiscReady();
         }
         catch (Exception ex)
         {
-            _startButton.Enabled = false;
-            SetStatus($"Non riesco a leggere la cartella: {ex.Message}");
+            _launcher.ShowDisc(
+                ready: false,
+                "Cartella non leggibile",
+                ex.Message);
         }
+    }
+
+    void ShowDiscReady()
+    {
+        if (_disc == null) return;
+        var sizeMb = _disc.BinSize / (1024d * 1024d);
+        _launcher.ShowDisc(
+            ready: true,
+            "File del disco pronti",
+            $"{_disc.CueName}  •  {_disc.BinName} ({sizeMb:0} MB)\nIl controllo completo SCUS-94900 verrà eseguito all'avvio.");
     }
 
     DiscDocuments? FindDiscDocuments(Android.Net.Uri treeUri)
@@ -206,8 +212,8 @@ public sealed class MainActivity : Activity
     async Task StartGameAsync()
     {
         if (_disc == null) return;
-        _selectButton.Enabled = false;
-        _startButton.Enabled = false;
+        _launcher.SetBusy(true, "Apro il runtime integrato e preparo i file del gioco.");
+        ShowGameUi();
         _progress.Visibility = ViewStates.Visible;
 
         try
@@ -263,7 +269,8 @@ public sealed class MainActivity : Activity
                 }
 
                 SetStatus("Avvio del core PS1…");
-                RecompOne.Runtime.Runtime.SetPlatformHost(new AndroidPlatformHost(this, _screen, _status));
+                RecompOne.Runtime.Runtime.SetPlatformHost(
+                    new AndroidPlatformHost(this, _screen, _status, _progress));
                 RunGameCore(gameDll, cuePath);
             });
         }
@@ -272,12 +279,11 @@ public sealed class MainActivity : Activity
             var root = Path.Combine(FilesDir!.AbsolutePath, "runtime");
             Directory.CreateDirectory(root);
             File.WriteAllText(Path.Combine(root, "android-last-error.txt"), ex.ToString());
-            SetStatus($"Avvio fallito: {ex.GetBaseException().Message}");
             RunOnUiThread(() =>
             {
-                _selectButton.Enabled = true;
-                _startButton.Enabled = _disc != null;
                 _progress.Visibility = ViewStates.Gone;
+                ShowLauncherUi();
+                _launcher.ShowError(ex.GetBaseException().Message);
             });
         }
     }

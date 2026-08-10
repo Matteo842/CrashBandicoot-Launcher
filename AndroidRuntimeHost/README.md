@@ -1,10 +1,8 @@
-# Android runtime preview
+# Unified Android app
 
-This is an isolated .NET-for-Android proof of concept for the real game runtime.
-It intentionally uses a different application id from `AndroidLauncher`, so both
-APKs can be installed together while the runtime is tested on a physical device.
-The launcher passes its selected document-tree URI to this app when `Start Game` is
-pressed; this app can also be opened directly and has its own folder picker.
+This is the single distributable Android application. The launcher UI, persisted
+Storage Access Framework folder selection, on-device recompiler, and game runtime
+all live in this .NET-for-Android project and are packaged into one APK.
 
 Current path:
 
@@ -15,9 +13,8 @@ Current path:
 5. show the software PS1 VRAM in an Android `ImageView`.
 
 The complete path above has been validated on a physical arm64 device through the
-Crash Bandicoot title screen. The preview deliberately starts without audio and
-controls; those are the next runtime milestones. No retail disc or generated game
-output is bundled.
+Crash Bandicoot title screen. Audio, settings, and controller/touch input are the
+next runtime milestones. No retail disc or generated game output is bundled.
 
 Build with JDK 21 (the Android Studio JDK 25 can still be used by the Gradle app):
 

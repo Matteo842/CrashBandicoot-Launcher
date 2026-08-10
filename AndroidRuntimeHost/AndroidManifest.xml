@@ -2,7 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <application
       android:allowBackup="false"
-      android:label="Crash Runtime Preview"
+      android:icon="@drawable/app_icon"
+      android:label="Crash Bandicoot Launcher"
       android:supportsRtl="true"
       android:theme="@android:style/Theme.Material.NoActionBar" />
 </manifest>

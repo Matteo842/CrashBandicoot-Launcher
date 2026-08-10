@@ -175,7 +175,6 @@ docs/HANDOFF_MODDING_P5_HOTRELOAD.md
 **/.externalNativeBuild/
 **/.cxx/
 **/build/
-AndroidLauncher/captures/
 AndroidRuntimeHost/captures/
 *.apk
 *.aab

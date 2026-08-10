@@ -5,7 +5,11 @@ using RecompOne.Runtime;
 
 namespace CrashBandicoot.AndroidRuntime;
 
-sealed class AndroidPlatformHost(Activity activity, ImageView screen, TextView status) : IRuntimePlatformHost
+sealed class AndroidPlatformHost(
+    Activity activity,
+    ImageView screen,
+    TextView status,
+    ProgressBar progress) : IRuntimePlatformHost
 {
     Bitmap? _bitmap;
     int _framePending;
@@ -40,6 +44,7 @@ sealed class AndroidPlatformHost(Activity activity, ImageView screen, TextView s
                 var previous = Interlocked.Exchange(ref _bitmap, next);
                 previous?.Recycle();
                 status.Text = $"Gioco in esecuzione • {width}×{height}";
+                progress.Visibility = Android.Views.ViewStates.Gone;
             }
             finally
             {
