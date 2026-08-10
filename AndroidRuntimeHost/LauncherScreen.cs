@@ -13,6 +13,8 @@ namespace CrashBandicoot.AndroidRuntime;
 /// </summary>
 sealed class LauncherScreen : View
 {
+    const float FooterUiScale = 1.30f;
+
     static readonly string[] MenuLabels =
     [
         "START GAME", "CONTROLS", "SETTINGS", "MODS", "CHEAT", "EXIT",
@@ -29,6 +31,7 @@ sealed class LauncherScreen : View
     readonly RectF _crateBounds = new();
     readonly RectF _infoBounds = new();
     readonly RectF _chipBounds = new();
+    Dialog? _aboutDialog;
 
     readonly Color _night = Color.Rgb(6, 16, 24);
     readonly Color _jungleTop = Color.Rgb(10, 40, 24);
@@ -123,30 +126,31 @@ sealed class LauncherScreen : View
     void LayoutScene(float width, float height)
     {
         _unit = Math.Clamp(height / 760f, 0.75f, 1.65f);
-        var footerHeight = 78f * _unit;
+        var footerHeight = 78f * FooterUiScale * _unit;
         _footerTop = height - footerHeight;
         var contentHeight = _footerTop;
 
         var brandX = 40f * _unit;
         var brandY = Math.Max(56f * _unit, contentHeight * 0.18f);
         var crateSize = Math.Min(width * 0.17f, contentHeight * 0.40f);
-        _crateBounds.Set(brandX, brandY + 120f * _unit,
-            brandX + crateSize, brandY + 120f * _unit + crateSize);
+        _crateBounds.Set(brandX, brandY + 165f * _unit,
+            brandX + crateSize, brandY + 165f * _unit + crateSize);
 
-        var menuX = width * 0.675f;
+        var menuX = width * 0.72f;
         var menuY = Math.Max(54f * _unit, contentHeight * 0.15f);
-        var menuRow = 60f * _unit;
+        var menuRow = 69f * _unit;
         for (var i = 0; i < _menuBounds.Length; i++)
         {
             var top = menuY + i * menuRow;
             _menuBounds[i].Set(menuX - 12f * _unit, top,
-                width - 30f * _unit, top + 52f * _unit);
+                width - 24f * _unit, top + 62f * _unit);
         }
 
-        var footerY = _footerTop + 16f * _unit;
-        _infoBounds.Set(28f * _unit, footerY, 64f * _unit, footerY + 36f * _unit);
-        _chipBounds.Set(76f * _unit, footerY + _unit,
-            244f * _unit, footerY + 35f * _unit);
+        var footerY = _footerTop + 16f * FooterUiScale * _unit;
+        _infoBounds.Set(28f * FooterUiScale * _unit, footerY,
+            64f * FooterUiScale * _unit, footerY + 36f * FooterUiScale * _unit);
+        _chipBounds.Set(76f * FooterUiScale * _unit, footerY + FooterUiScale * _unit,
+            244f * FooterUiScale * _unit, footerY + 35f * FooterUiScale * _unit);
     }
 
     void DrawBackground(Canvas canvas, float width, float height)
@@ -219,7 +223,7 @@ sealed class LauncherScreen : View
         DrawOutlinedText(canvas, "CRASH", _displayFont, 64f * _unit,
             _wumpa, Color.Rgb(58, 21, 0), x, y, 3f * _unit, true);
         DrawOutlinedText(canvas, "RECOMPILED", _displayFont, 28f * _unit,
-            _danger, Color.Rgb(58, 0, 0), x, y + 65f * _unit, 2f * _unit, true);
+            _danger, Color.Rgb(58, 0, 0), x, y + 90f * _unit, 2f * _unit, true);
     }
 
     void DrawCrate(Canvas canvas)
@@ -263,7 +267,7 @@ sealed class LauncherScreen : View
         var frame = new RectF(r);
         frame.Inset(10f * _unit, 10f * _unit);
         canvas.DrawRect(frame, _paint);
-        _paint.StrokeWidth = 2f * _unit;
+        _paint.StrokeWidth = 2f * FooterUiScale * _unit;
         _paint.Color = Color.Rgb(58, 32, 8);
         var inner = new RectF(r);
         inner.Inset(21f * _unit, 21f * _unit);
@@ -329,7 +333,7 @@ sealed class LauncherScreen : View
                 : hot ? _wumpaHot : _sand;
             var bounds = _menuBounds[i];
             var x = bounds.Left + (hot ? 10f * _unit : 0);
-            DrawTextAtTop(canvas, MenuLabels[i], _displayFont, 38f * _unit,
+            DrawTextAtTop(canvas, MenuLabels[i], _displayFont, 45.6f * _unit,
                 color, x, bounds.Top + 2f * _unit, shadow: true);
         }
     }
@@ -357,38 +361,42 @@ sealed class LauncherScreen : View
         _paint.Color = Color.Argb(165, 255, 180, 60);
         canvas.DrawOval(_infoBounds, _paint);
         _paint.SetStyle(Paint.Style.Fill);
-        DrawCenteredText(canvas, "i", _displayFont, 18f * _unit, _wumpaHot,
+        DrawCenteredText(canvas, "i", _displayFont, 18f * FooterUiScale * _unit, _wumpaHot,
             _infoBounds.CenterX(), _infoBounds.CenterY());
 
         _paint.Color = _pressed == 6
             ? Color.Argb(90, 255, 138, 0)
             : Color.Argb(38, 255, 138, 0);
-        canvas.DrawRoundRect(_chipBounds, 17f * _unit, 17f * _unit, _paint);
+        canvas.DrawRoundRect(_chipBounds, 17f * FooterUiScale * _unit,
+            17f * FooterUiScale * _unit, _paint);
         _paint.SetStyle(Paint.Style.Stroke);
-        _paint.StrokeWidth = Math.Max(1f, _unit);
+        _paint.StrokeWidth = Math.Max(1f, FooterUiScale * _unit);
         _paint.Color = Color.Argb(110, 255, 180, 60);
-        canvas.DrawRoundRect(_chipBounds, 17f * _unit, 17f * _unit, _paint);
+        canvas.DrawRoundRect(_chipBounds, 17f * FooterUiScale * _unit,
+            17f * FooterUiScale * _unit, _paint);
         _paint.SetStyle(Paint.Style.Fill);
-        DrawCenteredText(canvas, "Select disc (.cue)", _bodyBoldFont, 15f * _unit,
+        DrawCenteredText(canvas, "Select disc (.cue)", _bodyBoldFont,
+            15f * FooterUiScale * _unit,
             _sand, _chipBounds.CenterX(), _chipBounds.CenterY());
 
-        var textX = _chipBounds.Right + 14f * _unit;
-        var textRight = width - 118f * _unit;
+        var textX = _chipBounds.Right + 14f * FooterUiScale * _unit;
+        var textRight = width - 118f * FooterUiScale * _unit;
         var statusColor = _statusKind == "error"
             ? Color.Rgb(255, 143, 143)
             : _statusKind == "ok" ? _ok
             : Color.Argb(215, _sand.R, _sand.G, _sand.B);
-        DrawFooterLine(canvas, _status, _bodyFont, 14f * _unit, statusColor,
-            textX, _footerTop + 7f * _unit, textRight - textX);
-        DrawFooterLine(canvas, _discLine, _bodyFont, 15f * _unit,
+        DrawFooterLine(canvas, _status, _bodyFont, 14f * FooterUiScale * _unit, statusColor,
+            textX, _footerTop + 7f * FooterUiScale * _unit, textRight - textX);
+        DrawFooterLine(canvas, _discLine, _bodyFont, 15f * FooterUiScale * _unit,
             Color.Argb(200, _sand.R, _sand.G, _sand.B),
-            textX, _chipBounds.Top + 6f * _unit, textRight - textX);
+            textX, _chipBounds.Top + 6f * FooterUiScale * _unit, textRight - textX);
 
         _text.SetTypeface(_bodyBoldFont);
-        _text.TextSize = 23f * _unit;
+        _text.TextSize = 23f * FooterUiScale * _unit;
         _text.Color = Color.Argb(190, _sand.R, _sand.G, _sand.B);
         _text.TextAlign = Paint.Align.Right;
-        canvas.DrawText("v0.2.0", width - 18f * _unit, height - 15f * _unit, _text);
+        canvas.DrawText("v0.2.0", width - 18f * FooterUiScale * _unit,
+            height - 15f * FooterUiScale * _unit, _text);
         _text.TextAlign = Paint.Align.Left;
     }
 
@@ -563,12 +571,111 @@ sealed class LauncherScreen : View
                 SelectDiscRequested?.Invoke();
                 break;
             case 7:
-                Toast.MakeText(_activity,
-                    "Crash Bandicoot Recompiled — unofficial fan project",
-                    ToastLength.Short)?.Show();
+                Post(ShowAboutDialog);
                 break;
         }
     }
+
+    void ShowAboutDialog()
+    {
+        if (_aboutDialog is { IsShowing: true }) return;
+
+        var dialog = new Dialog(_activity);
+        dialog.RequestWindowFeature((int)WindowFeatures.NoTitle);
+        dialog.SetCanceledOnTouchOutside(false);
+
+        var card = new LinearLayout(_activity)
+        {
+            Orientation = Orientation.Vertical,
+        };
+        card.SetPadding(Dp(28), Dp(22), Dp(28), Dp(22));
+        card.Background = RoundedBackground(
+            Color.Rgb(11, 35, 27),
+            Color.Argb(150, 255, 176, 32),
+            Dp(1),
+            Dp(2));
+
+        var title = new TextView(_activity)
+        {
+            Text = "ABOUT",
+            TextSize = 20,
+        };
+        title.SetTypeface(_displayFont, TypefaceStyle.Normal);
+        title.SetTextColor(_wumpa);
+        title.SetIncludeFontPadding(false);
+        card.AddView(title, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+
+        var body = new TextView(_activity)
+        {
+            Text = "Unofficial fan project — not affiliated with Sony, Activision, or Naughty Dog.\n\n" +
+                   "Unofficial tools for a disc you own. First prepare writes a game folder next to the exe — later Starts reuse that.\n\n" +
+                   "Prepared files never replace your dump: you still need a valid NTSC-U .cue + .bin (SCUS-94900) every time you play.",
+            TextSize = 12,
+        };
+        body.SetTypeface(_bodyFont, TypefaceStyle.Normal);
+        body.SetTextColor(_sand);
+        body.SetLineSpacing(0, 1.12f);
+        card.AddView(body, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent)
+        {
+            TopMargin = Dp(18),
+            BottomMargin = Dp(20),
+        });
+
+        var back = new Button(_activity)
+        {
+            Text = "Back",
+            TextSize = 12,
+            Gravity = GravityFlags.Center,
+            StateListAnimator = null,
+        };
+        back.SetTypeface(_bodyBoldFont, TypefaceStyle.Normal);
+        back.SetTextColor(_sand);
+        back.SetMinHeight(0);
+        back.SetMinWidth(0);
+        back.Background = RoundedBackground(
+            Color.Rgb(31, 19, 13),
+            Color.Argb(210, 255, 176, 32),
+            Dp(1),
+            Dp(2));
+        back.Click += (_, _) => dialog.Dismiss();
+        card.AddView(back, new LinearLayout.LayoutParams(Dp(130), Dp(38)));
+
+        dialog.SetContentView(card);
+        dialog.DismissEvent += (_, _) =>
+        {
+            if (ReferenceEquals(_aboutDialog, dialog)) _aboutDialog = null;
+            dialog.Dispose();
+        };
+        _aboutDialog = dialog;
+        dialog.Show();
+
+        if (dialog.Window != null)
+        {
+            dialog.Window.SetBackgroundDrawable(new ColorDrawable(Color.Transparent));
+            dialog.Window.AddFlags(WindowManagerFlags.DimBehind);
+            dialog.Window.SetDimAmount(0.72f);
+            var displayWidth = Resources?.DisplayMetrics?.WidthPixels ?? Width;
+            dialog.Window.SetLayout(
+                (int)(displayWidth * 0.62f),
+                ViewGroup.LayoutParams.WrapContent);
+            dialog.Window.SetGravity(GravityFlags.Center);
+        }
+    }
+
+    static GradientDrawable RoundedBackground(
+        Color fill, Color stroke, int strokeWidth, float radius)
+    {
+        var drawable = new GradientDrawable();
+        drawable.SetColor(fill);
+        drawable.SetCornerRadius(radius);
+        drawable.SetStroke(strokeWidth, stroke);
+        return drawable;
+    }
+
+    int Dp(float value) =>
+        (int)(value * (Resources?.DisplayMetrics?.Density ?? 1f) + 0.5f);
 
     void ShowComingSoon(string feature) =>
         Toast.MakeText(_activity, $"{feature}: prossimo passaggio del port Android.",
