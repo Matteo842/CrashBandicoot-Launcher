@@ -47,6 +47,8 @@
                   Link="Fonts\Nunito-ExtraBold.ttf" />
     <AndroidAsset Include="..\CrashBandicoot.Launcher\Ui\fonts\Nunito-SemiBold.ttf"
                   Link="Fonts\Nunito-SemiBold.ttf" />
+    <AndroidAsset Include="..\CrashBandicoot.Launcher\Ui\world_map.png"
+                  Link="Images\world_map.png" />
     <AndroidAsset Include="..\CrashBandicoot.Launcher\Recomp\CrashBandicoot.json"
                   Link="Recomp\CrashBandicoot.json" />
     <AndroidAsset Include="..\CrashBandicoot.Launcher\Recomp\Patches\main.cs.patch"
