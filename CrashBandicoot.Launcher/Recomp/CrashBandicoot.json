@@ -1,0 +1,36 @@
+{
+  "game": {
+    "id": "SCUS-94900",
+    "name": "CrashBandicoot",
+    "output": "./CrashBandicoot.Recompiled"
+  },
+  "cue": "Crash Bandicoot.cue",
+  "linearSweep": true,
+  "debug": false,
+  "functions": [
+    { "address": "8003E638", "name": "VSync" },
+    { "address": "8004025C", "name": "DrawSync" },
+    { "address": "800407C0", "name": "DrawOTag" },
+    { "address": "80040834", "name": "PutDrawEnv" },
+    { "address": "80040A0C", "name": "PutDispEnv" },
+
+    { "address": "80043520", "name": "CdControl" },
+    { "address": "80043668", "name": "CdControlF" },
+    { "address": "80043984", "name": "CdReadSync" },
+    { "address": "800439A4", "name": "CdRead" },
+    { "address": "800440EC", "name": "CdSync" },
+    { "address": "80044370", "name": "CdReady" },
+    { "address": "80044640", "name": "CdControl" },
+    { "address": "80044E8C", "name": "CdInit" },
+    { "address": "80045610", "name": "CdRead" },
+    { "address": "800458C8", "name": "CdDataSync" }
+  ],
+  "patches": [
+    {
+      "address": "80033FBC",
+      "target": "RecompOne.Runtime.Sdk.LibMem.RMemcpy",
+      "mode": "replace"
+    }
+  ],
+  "overlays": []
+}

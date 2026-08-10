@@ -1,0 +1,490 @@
+--- main.cs
++++ main.cs
+@@ -6063,5 +6063,16 @@
+         c.RA = 0x80015D34u;
+         CrashBandicoot.func_80011CA0(c, m);
+         m.WriteU32((c.S2 + 0x18u), c.V0);
++        // realloc may move the NSD; retarget hash/header pointers before bucket relocation.
++        c.V1 = m.ReadU32((c.S2 + 0x8u));
++        if (c.V0 != 0u && c.V0 != c.V1)
++        {
++            m.WriteU32((c.S2 + 0x8u), c.V0);
++            m.WriteU32((c.S2 + 0x10u), c.V0 + 0x408u);
++            m.WriteU32((c.S2 + 0xCu), c.V0 + 0x520u);
++            c.A1 = m.ReadU32((c.V0 + 0x404u));
++            c.A1 = c.A1 << 3;
++            m.WriteU32((c.S2 + 0x14u), c.V0 + 0x520u + c.A1);
++        }
+         c.A0 = c.S0 << 2;
+         L80015D3C: ;
+@@ -44978,8 +44978,13 @@
+         return;
+     }
+     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+-    public static void func_800334A0(CpuContext c, IMemory m)
++    public static void func_800334A0(CpuContext c, IMemory m) => func_800334A0_impl(c, m, 0);
++    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
++    public static void func_80033878(CpuContext c, IMemory m) => func_800334A0_impl(c, m, 1);
++    // 800334A0/80033878 are one decompressor incorrectly split; 80033728 branches into 80033C94.
++    static void func_800334A0_impl(CpuContext c, IMemory m, int entry)
+     {
++        if (entry != 0) goto L80033878;
+         c.At = 0x1F800000u;
+         m.WriteU32(c.At, c.S0);
+         m.WriteU32((c.At + 0x4u), c.S1);
+@@ -45223,8 +45228,7 @@
+         L80033724: ;
+         c.A3 = (int)c.At < 2 ? 1u : 0u;
+         if (c.A3 == 0u) {
+-            Dispatcher.Call(c, m, 0x80033C94u);
+-            return;
++            goto L80033C94;
+         }
+         c.At = m.ReadU16(c.T6);
+         c.T6 = c.T6 + 0x2u;
+@@ -45331,10 +45335,7 @@
+         c.RA = m.ReadU32((c.At + 0x3Cu));
+         c.FP = m.ReadU32((c.At + 0x38u));
+         return;
+-    }
+-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+-    public static void func_80033878(CpuContext c, IMemory m)
+-    {
++        L80033878: ;
+         c.At = 0x1F800000u;
+         m.WriteU32(c.At, c.S0);
+         m.WriteU32((c.At + 0x4u), c.S1);
+@@ -45750,19 +45751,27 @@
+         c.S4 = c.S4 + 0x3D38u;
+         c.S2 = c.At << 2;
+         c.S4 = c.S4 - c.S2;
+-        Dispatcher.Call(c, m, c.S4);
+-        return;
++        switch (c.S4)
++        {
++            case 0x80033D18u: goto L80033D18;
++            case 0x80033D28u: goto L80033D28;
++            case 0x80033D38u: goto L80033D38;
++            default: Dispatcher.Call(c, m, c.S4); return;
++        }
+         L80033D10: ;
+         c.S5 = c.At - 0x8u;
+         c.At = 0u | 0x0008u;
++        L80033D18: ;
+         c.S3 = m.ReadU32((c.T6 + 0xCu));
+         c.S2 = m.ReadU32((c.T6 + 0x8u));
+         m.WriteU32((c.S1 + 0xCu), c.S3);
+         m.WriteU32((c.S1 + 0x8u), c.S2);
++        L80033D28: ;
+         c.S3 = m.ReadU32((c.T6 + 0x4u));
+         c.S2 = m.ReadU32(c.T6);
+         m.WriteU32((c.S1 + 0x4u), c.S3);
+         m.WriteU32(c.S1, c.S2);
++        L80033D38: ;
+         c.T6 = c.T6 + c.At;
+         c.T6 = c.T6 + c.At;
+         c.S1 = c.S1 + c.At;
+@@ -45794,14 +45803,20 @@
+         c.A3 = c.At + c.At;
+         c.A3 = c.S1 + c.A3;
+         c.S2 = m.ReadU16(c.A3);
+-        Dispatcher.Call(c, m, c.S4);
+-        return;
++        switch (c.S4)
++        {
++            case 0x80033DA8u: goto L80033DA8;
++            case 0x80033DD0u: goto L80033DD0;
++            case 0x80033DF8u: goto L80033DF8;
++            default: Dispatcher.Call(c, m, c.S4); return;
++        }
+         L80033D94: ;
+         c.S5 = c.At - 0x8u;
+         c.At = 0u | 0x0008u;
+         c.A3 = c.At + c.At;
+         c.A3 = c.S1 + c.A3;
+         c.S2 = m.ReadU16(c.A3);
++        L80033DA8: ;
+         c.T9 = m.ReadU32((c.T6 + 0xCu));
+         c.S3 = c.S2 << 16;
+         c.A3 = c.T9 >> 16;
+@@ -45812,6 +45827,7 @@
+         c.A3 = c.S2 >> 16;
+         c.S3 = c.S3 | c.A3;
+         m.WriteU32((c.S1 + 0xAu), c.S3);
++        L80033DD0: ;
+         c.T9 = m.ReadU32((c.T6 + 0x4u));
+         c.S3 = c.S2 << 16;
+         c.A3 = c.T9 >> 16;
+@@ -45822,6 +45838,7 @@
+         c.A3 = c.S2 >> 16;
+         c.S3 = c.S3 | c.A3;
+         m.WriteU32((c.S1 + 0x2u), c.S3);
++        L80033DF8: ;
+         m.WriteU16(c.S1, (ushort)c.S2);
+         c.T6 = c.T6 + c.At;
+         c.T6 = c.T6 + c.At;
+@@ -45854,14 +45871,20 @@
+         c.A3 = c.At + c.At;
+         c.A3 = c.T6 + c.A3;
+         c.S2 = m.ReadU16((c.A3 - 0x2u));
+-        Dispatcher.Call(c, m, c.S4);
+-        return;
++        switch (c.S4)
++        {
++            case 0x80033E6Cu: goto L80033E6C;
++            case 0x80033E94u: goto L80033E94;
++            case 0x80033EBCu: goto L80033EBC;
++            default: Dispatcher.Call(c, m, c.S4); return;
++        }
+         L80033E58: ;
+         c.S5 = c.At - 0x8u;
+         c.At = 0u | 0x0008u;
+         c.A3 = c.At + c.At;
+         c.A3 = c.T6 + c.A3;
+         c.S2 = m.ReadU16((c.A3 - 0x2u));
++        L80033E6C: ;
+         c.T9 = m.ReadU32((c.T6 + 0xAu));
+         c.S3 = c.S2 << 16;
+         c.A3 = c.T9 >> 16;
+@@ -45872,6 +45895,7 @@
+         c.A3 = c.S2 >> 16;
+         c.S3 = c.S3 | c.A3;
+         m.WriteU32((c.S1 + 0x8u), c.S3);
++        L80033E94: ;
+         c.T9 = m.ReadU32((c.T6 + 0x2u));
+         c.S3 = c.S2 << 16;
+         c.A3 = c.T9 >> 16;
+@@ -45882,6 +45906,7 @@
+         c.A3 = c.S2 >> 16;
+         c.S3 = c.S3 | c.A3;
+         m.WriteU32(c.S1, c.S3);
++        L80033EBC: ;
+         c.T6 = c.T6 + c.At;
+         c.T6 = c.T6 + c.At;
+         c.S1 = c.S1 + c.At;
+@@ -45900,7 +45925,10 @@
+         c.S3 = c.At << 1;
+         c.T6 = c.T6 + c.S3;
+         c.S1 = c.S1 + c.S3;
++        // Tail stubs jr to prologue-hijacked RA (loop continue), not the real caller.
+         Dispatcher.Call(c, m, c.S4);
++        if (c.RA == 0x80033748u) goto L80033748;
++        if (c.RA == 0x80033C28u) goto L80033C28;
+         return;
+     }
+     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+@@ -50271,28 +50299,16 @@
+         c.V0 = c.V0 << 3;
+         c.At = c.At + c.V0;
+         c.A1 = c.A1 + c.A0;
+-        Dispatcher.Call(c, m, c.At);
+-        return;
+-        if ((int)0u >= 0) {
+-            goto L800380A0;
+-        }
+-        if ((int)0u >= 0) {
+-            goto L800380E8;
+-        }
+-        if ((int)0u >= 0) {
+-            goto L80038178;
+-        }
+-        if ((int)0u >= 0) {
+-            goto L80038130;
+-        }
+-        if ((int)0u >= 0) {
+-            goto L80038264;
+-        }
+-        if ((int)0u >= 0) {
+-            goto L80038350;
+-        }
+-        if ((int)0u >= 0) {
+-            goto L8003843C;
++        switch (c.At)
++        {
++            case 0x80037ED4u: goto L800380A0;
++            case 0x80037EDCu: goto L800380E8;
++            case 0x80037EE4u: goto L80038178;
++            case 0x80037EECu: goto L80038130;
++            case 0x80037EF4u: goto L80038264;
++            case 0x80037EFCu: goto L80038350;
++            case 0x80037F04u: goto L8003843C;
++            default: Dispatcher.Call(c, m, c.At); return;
+         }
+         L80037F0C: ;
+         c.V0 = 0x80030000u;
+@@ -50301,222 +50317,70 @@
+         c.V0 = c.V0 + c.At;
+         c.At = c.RA >> 24;
+         c.FP = c.FP - 0x1u;
+-        Dispatcher.Call(c, m, c.V0);
+-        return;
+-        if ((int)0u >= 0) {
+-            goto L80037E38;
+-        }
+-        if ((int)0u >= 0) {
+-            c.RA = c.S7 + 0u;
+-            goto L80037F64;
+-        }
+-        c.RA = c.S7 + 0u;
+-        if ((int)0u >= 0) {
+-            c.RA = c.T8 + 0u;
+-            goto L80037F64;
+-        }
+-        c.RA = c.T8 + 0u;
+-        if ((int)0u >= 0) {
+-            c.RA = c.T9 + 0u;
+-            goto L80037F64;
+-        }
+-        c.RA = c.T9 + 0u;
+-        if ((int)0u >= 0) {
+-            c.RA = c.GP + 0u;
+-            goto L80037F64;
+-        }
+-        c.RA = c.GP + 0u;
+-        if ((int)0u >= 0) {
+-            c.RA = c.SP + 0u;
+-            goto L80037F64;
+-        }
+-        c.RA = c.SP + 0u;
+-        if ((int)0u >= 0) {
+-            c.RA = c.S6 + 0u;
+-            goto L80037F64;
+-        }
+-        c.RA = c.S6 + 0u;
+-        c.RA = c.T0 + 0u;
++        switch (c.V0)
++        {
++            case 0x80037F28u: goto L80037E38;
++            case 0x80037F30u: c.RA = c.S7; goto L80037F64;
++            case 0x80037F38u: c.RA = c.T8; goto L80037F64;
++            case 0x80037F40u: c.RA = c.T9; goto L80037F64;
++            case 0x80037F48u: c.RA = c.GP; goto L80037F64;
++            case 0x80037F50u: c.RA = c.SP; goto L80037F64;
++            case 0x80037F58u: c.RA = c.S6; goto L80037F64;
++            case 0x80037F60u: c.RA = c.T0; goto L80037F64;
++            default: Dispatcher.Call(c, m, c.V0); return;
++        }
+         L80037F64: ;
+         c.V0 = 0x80030000u;
+         c.V0 = c.V0 + 0x7F78u;
+         c.At = c.At + c.V0;
+         c.A1 = c.RA & 0xFFFFu;
+-        Dispatcher.Call(c, m, c.At);
+-        return;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800380C0;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800380DC;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038108;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038124;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038150;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L8003816C;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800381E4;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038204;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038228;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038250;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800382D0;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800382F0;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038314;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L8003833C;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800383BC;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800383DC;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038400;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038428;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800384D0;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800384F0;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038514;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L8003853C;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L80038564;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L8003858C;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800385B8;
+-        }
+-        c.A1 = c.A1 + c.A0;
+-        if ((int)0u >= 0) {
+-            c.A1 = c.A1 + c.A0;
+-            goto L800385E8;
+-        }
+-        c.A1 = c.A1 + c.A0;
++        switch (c.At)
++        {
++            case 0x80037F78u: c.A1 = c.A1 + c.A0; goto L800380C0;
++            case 0x80037F80u: c.A1 = c.A1 + c.A0; goto L800380DC;
++            case 0x80037F88u: c.A1 = c.A1 + c.A0; goto L80038108;
++            case 0x80037F90u: c.A1 = c.A1 + c.A0; goto L80038124;
++            case 0x80037F98u: c.A1 = c.A1 + c.A0; goto L80038150;
++            case 0x80037FA0u: c.A1 = c.A1 + c.A0; goto L8003816C;
++            case 0x80037FA8u: c.A1 = c.A1 + c.A0; goto L800381E4;
++            case 0x80037FB0u: c.A1 = c.A1 + c.A0; goto L80038204;
++            case 0x80037FB8u: c.A1 = c.A1 + c.A0; goto L80038228;
++            case 0x80037FC0u: c.A1 = c.A1 + c.A0; goto L80038250;
++            case 0x80037FC8u: c.A1 = c.A1 + c.A0; goto L800382D0;
++            case 0x80037FD0u: c.A1 = c.A1 + c.A0; goto L800382F0;
++            case 0x80037FD8u: c.A1 = c.A1 + c.A0; goto L80038314;
++            case 0x80037FE0u: c.A1 = c.A1 + c.A0; goto L8003833C;
++            case 0x80037FE8u: c.A1 = c.A1 + c.A0; goto L800383BC;
++            case 0x80037FF0u: c.A1 = c.A1 + c.A0; goto L800383DC;
++            case 0x80037FF8u: c.A1 = c.A1 + c.A0; goto L80038400;
++            case 0x80038000u: c.A1 = c.A1 + c.A0; goto L80038428;
++            case 0x80038008u: c.A1 = c.A1 + c.A0; goto L800384D0;
++            case 0x80038010u: c.A1 = c.A1 + c.A0; goto L800384F0;
++            case 0x80038018u: c.A1 = c.A1 + c.A0; goto L80038514;
++            case 0x80038020u: c.A1 = c.A1 + c.A0; goto L8003853C;
++            case 0x80038028u: c.A1 = c.A1 + c.A0; goto L80038564;
++            case 0x80038030u: c.A1 = c.A1 + c.A0; goto L8003858C;
++            case 0x80038038u: c.A1 = c.A1 + c.A0; goto L800385B8;
++            case 0x80038040u: c.A1 = c.A1 + c.A0; goto L800385E8;
++            default: Dispatcher.Call(c, m, c.At); return;
++        }
+         L80038048: ;
+         c.At = 0x80040000u;
+         c.At = c.At - 0x7FA0u;
+         c.V0 = c.FP << 3;
+         c.At = c.At + c.V0;
+         c.FP = c.FP + 0x1u;
+-        Dispatcher.Call(c, m, c.At);
+-        return;
+-        if ((int)0u >= 0) {
+-            c.S7 = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.S7 = c.RA + 0u;
+-        if ((int)0u >= 0) {
+-            c.T8 = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.T8 = c.RA + 0u;
+-        if ((int)0u >= 0) {
+-            c.T9 = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.T9 = c.RA + 0u;
+-        if ((int)0u >= 0) {
+-            c.GP = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.GP = c.RA + 0u;
+-        if ((int)0u >= 0) {
+-            c.SP = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.SP = c.RA + 0u;
+-        if ((int)0u >= 0) {
+-            c.S6 = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.S6 = c.RA + 0u;
+-        if ((int)0u >= 0) {
+-            c.T0 = c.RA + 0u;
+-            goto L80037E88;
+-        }
+-        c.T0 = c.RA + 0u;
++        switch (c.At)
++        {
++            case 0x80038060u: c.S7 = c.RA; goto L80037E88;
++            case 0x80038068u: c.T8 = c.RA; goto L80037E88;
++            case 0x80038070u: c.T9 = c.RA; goto L80037E88;
++            case 0x80038078u: c.GP = c.RA; goto L80037E88;
++            case 0x80038080u: c.SP = c.RA; goto L80037E88;
++            case 0x80038088u: c.S6 = c.RA; goto L80037E88;
++            case 0x80038090u: c.T0 = c.RA; goto L80037E88;
++            default: Dispatcher.Call(c, m, c.At); return;
++        }
+         L80038098: ;
+         Bios.Break(c, m);
+         if ((int)0u >= 0) {

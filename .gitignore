@@ -61,6 +61,11 @@ x86/
 *.cdi
 *.dump
 *.raw
+
+# RecompOne BIOS font resources required by the runtime
+!RecompOne.Runtime/Bios/Fonts/font1.raw
+!RecompOne.Runtime/Bios/Fonts/font2.raw
+
 # Common dump naming (even without extension tricks)
 **/Crash Bandicoot.*
 **/crash*bandicoot*.bin
@@ -111,7 +116,7 @@ game.recomp.dll
 **/Recompiled/Entry.cs
 **/Recompiled/Stubs.cs
 # LocalAppData legacy path (old builds) — never commit if copied here
-recomp/
+/recomp/
 **/CrashBandicoot-Launcher/recomp/
 
 # --- Runtime / player data next to the exe ----------------------------------
