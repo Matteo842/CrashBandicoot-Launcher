@@ -35,6 +35,7 @@ internal static class HostWindow
     const uint GaRoot = 2;
 
     static IWindow? _window;
+    static IInputContext? _input;
     static GL? _gl;
     static ImGuiController? _imgui;
     static bool _headless;
@@ -149,6 +150,7 @@ internal static class HostWindow
         _layoutPending = true;
         _headless = false;
         _gpu = null;
+        _input = null;
         _gl = null;
         _imgui = null;
         _glBackend = null;
@@ -291,9 +293,21 @@ internal static class HostWindow
 
     public static void Shutdown()
     {
-        if (!_headless && _window != null && !_window.IsClosing)
-            _window.Close();
-        InputManager.Shutdown();
+        if (!_headless && _window != null)
+        {
+            // Close() only requests shutdown; its Closing callback is not guaranteed
+            // to run before control returns to WinForms. Tear down input first so a
+            // queued key-up cannot call the disposed ImGui context in the launcher loop.
+            OnClosing();
+            if (!_window.IsClosing)
+                _window.Close();
+            _window.Dispose();
+            _window = null;
+        }
+        else
+        {
+            InputManager.Shutdown();
+        }
         _embedParent = 0;
         _embedChild = 0;
         _embedded = false;
@@ -465,8 +479,8 @@ internal static class HostWindow
 
     static void OnLoad()
     {
-        var input = _window!.CreateInput();
-        InputManager.Initialize(input);
+        _input = _window!.CreateInput();
+        InputManager.Initialize(_input);
 
         _gl = GL.GetApi(_window);
         _gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
@@ -493,7 +507,7 @@ internal static class HostWindow
         ApplyWidescreen(ConfigManager.View.Widescreen);
         ApplyVSync(ConfigManager.View.VSync);
 
-        _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
+        _imgui = new ImGuiController(_gl, _window, _input, null, ConfigureImGui);
 
         PanelManager.Register(new OutputPanel());
         PanelManager.Register(new VramViewerPanel());
@@ -670,8 +684,13 @@ internal static class HostWindow
         ConfigManager.SaveView(PanelManager.Panels);
         ConfigManager.SaveGame();
         PanelManager.Shutdown();
+        InputManager.Shutdown();
         _glBackend?.Dispose();
         _imgui?.Dispose();
+        // ImGuiController.Dispose only frees renderer resources; the input context
+        // owns the keyboard callbacks and must be disposed to unsubscribe them.
+        _input?.Dispose();
+        _input = null;
         _gl?.DeleteTexture(_displayTex);
         _gl?.DeleteTexture(_vramTex);
         _gl?.DeleteTexture(_ramTex);

@@ -213,6 +213,23 @@ internal static unsafe class InputManager
 
     public static void Shutdown()
     {
+        if (_keyboard != null)
+        {
+            _keyboard.KeyDown -= OnKeyDown;
+            _keyboard.KeyUp -= OnKeyUp;
+            _keyboard = null;
+        }
+
+        if (_mouse != null)
+        {
+            _mouse.MouseMove -= OnMouseMove;
+            _mouse.MouseDown -= OnMouseDown;
+            _mouse.MouseUp -= OnMouseUp;
+            _mouse.Scroll -= OnScroll;
+            _mouse = null;
+        }
+
+        _keysDown.Clear();
         CloseControllers();
         _sdl?.QuitSubSystem(Sdl.InitGamecontroller);
         _sdl?.Dispose();
