@@ -166,3 +166,20 @@ run.bat
 docs/HANDOFF_MODDING_P3_ASSETS.md
 docs/HANDOFF_MODDING_P4_TOOLS.md
 docs/HANDOFF_MODDING_P5_HOTRELOAD.md
+
+# --- Android launcher --------------------------------------------------------
+# Android Studio / Gradle local state and generated packages.
+**/.gradle/
+**/.kotlin/
+**/local.properties
+**/.externalNativeBuild/
+**/.cxx/
+**/build/
+AndroidLauncher/captures/
+AndroidRuntimeHost/captures/
+*.apk
+*.aab
+*.apks
+*.jks
+*.keystore
+keystore.properties

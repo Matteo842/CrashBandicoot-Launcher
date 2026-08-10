@@ -6,7 +6,12 @@ namespace CrashBandicoot.Launcher.Recomp;
 
 public static class RecompRunner
 {
-    public static void Run(string configTemplatePath, string cuePath, string outDir, IProgress<string>? progress = null)
+    public static void Run(
+        string configTemplatePath,
+        string cuePath,
+        string outDir,
+        IProgress<string>? progress = null,
+        string? postPassPatchPath = null)
     {
         progress?.Report("Loading recompiler config…");
         if (!File.Exists(configTemplatePath))
@@ -43,7 +48,7 @@ public static class RecompRunner
 
         progress?.Report("Applying Crash compatibility post-pass…");
         var mainCs = Path.Combine(resolvedOut, "main.cs");
-        var patch = FindPatchPath();
+        var patch = postPassPatchPath ?? FindPatchPath();
         PostPassApplier.Apply(mainCs, patch);
 
         progress?.Report("Recompilation finished.");

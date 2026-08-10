@@ -19,7 +19,12 @@ public static class GameCompiler
         global using System.Threading.Tasks;
         """;
 
-    public static void CompileToDll(string sourcesDir, string outputDll, IProgress<string>? progress = null)
+    public static void CompileToDll(
+        string sourcesDir,
+        string outputDll,
+        IProgress<string>? progress = null,
+        string? metadataReferencesDir = null,
+        bool concurrentBuild = true)
     {
         progress?.Report("Compiling recompiled game…");
         var files = Directory.GetFiles(sourcesDir, "*.cs")
@@ -37,11 +42,11 @@ public static class GameCompiler
         trees.AddRange(files.Select(f =>
             CSharpSyntaxTree.ParseText(SourceText.From(File.ReadAllText(f), Encoding.UTF8), parse, f)));
 
-        var refs = BuildReferences();
+        var refs = BuildReferences(metadataReferencesDir);
         var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
             .WithAllowUnsafe(true)
             .WithOptimizationLevel(OptimizationLevel.Release)
-            .WithConcurrentBuild(true);
+            .WithConcurrentBuild(concurrentBuild);
 
         var compilation = CSharpCompilation.Create("CrashBandicoot.Game", trees, refs, options);
         Directory.CreateDirectory(Path.GetDirectoryName(outputDll)!);
@@ -60,7 +65,7 @@ public static class GameCompiler
         progress?.Report("Compile OK.");
     }
 
-    static ImmutableArray<MetadataReference> BuildReferences()
+    static ImmutableArray<MetadataReference> BuildReferences(string? metadataReferencesDir)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<MetadataReference>();
@@ -68,8 +73,15 @@ public static class GameCompiler
         void Add(string path)
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            path = Path.GetFullPath(path);
             if (!set.Add(path)) return;
             list.Add(MetadataReference.CreateFromFile(path));
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadataReferencesDir) && Directory.Exists(metadataReferencesDir))
+        {
+            foreach (var path in Directory.EnumerateFiles(metadataReferencesDir, "*.dll"))
+                Add(path);
         }
 
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())

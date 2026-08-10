@@ -6,10 +6,27 @@ namespace RecompOne.Runtime;
 /// </summary>
 public static class AppPaths
 {
+    static string? _rootOverride;
+
+    /// <summary>
+    /// Overrides the writable application root. Android hosts must call this
+    /// before the runtime is initialized because the APK install directory is
+    /// read-only.
+    /// </summary>
+    public static void SetRoot(string? root)
+    {
+        _rootOverride = string.IsNullOrWhiteSpace(root)
+            ? null
+            : Path.GetFullPath(root);
+    }
+
     public static string Root
     {
         get
         {
+            if (_rootOverride != null)
+                return _rootOverride;
+
             var exe = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(exe))
             {
