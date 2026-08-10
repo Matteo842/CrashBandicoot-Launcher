@@ -8,7 +8,9 @@ This repository contains **tools and a launcher** that work with a copy of *Cras
 Built on [RecompOne](https://github.com/BlackLabelHQ/RecompOne) (static PS1 recompilation + runtime). Current release: **1.6.1** (native WinForms launcher on Windows; CLI on Linux). Still experimental — expect bugs.
 
 ---
+<img width="1920" height="800" alt="Crash-Launcher1" src="https://github.com/user-attachments/assets/3682fe9c-0deb-466c-adbe-285a1fd7bbcc" />
 
+---
 ## What this is
 
 A small host application that:
