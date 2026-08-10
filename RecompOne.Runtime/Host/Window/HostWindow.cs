@@ -71,6 +71,19 @@ internal static class HostWindow
 
     public static bool IsEmbedded => _embedded;
 
+    /// <summary>Whether the embedded game belongs to the current foreground window.</summary>
+    public static bool IsInputActive
+    {
+        get
+        {
+            if (!OperatingSystem.IsWindows() || !_embedded) return true;
+            if (_embedChild == 0) return false;
+            var foreground = GetForegroundWindow();
+            return foreground != 0
+                && GetAncestor(foreground, GaRoot) == GetAncestor(_embedChild, GaRoot);
+        }
+    }
+
     public static void Initialize(string title)
     {
         ConfigManager.Load();
@@ -168,6 +181,11 @@ internal static class HostWindow
         _embedChild = child;
         _embedded = true;
         FitEmbeddedToParent();
+
+        // The launcher control that was visible before game mode can retain keyboard
+        // focus after SetParent. Give focus to the GLFW child so Silk receives normal
+        // key events (game input, ImGui navigation and mod KeyboardEvent callbacks).
+        SetFocus(child);
     }
 
     /// <summary>Keep the OpenGL child sized to the host panel (call on panel resize).</summary>
@@ -408,6 +426,12 @@ internal static class HostWindow
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern nint SetParent(nint hWndChild, nint hWndNewParent);
+
+    [DllImport("user32.dll")]
+    static extern nint SetFocus(nint hWnd);
+
+    [DllImport("user32.dll")]
+    static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern int GetWindowLong(nint hWnd, int nIndex);

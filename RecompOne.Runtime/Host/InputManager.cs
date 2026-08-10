@@ -94,6 +94,19 @@ internal static unsafe class InputManager
 
     static bool IsKeyDownReconciled(Key k)
     {
+        // A WinForms-hosted GLFW child can lose focus back to its parent without
+        // Silk receiving another key event. The host hotkeys already use this
+        // Win32 path for that reason; use it for gameplay bindings as well.
+        if (OperatingSystem.IsWindows() && HostWindow.IsEmbedded
+            && SilkKeyToVk(k) is int vk)
+        {
+            bool down = HostWindow.IsInputActive
+                && (GetAsyncKeyState(vk) & 0x8000) != 0;
+            if (down) _keysDown.Add(k);
+            else _keysDown.Remove(k);
+            return down;
+        }
+
         if (_keyboard != null)
         {
             try
@@ -437,12 +450,9 @@ internal static unsafe class InputManager
         return Enum.TryParse<Key>(name.Trim(), ignoreCase: true, out var bound) ? bound : Key.F3;
     }
 
-    /// <summary>Win32 VK for host hotkeys; null if we have no async-key fallback for that Silk key.</summary>
+    /// <summary>Win32 virtual-key code for a Silk key, or null when no stable mapping exists.</summary>
     static int? SilkKeyToVk(Key key) => key switch
     {
-        Key.F1 => 0x70, Key.F2 => 0x71, Key.F3 => 0x72, Key.F4 => 0x73,
-        Key.F5 => 0x74, Key.F6 => 0x75, Key.F7 => 0x76, Key.F8 => 0x77,
-        Key.F9 => 0x78, Key.F10 => 0x79, Key.F11 => 0x7A, Key.F12 => 0x7B,
         Key.A => 0x41, Key.B => 0x42, Key.C => 0x43, Key.D => 0x44,
         Key.E => 0x45, Key.F => 0x46, Key.G => 0x47, Key.H => 0x48,
         Key.I => 0x49, Key.J => 0x4A, Key.K => 0x4B, Key.L => 0x4C,
@@ -454,11 +464,33 @@ internal static unsafe class InputManager
         Key.Number3 => 0x33, Key.Number4 => 0x34, Key.Number5 => 0x35,
         Key.Number6 => 0x36, Key.Number7 => 0x37, Key.Number8 => 0x38,
         Key.Number9 => 0x39,
+        Key.Apostrophe => 0xDE, Key.Comma => 0xBC, Key.Minus => 0xBD,
+        Key.Period => 0xBE, Key.Slash => 0xBF, Key.Semicolon => 0xBA,
+        Key.Equal => 0xBB, Key.LeftBracket => 0xDB, Key.BackSlash => 0xDC,
+        Key.RightBracket => 0xDD, Key.GraveAccent => 0xC0,
         Key.Space => 0x20, Key.Escape => 0x1B, Key.Tab => 0x09,
         Key.Enter => 0x0D, Key.Backspace => 0x08, Key.Insert => 0x2D,
         Key.Delete => 0x2E, Key.Home => 0x24, Key.End => 0x23,
         Key.PageUp => 0x21, Key.PageDown => 0x22,
         Key.Up => 0x26, Key.Down => 0x28, Key.Left => 0x25, Key.Right => 0x27,
+        Key.CapsLock => 0x14, Key.ScrollLock => 0x91, Key.NumLock => 0x90,
+        Key.PrintScreen => 0x2C, Key.Pause => 0x13,
+        Key.F1 => 0x70, Key.F2 => 0x71, Key.F3 => 0x72, Key.F4 => 0x73,
+        Key.F5 => 0x74, Key.F6 => 0x75, Key.F7 => 0x76, Key.F8 => 0x77,
+        Key.F9 => 0x78, Key.F10 => 0x79, Key.F11 => 0x7A, Key.F12 => 0x7B,
+        Key.F13 => 0x7C, Key.F14 => 0x7D, Key.F15 => 0x7E, Key.F16 => 0x7F,
+        Key.F17 => 0x80, Key.F18 => 0x81, Key.F19 => 0x82, Key.F20 => 0x83,
+        Key.F21 => 0x84, Key.F22 => 0x85, Key.F23 => 0x86, Key.F24 => 0x87,
+        Key.Keypad0 => 0x60, Key.Keypad1 => 0x61, Key.Keypad2 => 0x62,
+        Key.Keypad3 => 0x63, Key.Keypad4 => 0x64, Key.Keypad5 => 0x65,
+        Key.Keypad6 => 0x66, Key.Keypad7 => 0x67, Key.Keypad8 => 0x68,
+        Key.Keypad9 => 0x69, Key.KeypadDecimal => 0x6E, Key.KeypadDivide => 0x6F,
+        Key.KeypadMultiply => 0x6A, Key.KeypadSubtract => 0x6D,
+        Key.KeypadAdd => 0x6B, Key.KeypadEnter => 0x0D, Key.KeypadEqual => 0x92,
+        Key.ShiftLeft => 0xA0, Key.ShiftRight => 0xA1,
+        Key.ControlLeft => 0xA2, Key.ControlRight => 0xA3,
+        Key.AltLeft => 0xA4, Key.AltRight => 0xA5,
+        Key.SuperLeft => 0x5B, Key.SuperRight => 0x5C, Key.Menu => 0x5D,
         _ => null,
     };
 
