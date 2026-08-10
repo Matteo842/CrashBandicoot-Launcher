@@ -30,6 +30,7 @@ public sealed class MainActivity : Activity
     TextView _status = null!;
     ImageView _screen = null!;
     ProgressBar _progress = null!;
+    TouchControllerView _touchControls = null!;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
 
@@ -69,34 +70,48 @@ public sealed class MainActivity : Activity
 
     void ShowGameUi()
     {
-        var root = new LinearLayout(this)
-        {
-            Orientation = Orientation.Vertical,
-        };
-        root.SetGravity(GravityFlags.CenterHorizontal);
+        RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
+        var root = new FrameLayout(this);
         root.SetBackgroundColor(Color.Rgb(7, 11, 18));
-        root.SetPadding(Dp(18), Dp(12), Dp(18), Dp(12));
 
         _screen = new ImageView(this);
         _screen.SetBackgroundColor(Color.Black);
         _screen.SetScaleType(ImageView.ScaleType.FitCenter);
-        root.AddView(_screen, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MatchParent, 0, 1f));
+        root.AddView(_screen, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+
+        _touchControls = new TouchControllerView(this);
+        root.AddView(_touchControls, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
         _status = new TextView(this)
         {
             Text = "Seleziona la cartella che contiene il tuo CUE/BIN.",
-            TextSize = 16,
+            TextSize = 13,
             Gravity = GravityFlags.Center,
         };
         _status.SetTextColor(Color.White);
-        _status.SetPadding(0, Dp(10), 0, Dp(8));
-        root.AddView(_status, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+        _status.SetBackgroundColor(Color.Argb(145, 3, 9, 14));
+        _status.SetPadding(Dp(12), Dp(5), Dp(12), Dp(5));
+        var statusLayout = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent,
+            GravityFlags.Top | GravityFlags.CenterHorizontal)
+        {
+            LeftMargin = Dp(150),
+            RightMargin = Dp(150),
+            TopMargin = Dp(34),
+        };
+        root.AddView(_status, statusLayout);
 
         _progress = new ProgressBar(this) { Indeterminate = true, Visibility = ViewStates.Gone };
-        root.AddView(_progress, new LinearLayout.LayoutParams(Dp(42), Dp(42)));
+        root.AddView(_progress, new FrameLayout.LayoutParams(Dp(42), Dp(42), GravityFlags.Center));
         SetContentView(root);
+    }
+
+    protected override void OnPause()
+    {
+        RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
+        base.OnPause();
     }
 
     void PickDiscFolder()

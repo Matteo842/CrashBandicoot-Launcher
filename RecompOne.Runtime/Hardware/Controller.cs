@@ -2,6 +2,8 @@ namespace RecompOne.Runtime.Hardware;
 
 public static class Controller
 {
+    static int _virtualButtons;
+
     public const ushort Select = 1 << 0;
     public const ushort L3 = 1 << 1;
     public const ushort R3 = 1 << 2;
@@ -31,4 +33,11 @@ public static class Controller
     public static byte   RightY2 = 0x80;
     public static byte   LeftX2 = 0x80;
     public static byte   LeftY2 = 0x80;
+
+    /// <summary>Active-high buttons supplied by a platform virtual controller.</summary>
+    public static ushort VirtualButtons =>
+        (ushort)System.Threading.Volatile.Read(ref _virtualButtons);
+
+    public static void SetVirtualPadState(ushort pressedButtons) =>
+        System.Threading.Volatile.Write(ref _virtualButtons, pressedButtons);
 }

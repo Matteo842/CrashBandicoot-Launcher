@@ -55,6 +55,7 @@ sealed class AndroidPlatformHost(
 
     public void Shutdown()
     {
+        RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
         activity.RunOnUiThread(() =>
         {
             screen.SetImageDrawable(null);

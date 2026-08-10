@@ -132,6 +132,7 @@ internal static unsafe class InputManager
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
+        ApplyVirtualPad();
         Controller.Connected2 = _pad1 != null || HasAnyKey(ConfigManager.Game.Keys2);
     }
 
@@ -230,6 +231,7 @@ internal static unsafe class InputManager
         }
 
         _keysDown.Clear();
+        Controller.SetVirtualPadState(0);
         CloseControllers();
         _sdl?.QuitSubSystem(Sdl.InitGamecontroller);
         _sdl?.Dispose();
@@ -361,6 +363,12 @@ internal static unsafe class InputManager
         {
             Controller.LeftX2 = Controller.LeftY2 = Controller.RightX2 = Controller.RightY2 = 0x80;
         }
+    }
+
+    static void ApplyVirtualPad()
+    {
+        var pressed = Controller.VirtualButtons;
+        Controller.State = (ushort)(Controller.State & ~pressed);
     }
 
     static ushort PadState(GameController* ctrl, GamepadBindings pad, ushort s)
