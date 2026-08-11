@@ -112,8 +112,12 @@ internal static class GlShaders
         flat in int   vSemiTrans;
         flat in int   vBlendMode;
 
+        #ifdef GLES_FRAMEBUFFER_FETCH
+        layout(location = 0) inout vec4 FragColor;
+        #else
         layout(location = 0, index = 0) out vec4 FragColor;
         layout(location = 0, index = 1) out vec4 BlendColor;
+        #endif
 
         uniform sampler2D uVram;
         uniform sampler2D uDest;
@@ -246,12 +250,36 @@ internal static class GlShaders
         #endif
         }
 
+        vec4 outputColor(vec4 source, bool stp) {
+        #ifdef GLES_FRAMEBUFFER_FETCH
+            if (vSemiTrans == 0 || !stp) return source;
+            vec3 destination = FragColor.rgb;
+            vec3 blended;
+            if (vBlendMode == 0)
+                blended = (destination + source.rgb) * 0.5;
+            else if (vBlendMode == 1)
+                blended = destination + source.rgb;
+            else if (vBlendMode == 2)
+                blended = destination - source.rgb;
+            else
+                blended = destination + source.rgb * 0.25;
+            return vec4(clamp(blended, 0.0, 1.0), source.a);
+        #else
+            BlendColor = blendFactors(stp);
+            return source;
+        #endif
+        }
+
         void main() {
+        #ifdef GLES_FRAMEBUFFER_FETCH
+            if (uCheckMask != 0 && FragColor.a >= 0.5) discard;
+        #else
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
+        #endif
 
             if (texMode == 4) {
-                FragColor = vec4(quant5(ivec3(vColor.rgb * 255.0 + 0.5)), uSetMask);
-                BlendColor = blendFactors(true);
+                FragColor = outputColor(
+                    vec4(quant5(ivec3(vColor.rgb * 255.0 + 0.5)), uSetMask), true);
                 return;
             }
 
@@ -272,15 +300,16 @@ internal static class GlShaders
                 ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
                 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             }
-            FragColor = vec4(quant5(c8), max(texel.a, uSetMask));
-            BlendColor = blendFactors(texel.a >= 0.5);
+            FragColor = outputColor(
+                vec4(quant5(c8), max(texel.a, uSetMask)), texel.a >= 0.5);
         }
         """;
 
-    public static uint Build(GL gl, string vsSrc, string fsSrc, string name, bool gles = false)
+    public static uint Build(GL gl, string vsSrc, string fsSrc, string name, bool gles = false,
+        bool framebufferFetch = false)
     {
-        uint vs = CompileStage(gl, ShaderType.VertexShader, AdaptSource(vsSrc, gles), name);
-        uint fs = CompileStage(gl, ShaderType.FragmentShader, AdaptSource(fsSrc, gles), name);
+        uint vs = CompileStage(gl, ShaderType.VertexShader, AdaptSource(vsSrc, gles, framebufferFetch), name);
+        uint fs = CompileStage(gl, ShaderType.FragmentShader, AdaptSource(fsSrc, gles, framebufferFetch), name);
         if (vs == 0 || fs == 0) return 0;
 
         uint prog = gl.CreateProgram();
@@ -306,13 +335,15 @@ internal static class GlShaders
         return new string(a);
     }
 
-    static string AdaptSource(string source, bool gles)
+    static string AdaptSource(string source, bool gles, bool framebufferFetch)
     {
         if (!gles) return source;
 
         var header = "#version 320 es";
         if (source.Contains("index = 1", StringComparison.Ordinal))
-            header += "\n#extension GL_EXT_blend_func_extended : require";
+            header += framebufferFetch
+                ? "\n#extension GL_EXT_shader_framebuffer_fetch : require\n#define GLES_FRAMEBUFFER_FETCH 1"
+                : "\n#extension GL_EXT_blend_func_extended : require";
         header += "\n#define GLES_UNIFIED_BLEND 1\nprecision highp float;\nprecision highp int;";
         return source
             .Replace("#version 330 core", header, StringComparison.Ordinal)

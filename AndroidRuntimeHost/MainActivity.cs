@@ -374,9 +374,6 @@ public sealed class MainActivity : Activity
                 gl = Silk.NET.OpenGL.GL.GetApi(egl);
                 RecompOne.Runtime.Hle.GlVram.Scale = ConfigManager.View.InternalResolution;
                 backend = new RecompOne.Runtime.Hle.GlBackend(gl);
-                backend.InitGl(gles: true);
-                if (!backend.Ready)
-                    throw new InvalidOperationException("Il renderer OpenGL ES Android non si è inizializzato.");
 
                 string extensions;
                 unsafe
@@ -384,16 +381,32 @@ public sealed class MainActivity : Activity
                     extensions = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
                         (nint)gl.GetString(Silk.NET.OpenGL.StringName.Extensions)) ?? string.Empty;
                 }
-                string? barrierName = extensions.Contains("GL_EXT_texture_barrier", StringComparison.Ordinal)
+                var extensionSet = new HashSet<string>(
+                    extensions.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
+                nint shadingRateAddress = extensionSet.Contains("GL_QCOM_shading_rate")
+                    ? egl.GetProcAddress("glShadingRateQCOM")
+                    : 0;
+                // Framebuffer fetch keeps effects such as Crash's spin in one
+                // ordered batch. Qualcomm coarse shading is the fallback for
+                // drivers that cannot provide programmable framebuffer blending.
+                bool framebufferFetch = extensionSet.Contains("GL_EXT_shader_framebuffer_fetch");
+                bool requestCoarseShading = shadingRateAddress != 0 &&
+                                            ConfigManager.View.InternalResolution >= 8;
+                backend.InitGl(gles: true, framebufferFetch: framebufferFetch);
+                if (!backend.Ready)
+                    throw new InvalidOperationException("Il renderer OpenGL ES Android non si è inizializzato.");
+                string? barrierName = extensionSet.Contains("GL_EXT_texture_barrier")
                     ? "glTextureBarrierEXT"
-                    : extensions.Contains("GL_NV_texture_barrier", StringComparison.Ordinal)
+                    : extensionSet.Contains("GL_NV_texture_barrier")
                         ? "glTextureBarrierNV"
                         : null;
                 bool nativeBarrier = barrierName != null &&
                                      backend.ConfigureGlesTextureBarrier(egl.GetProcAddress(barrierName));
+                bool coarseShading = requestCoarseShading &&
+                                     backend.ConfigureGlesShadingRate(shadingRateAddress);
                 Android.Util.Log.Info("CrashGPU", nativeBarrier
-                    ? $"GLES texture barrier: {barrierName}"
-                    : "GLES texture barrier unavailable; using flush fallback");
+                    ? $"GLES texture barrier: {barrierName}; framebuffer fetch: {framebufferFetch}; 2x2 shading: {coarseShading}"
+                    : $"GLES texture barrier unavailable; using flush fallback; framebuffer fetch: {framebufferFetch}; 2x2 shading: {coarseShading}");
 
                 RecompOne.Runtime.Hle.GpuHle.Backend = backend;
                 RecompOne.Runtime.Hle.GpuHle.Active = true;
