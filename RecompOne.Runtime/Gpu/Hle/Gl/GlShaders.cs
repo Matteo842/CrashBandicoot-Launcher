@@ -72,6 +72,8 @@ internal static class GlShaders
         flat out ivec2 pageBase;
         flat out int   texMode;
         flat out int   vDither;
+        flat out int   vSemiTrans;
+        flat out int   vBlendMode;
 
         uniform vec2 uVertexOffset;
         uniform vec2 uPosBias;
@@ -83,6 +85,8 @@ internal static class GlShaders
 
             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
             vDither = (inTexpage >> 10) & 1;
+            vSemiTrans = (inTexpage >> 12) & 1;
+            vBlendMode = (inTexpage >> 13) & 3;
             vInvZ = inInvZ;
 
             if ((inTexpage & 0x8000) != 0) {
@@ -105,6 +109,8 @@ internal static class GlShaders
         flat in ivec2 pageBase;
         flat in int   texMode;
         flat in int   vDither;
+        flat in int   vSemiTrans;
+        flat in int   vBlendMode;
 
         layout(location = 0, index = 0) out vec4 FragColor;
         layout(location = 0, index = 1) out vec4 BlendColor;
@@ -229,12 +235,23 @@ internal static class GlShaders
             return mix(nearest, filtered, clamp(strength, 0.0, 1.0));
         }
 
+        vec4 blendFactors(bool stp) {
+        #ifdef GLES_UNIFIED_BLEND
+            if (vSemiTrans == 0 || !stp) return vec4(1.0);
+            if (vBlendMode == 0) return vec4(0.5, 0.5, 0.5, 0.5);
+            if (vBlendMode == 3) return vec4(0.25, 0.25, 0.25, 0.0);
+            return vec4(1.0, 1.0, 1.0, 0.0);
+        #else
+            return stp ? uBlend : uBlendOpaque;
+        #endif
+        }
+
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
 
             if (texMode == 4) {
                 FragColor = vec4(quant5(ivec3(vColor.rgb * 255.0 + 0.5)), uSetMask);
-                BlendColor = uBlend;
+                BlendColor = blendFactors(true);
                 return;
             }
 
@@ -256,14 +273,14 @@ internal static class GlShaders
                 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             }
             FragColor = vec4(quant5(c8), max(texel.a, uSetMask));
-            BlendColor = texel.a >= 0.5 ? uBlend : uBlendOpaque;
+            BlendColor = blendFactors(texel.a >= 0.5);
         }
         """;
 
-    public static uint Build(GL gl, string vsSrc, string fsSrc, string name)
+    public static uint Build(GL gl, string vsSrc, string fsSrc, string name, bool gles = false)
     {
-        uint vs = CompileStage(gl, ShaderType.VertexShader, vsSrc, name);
-        uint fs = CompileStage(gl, ShaderType.FragmentShader, fsSrc, name);
+        uint vs = CompileStage(gl, ShaderType.VertexShader, AdaptSource(vsSrc, gles), name);
+        uint fs = CompileStage(gl, ShaderType.FragmentShader, AdaptSource(fsSrc, gles), name);
         if (vs == 0 || fs == 0) return 0;
 
         uint prog = gl.CreateProgram();
@@ -287,6 +304,20 @@ internal static class GlShaders
         var a = s.ToCharArray();
         for (int i = 0; i < a.Length; i++) if (a[i] > 0x7F) a[i] = ' ';
         return new string(a);
+    }
+
+    static string AdaptSource(string source, bool gles)
+    {
+        if (!gles) return source;
+
+        var header = "#version 320 es";
+        if (source.Contains("index = 1", StringComparison.Ordinal))
+            header += "\n#extension GL_EXT_blend_func_extended : require";
+        header += "\n#define GLES_UNIFIED_BLEND 1\nprecision highp float;\nprecision highp int;";
+        return source
+            .Replace("#version 330 core", header, StringComparison.Ordinal)
+            .Replace("uniform vec4  uBlendOpaque = vec4(1.0, 1.0, 1.0, 0.0);",
+                "uniform vec4  uBlendOpaque;", StringComparison.Ordinal);
     }
 
     static uint CompileStage(GL gl, ShaderType type, string src, string name)

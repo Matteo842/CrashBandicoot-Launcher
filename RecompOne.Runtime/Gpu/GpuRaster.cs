@@ -56,7 +56,8 @@ public sealed partial class Gpu
             v[i].Subpixel = false;
             v[i].HasGteZ = false;
             v[i].GteZ = 0f;
-            if (HleOn && GteScreenCache.TryFind(gx, gy, out float fx, out float fy, out float gz))
+            if ((HleOn || Hle.GpuHle.DejitterActive) &&
+                GteScreenCache.TryFind(gx, gy, out float fx, out float fy, out float gz))
             {
                 if (gz > 0f)
                 {
@@ -71,6 +72,13 @@ public sealed partial class Gpu
                         v[i].Fx = _drawOffsetX + fx;
                         v[i].Fy = _drawOffsetY + fy;
                         v[i].Subpixel = true;
+                        // The Android/software path has no floating-point GPU rasterizer.
+                        // Rounded GTE coordinates still remove the truncation wobble.
+                        if (!HleOn)
+                        {
+                            v[i].X = _drawOffsetX + (int)MathF.Round(fx);
+                            v[i].Y = _drawOffsetY + (int)MathF.Round(fy);
+                        }
                     }
                 }
             }
@@ -331,7 +339,7 @@ public sealed partial class Gpu
         ushort bg = Vram[idx];
         if (_checkMask && (bg & 0x8000) != 0) return;
 
-        if (dither)
+        if (dither && !Hle.GpuHle.DeditherActive)
         {
             int d = Dither[y & 3, x & 3];
             r = Clamp255(r + d); g = Clamp255(g + d); b = Clamp255(b + d);

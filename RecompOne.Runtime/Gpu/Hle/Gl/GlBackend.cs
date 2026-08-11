@@ -5,6 +5,9 @@ namespace RecompOne.Runtime.Hle;
 
 public sealed class GlBackend : IGpuBackend
 {
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    delegate void TextureBarrierProc();
+
     [StructLayout(LayoutKind.Sequential)]
     struct GlVertex { public float X, Y; public uint Color; public int Clut, Texpage; public float U, V, InvZ; }
 
@@ -20,6 +23,9 @@ public sealed class GlBackend : IGpuBackend
     uint _presentFbo, _presentTex;
     int _presentW, _presentH;
     bool _presentNearest;
+    bool _gles;
+    TextureBarrierProc? _glesTextureBarrier;
+    byte[] _readback = [];
 
     readonly GlVertex[] _verts = new GlVertex[MaxVerts];
     int _count;
@@ -28,6 +34,7 @@ public sealed class GlBackend : IGpuBackend
 
     GlDisplayRt? _kTarget;
     bool _kTransparent;
+    bool _kSubtractBatch;
     int _kBlend, _kSetMask, _kCheckMask;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
     int _kClipX0, _kClipY0, _kClipX1, _kClipY1;
@@ -35,16 +42,27 @@ public sealed class GlBackend : IGpuBackend
     int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
 
     public bool Ready { get; private set; }
+    public string LastDiagnostic { get; private set; } = "ok";
 
     public GlBackend(GL gl) { _gl = gl; _vram = new GlVram(gl); }
 
-    public unsafe void InitGl()
+    public bool ConfigureGlesTextureBarrier(nint address)
     {
-        _vram.Init();
+        if (address == 0) return false;
+        _glesTextureBarrier = Marshal.GetDelegateForFunctionPointer<TextureBarrierProc>(address);
+        return true;
+    }
 
-        _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim");
-        _progPresent = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.PresentFs, "present");
-        _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24");
+    public unsafe void InitGl(bool gles = false)
+    {
+        _gles = gles;
+        _vram.Init(gles);
+        CheckError("vram.init");
+
+        _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim", gles);
+        _progPresent = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.PresentFs, "present", gles);
+        _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24", gles);
+        CheckError("shaders");
         if (_progPrim == 0 || _progPresent == 0 || _progPresent24 == 0) return;
 
         _uTexWindow = _gl.GetUniformLocation(_progPrim, "uTexWindow");
@@ -111,6 +129,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _presentTex, 0);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        CheckError("geometry/fbo");
 
         _kClipX1 = 1023; _kClipY1 = 511;
         Ready = true;
@@ -244,7 +263,10 @@ public sealed class GlBackend : IGpuBackend
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        return _kTransparent == transparent && _kBlend == blend
+        bool blendMatches = _gles
+            ? _kSubtractBatch == (transparent && blend == 2)
+            : _kTransparent == transparent && _kBlend == blend;
+        return blendMatches
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
             && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1;
@@ -254,12 +276,14 @@ public sealed class GlBackend : IGpuBackend
     {
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
+        bool subtractBatch = transparent && blend == 2;
         var target = Classify();
         if (_count > 0 && (target != _kTarget || !DesiredMatches(transparent, blend))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
         CheckTextureFeedback(f);
 
         _kTarget = target;
+        _kSubtractBatch = subtractBatch;
         _kTransparent = transparent; _kBlend = blend;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
@@ -274,6 +298,8 @@ public sealed class GlBackend : IGpuBackend
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
         if (dither) tpage |= 0x400;
+        if (f.SemiTrans) tpage |= 0x1000;
+        tpage |= (f.BlendMode & 3) << 13;
         float invZ = v.HasGteZ && v.Z > 0f ? 1f / v.Z : 0f;
         return new GlVertex
         {
@@ -400,7 +426,16 @@ public sealed class GlBackend : IGpuBackend
             _gl.Viewport(0, 0, (uint)rt.TexW, (uint)rt.TexH);
             destTex = rt.Tex;
         }
-        _vram.Barrier();
+
+        // Display render targets are separate from the PS1 texture VRAM. Most
+        // Crash batches therefore have no feedback dependency at all. Only
+        // synchronize when the fragment shader genuinely reads the texture that
+        // is currently attached for drawing (mask checks, or direct VRAM draws).
+        bool readsDrawTarget = _kCheckMask != 0 || (rt == null && BatchSamplesVram());
+        if (readsDrawTarget)
+        {
+            Barrier();
+        }
 
         _gl.Disable(EnableCap.DepthTest);
         _gl.Disable(EnableCap.CullFace);
@@ -424,7 +459,8 @@ public sealed class GlBackend : IGpuBackend
         _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);
         _gl.ActiveTexture(TextureUnit.Texture1);
-        _gl.BindTexture(TextureTarget.Texture2D, destTex);
+        _gl.BindTexture(TextureTarget.Texture2D,
+            _kCheckMask != 0 ? destTex : _vram.Texture);
         _gl.ActiveTexture(TextureUnit.Texture0);
         if (rt != null)
         {
@@ -447,7 +483,23 @@ public sealed class GlBackend : IGpuBackend
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
 
-        if (!_kTransparent)
+        if (_gles && !_kSubtractBatch)
+        {
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+            _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.OneMinusSrc1Alpha,
+                BlendingFactor.One, BlendingFactor.Zero);
+            _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+        }
+        else if (_gles)
+        {
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
+            _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.OneMinusSrc1Alpha,
+                BlendingFactor.One, BlendingFactor.Zero);
+            _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+        }
+        else if (!_kTransparent)
         {
             _gl.Disable(EnableCap.Blend);
             _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
@@ -462,7 +514,7 @@ public sealed class GlBackend : IGpuBackend
                 SetBlend(0f, 1f);
                 _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
 
-                _vram.Barrier();
+                if (readsDrawTarget) Barrier();
                 _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
                 SetBlend(1f, 1f);
                 _gl.Uniform4(_uBlendOpaque, 0f, 0f, 0f, 1f);
@@ -481,7 +533,28 @@ public sealed class GlBackend : IGpuBackend
         _count = 0;
     }
 
+    bool BatchSamplesVram()
+    {
+        for (int i = 0; i < _count; i += 3)
+            if ((_verts[i].Texpage & 0x8000) == 0)
+                return true;
+        return false;
+    }
+
     void SetBlend(float src, float dst) => _gl.Uniform4(_uBlend, src, src, src, dst);
+
+    // Prefer the driver's GLES texture-barrier extension. It resolves the PS1
+    // VRAM feedback dependency without stalling the CPU after every batch.
+    // Flush is a conservative fallback for GLES drivers without the extension.
+    void Barrier()
+    {
+        if (!_gles)
+            _vram.Barrier();
+        else if (_glesTextureBarrier != null)
+            _glesTextureBarrier();
+        else
+            _gl.Flush();
+    }
 
     public void Present(in HleDispEnv disp) => PresentDisplay(disp.X, disp.Y, disp.W, disp.H, disp.Rgb24);
 
@@ -575,6 +648,7 @@ public sealed class GlBackend : IGpuBackend
             _gl.Uniform2(_uPresentTexSize, (float)VramShadow.Width, VramShadow.Height);
         }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+        CheckError("present");
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return (_presentTex, fbW, fbH, aspect);
@@ -588,7 +662,103 @@ public sealed class GlBackend : IGpuBackend
         var filter = nearest ? GLEnum.Nearest : GLEnum.Linear;
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)filter);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)filter);
+        // Some GLES drivers do not refresh an attachment that was connected
+        // while its texture still had no storage. Reattach after allocation.
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
+        _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+            FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _presentTex, 0);
         _presentW = w; _presentH = h; _presentNearest = nearest;
+    }
+
+    /// <summary>
+    /// Read the high-resolution present target into Android-compatible ARGB pixels.
+    /// OpenGL's bottom-left origin is flipped here so callers can upload the result
+    /// directly into a Bitmap without another allocation.
+    /// </summary>
+    public unsafe bool ReadPresentArgb(Span<int> destination)
+    {
+        var count = _presentW * _presentH;
+        if (!Ready || count <= 0 || destination.Length < count) return false;
+        var byteCount = count * 4;
+        if (_readback.Length < byteCount) _readback = new byte[byteCount];
+
+        // GL_FRAMEBUFFER binds both read and draw targets and is the most
+        // consistently supported path on Android GLES drivers.
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
+        fixed (byte* raw = _readback)
+            _gl.ReadPixels(0, 0, (uint)_presentW, (uint)_presentH,
+                PixelFormat.Rgba, PixelType.UnsignedByte, raw);
+
+        for (var y = 0; y < _presentH; y++)
+        {
+            // VRAM row zero is the top of the PS1 image but was uploaded at GL
+            // row zero (the bottom), so the GL readback is already top-first
+            // for Android. Flipping it here would display the game upside down.
+            var sourceRow = y * _presentW * 4;
+            var targetRow = y * _presentW;
+            for (var x = 0; x < _presentW; x++)
+            {
+                var source = sourceRow + x * 4;
+                destination[targetRow + x] = unchecked((int)(0xFF000000u |
+                    ((uint)_readback[source] << 16) |
+                    ((uint)_readback[source + 1] << 8) |
+                    _readback[source + 2]));
+            }
+        }
+        CheckError("readback");
+        return true;
+    }
+
+    /// <summary>
+    /// Composite the high-resolution present texture straight into the current
+    /// EGL window surface. This is Android's fast path: no glReadPixels, managed
+    /// pixel conversion, Bitmap allocation, or CPU-to-GPU upload.
+    /// </summary>
+    public void PresentToDefaultFramebuffer(int surfaceWidth, int surfaceHeight, float aspect)
+    {
+        if (!Ready || _presentTex == 0 || surfaceWidth <= 0 || surfaceHeight <= 0)
+            return;
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        _gl.Viewport(0, 0, (uint)surfaceWidth, (uint)surfaceHeight);
+        _gl.Disable(EnableCap.DepthTest);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.Disable(EnableCap.CullFace);
+        // Magenta makes the EGL surface/viewport visible while validating the
+        // direct Android presentation path; the final build restores black.
+        _gl.ClearColor(0f, 0f, 0f, 1f);
+        _gl.Clear(ClearBufferMask.ColorBufferBit);
+
+        int targetWidth = surfaceWidth;
+        int targetHeight = Math.Max(1, (int)MathF.Round(targetWidth / aspect));
+        if (targetHeight > surfaceHeight)
+        {
+            targetHeight = surfaceHeight;
+            targetWidth = Math.Max(1, (int)MathF.Round(targetHeight * aspect));
+        }
+        int targetX = (surfaceWidth - targetWidth) / 2;
+        int targetY = (surfaceHeight - targetHeight) / 2;
+        _gl.Viewport(targetX, targetY, (uint)targetWidth, (uint)targetHeight);
+
+        _gl.UseProgram(_progPresent);
+        _gl.BindVertexArray(_presentVao);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, _presentTex);
+        // The PS1's top row lives at GL texture row zero. Flip only during this
+        // final GPU pass so the Android surface receives conventional top-down video.
+        _gl.Uniform2(_uPresentOrigin, 0f, (float)_presentH);
+        _gl.Uniform2(_uPresentSize, (float)_presentW, (float)-_presentH);
+        _gl.Uniform2(_uPresentTexSize, (float)_presentW, (float)_presentH);
+        _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+        CheckError("surface present");
+    }
+
+    void CheckError(string stage)
+    {
+        var error = _gl.GetError();
+        if (error != GLEnum.NoError)
+            LastDiagnostic = $"{stage}: {error}";
     }
 
     public void Dispose()

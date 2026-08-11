@@ -53,6 +53,7 @@ sealed class LauncherScreen : View
 
     public event Action? SelectDiscRequested;
     public event Action? StartGameRequested;
+    public event Action? SettingsRequested;
 
     public LauncherScreen(Activity activity) : base(activity)
     {
@@ -556,7 +557,7 @@ sealed class LauncherScreen : View
                 Post(() => TouchControlsDialog.Show(_activity));
                 break;
             case 2:
-                ShowComingSoon("Settings");
+                SettingsRequested?.Invoke();
                 break;
             case 3:
                 ShowComingSoon("Mods");

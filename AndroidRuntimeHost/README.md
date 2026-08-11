@@ -21,8 +21,13 @@ continuous movement and simultaneous direction/action presses. The overlay can b
 play; its opacity, size, color/neutral appearance, and control-group positions are saved
 per device and can be edited from the launcher's Controls screen. L1/L2/R1/R2 are
 hidden by default for Crash Bandicoot but can be enabled from the same screen.
-Gameplay uses Android immersive fullscreen and restores hidden system bars only transiently
-when the user explicitly swipes for them.
+The Settings screen mirrors the desktop launcher controls: master volume/mute,
+fullscreen, widescreen, internal resolution, texture filter and strength, dedither,
+and dejitter. Android fullscreen, software-present filtering, widescreen output,
+dedither, and software dejitter are applied by the current host; GPU-only enhancement
+values are persisted for the future Android GPU renderer.
+Gameplay uses optional Android immersive fullscreen and restores hidden system bars only
+transiently when the user explicitly swipes for them.
 Audio is the next runtime milestone. No retail disc or generated game output is bundled.
 
 Build with JDK 21 (the Android Studio JDK 25 can still be used by the Gradle app):

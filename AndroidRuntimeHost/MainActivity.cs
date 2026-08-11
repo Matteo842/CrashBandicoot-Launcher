@@ -28,7 +28,7 @@ public sealed class MainActivity : Activity
 
     LauncherScreen _launcher = null!;
     TextView _status = null!;
-    ImageView _screen = null!;
+    TextureView _screen = null!;
     ProgressBar _progress = null!;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
@@ -37,6 +37,7 @@ public sealed class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        InitializeRuntimeConfiguration();
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
         if (Window != null)
         {
@@ -63,6 +64,7 @@ public sealed class MainActivity : Activity
         _launcher = new LauncherScreen(this);
         _launcher.SelectDiscRequested += PickDiscFolder;
         _launcher.StartGameRequested += () => _ = StartGameAsync();
+        _launcher.SettingsRequested += () => SettingsDialog.Show(this, ApplyGameDisplayMode);
         SetContentView(_launcher);
 
         if (_disc != null)
@@ -72,14 +74,12 @@ public sealed class MainActivity : Activity
     void ShowGameUi()
     {
         _gameUiVisible = true;
-        EnterImmersiveGameMode();
+        ApplyGameDisplayMode();
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
         var root = new FrameLayout(this);
         root.SetBackgroundColor(Color.Rgb(7, 11, 18));
 
-        _screen = new ImageView(this);
-        _screen.SetBackgroundColor(Color.Black);
-        _screen.SetScaleType(ImageView.ScaleType.FitCenter);
+        _screen = new TextureView(this);
         root.AddView(_screen, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
@@ -140,10 +140,30 @@ public sealed class MainActivity : Activity
         }
     }
 
+    void LeaveImmersiveGameMode()
+    {
+        if (Window == null) return;
+
+        Window.ClearFlags(WindowManagerFlags.Fullscreen);
+        Window.DecorView.SystemUiFlags = SystemUiFlags.LayoutStable;
+        if (OperatingSystem.IsAndroidVersionAtLeast(30))
+        {
+            Window.SetDecorFitsSystemWindows(true);
+            Window.InsetsController?.Show(WindowInsets.Type.SystemBars());
+        }
+    }
+
+    void ApplyGameDisplayMode()
+    {
+        if (!_gameUiVisible) return;
+        if (ConfigManager.View.Fullscreen) EnterImmersiveGameMode();
+        else LeaveImmersiveGameMode();
+    }
+
     public override void OnWindowFocusChanged(bool hasFocus)
     {
         base.OnWindowFocusChanged(hasFocus);
-        if (hasFocus && _gameUiVisible) EnterImmersiveGameMode();
+        if (hasFocus && _gameUiVisible) ApplyGameDisplayMode();
     }
 
     protected override void OnPause()
@@ -293,6 +313,7 @@ public sealed class MainActivity : Activity
                 ConfigManager.Load();
                 ConfigManager.Game.CdPath = cuePath;
                 ConfigManager.SaveGame();
+                ApplyRuntimeGraphicsSettings();
 
                 SetStatus("Controllo che sia Crash Bandicoot NTSC-U…");
                 var validation = DiscValidator.Validate(cuePath);
@@ -322,8 +343,6 @@ public sealed class MainActivity : Activity
                 }
 
                 SetStatus("Avvio del core PS1…");
-                RecompOne.Runtime.Runtime.SetPlatformHost(
-                    new AndroidPlatformHost(this, _screen, _status, _progress));
                 RunGameCore(gameDll, cuePath);
             });
         }
@@ -341,8 +360,97 @@ public sealed class MainActivity : Activity
         }
     }
 
-    static void RunGameCore(string gameDll, string cuePath)
-        => RunOnLargeStack("PS1 Game Core", () => GameLoader.Run(gameDll, cuePath));
+    void RunGameCore(string gameDll, string cuePath)
+        => RunOnLargeStack("PS1 Game Core", () =>
+        {
+            AndroidEglContext? egl = null;
+            Surface? surface = null;
+            Silk.NET.OpenGL.GL? gl = null;
+            RecompOne.Runtime.Hle.GlBackend? backend = null;
+            try
+            {
+                surface = WaitForGameSurface();
+                egl = new AndroidEglContext(surface);
+                gl = Silk.NET.OpenGL.GL.GetApi(egl);
+                RecompOne.Runtime.Hle.GlVram.Scale = ConfigManager.View.InternalResolution;
+                backend = new RecompOne.Runtime.Hle.GlBackend(gl);
+                backend.InitGl(gles: true);
+                if (!backend.Ready)
+                    throw new InvalidOperationException("Il renderer OpenGL ES Android non si è inizializzato.");
+
+                string extensions;
+                unsafe
+                {
+                    extensions = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
+                        (nint)gl.GetString(Silk.NET.OpenGL.StringName.Extensions)) ?? string.Empty;
+                }
+                string? barrierName = extensions.Contains("GL_EXT_texture_barrier", StringComparison.Ordinal)
+                    ? "glTextureBarrierEXT"
+                    : extensions.Contains("GL_NV_texture_barrier", StringComparison.Ordinal)
+                        ? "glTextureBarrierNV"
+                        : null;
+                bool nativeBarrier = barrierName != null &&
+                                     backend.ConfigureGlesTextureBarrier(egl.GetProcAddress(barrierName));
+                Android.Util.Log.Info("CrashGPU", nativeBarrier
+                    ? $"GLES texture barrier: {barrierName}"
+                    : "GLES texture barrier unavailable; using flush fallback");
+
+                RecompOne.Runtime.Hle.GpuHle.Backend = backend;
+                RecompOne.Runtime.Hle.GpuHle.Active = true;
+                RecompOne.Runtime.Hle.GpuHle.NativeResolution =
+                    ConfigManager.View.InternalResolution <= 1;
+                RecompOne.Runtime.Runtime.SetPlatformHost(
+                    new AndroidPlatformHost(this, _status, _progress, egl, backend));
+                GameLoader.Run(gameDll, cuePath);
+            }
+            finally
+            {
+                RecompOne.Runtime.Hle.GpuHle.Active = false;
+                RecompOne.Runtime.Hle.GpuHle.Backend = null;
+                backend?.Dispose();
+                gl?.Dispose();
+                egl?.Dispose();
+                surface?.Dispose();
+            }
+        });
+
+    Surface WaitForGameSurface()
+    {
+        var deadline = System.Environment.TickCount64 + 5000;
+        while ((!_screen.IsAvailable || _screen.SurfaceTexture == null) &&
+               System.Environment.TickCount64 < deadline)
+            Thread.Sleep(10);
+
+        if (!_screen.IsAvailable || _screen.SurfaceTexture == null)
+            throw new InvalidOperationException("La superficie video Android non è pronta.");
+        return new Surface(_screen.SurfaceTexture);
+    }
+
+    void InitializeRuntimeConfiguration()
+    {
+        var dataRoot = Path.Combine(FilesDir!.AbsolutePath, "runtime");
+        AppPaths.SetRoot(dataRoot);
+        AppPaths.EnsureCreated();
+        ConfigManager.Load();
+
+        // A phone game should start immersive unless the user explicitly changes it.
+        if (!ConfigManager.View.Values.ContainsKey("Fullscreen"))
+        {
+            ConfigManager.View.Fullscreen = true;
+            ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
+        }
+    }
+
+    static void ApplyRuntimeGraphicsSettings()
+    {
+        var view = ConfigManager.View;
+        RecompOne.Runtime.Hle.GpuHle.WideAspect = view.Widescreen ? 16f / 9f : 0f;
+        RecompOne.Runtime.Hle.GpuHle.TextureFilter = view.TextureFilter;
+        RecompOne.Runtime.Hle.GpuHle.TextureFilterStrength = view.TextureFilterStrength;
+        RecompOne.Runtime.Hle.GpuHle.Dedither = view.Dedither;
+        RecompOne.Runtime.Hle.GpuHle.Dejitter = view.Dejitter;
+        RecompOne.Runtime.Hle.GpuHle.RefreshWideFov();
+    }
 
     static void RunOnLargeStack(string threadName, Action action)
     {

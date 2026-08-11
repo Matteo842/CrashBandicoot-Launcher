@@ -9,17 +9,20 @@ public sealed class GlVram
     public static int Height => VramShadow.Height * Scale;
 
     readonly GL _gl;
+    bool _gles;
     uint _tex, _fbo;
     uint _stageTex, _stageFbo;
     uint _scratchTex;
+    byte[] _transfer = [];
 
     public uint Texture => _tex;
     public uint Fbo => _fbo;
 
     public GlVram(GL gl) => _gl = gl;
 
-    public void Init()
+    public void Init(bool gles = false)
     {
+        _gles = gles;
         _tex = CreateTex(Width, Height);
         _fbo = CreateFbo(_tex);
         _stageTex = CreateTex(VramShadow.Width, VramShadow.Height);
@@ -36,8 +39,12 @@ public sealed class GlVram
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
         // null data: allocate GPU storage without a giant CPU zero-fill (matters at 8x / 4K).
-        _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb5A1, (uint)w, (uint)h, 0,
-            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, null);
+        // UNSIGNED_SHORT_1_5_5_5_REV is not part of OpenGL ES. Use RGBA8 on
+        // Android; the shaders already quantize to PS1 colour precision.
+        _gl.TexImage2D(TextureTarget.Texture2D, 0,
+            _gles ? InternalFormat.Rgba8 : InternalFormat.Rgb5A1,
+            (uint)w, (uint)h, 0, PixelFormat.Rgba,
+            _gles ? PixelType.UnsignedByte : PixelType.UnsignedShort1555Rev, null);
         return t;
     }
 
@@ -62,9 +69,29 @@ public sealed class GlVram
     {
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _gl.BindTexture(TextureTarget.Texture2D, _stageTex);
-        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 2);
-        _gl.TexSubImage2D(TextureTarget.Texture2D, 0, x, y, (uint)w, (uint)h,
-            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, px);
+        if (_gles)
+        {
+            int count = w * h;
+            if (_transfer.Length < count * 4) _transfer = new byte[count * 4];
+            for (int i = 0; i < count; i++)
+            {
+                ushort p = px[i];
+                int o = i * 4;
+                _transfer[o] = (byte)((p & 0x1f) * 255 / 31);
+                _transfer[o + 1] = (byte)(((p >> 5) & 0x1f) * 255 / 31);
+                _transfer[o + 2] = (byte)(((p >> 10) & 0x1f) * 255 / 31);
+                _transfer[o + 3] = (byte)((p & 0x8000) != 0 ? 255 : 0);
+            }
+            _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            _gl.TexSubImage2D<byte>(TextureTarget.Texture2D, 0, x, y, (uint)w, (uint)h,
+                PixelFormat.Rgba, PixelType.UnsignedByte, _transfer.AsSpan(0, count * 4));
+        }
+        else
+        {
+            _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 2);
+            _gl.TexSubImage2D(TextureTarget.Texture2D, 0, x, y, (uint)w, (uint)h,
+                PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, px);
+        }
 
         _gl.Disable(EnableCap.ScissorTest);
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
@@ -114,8 +141,27 @@ public sealed class GlVram
             x, y, x + w, y + h, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
 
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
-        _gl.PixelStore(PixelStoreParameter.PackAlignment, 2);
-        _gl.ReadPixels(x, y, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, dst);
+        if (_gles)
+        {
+            int count = w * h;
+            if (_transfer.Length < count * 4) _transfer = new byte[count * 4];
+            _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
+            _gl.ReadPixels<byte>(x, y, (uint)w, (uint)h, PixelFormat.Rgba,
+                PixelType.UnsignedByte, _transfer.AsSpan(0, count * 4));
+            for (int i = 0; i < count; i++)
+            {
+                int o = i * 4;
+                dst[i] = (ushort)((_transfer[o] * 31 / 255) |
+                    ((_transfer[o + 1] * 31 / 255) << 5) |
+                    ((_transfer[o + 2] * 31 / 255) << 10) |
+                    (_transfer[o + 3] >= 128 ? 0x8000 : 0));
+            }
+        }
+        else
+        {
+            _gl.PixelStore(PixelStoreParameter.PackAlignment, 2);
+            _gl.ReadPixels(x, y, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, dst);
+        }
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
     }
 
