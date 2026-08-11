@@ -28,6 +28,8 @@ sealed class TouchControllerView : View
     readonly RectF _select = new();
 
     float _radius;
+    float _controlStep;
+    float _joystickTravelRadius;
     float _dpadX;
     float _dpadY;
     float _faceX;
@@ -37,6 +39,12 @@ sealed class TouchControllerView : View
     ushort _pressedButtons;
     TouchControlGroup? _dragGroup;
     int _dragPointerId = -1;
+    int _joystickPointerId = -1;
+    bool _joystickActive;
+    float _joystickOriginX;
+    float _joystickOriginY;
+    float _joystickKnobX;
+    float _joystickKnobY;
 
     static readonly Color Sand = Color.Rgb(255, 239, 194);
     static readonly Color Neutral = Color.Rgb(174, 184, 186);
@@ -91,22 +99,26 @@ sealed class TouchControllerView : View
         var density = Resources?.DisplayMetrics?.Density ?? 1f;
         _radius = Math.Clamp(height * 0.085f, 28f * density, 44f * density) * _settings.Scale;
         var margin = Math.Max(10f * density, height * 0.022f);
-        var step = _radius * 1.38f;
-        var groupReach = step + _radius;
+        var maximumVerticalStep = Math.Max(_radius,
+            height * 0.5f - margin - _radius);
+        _controlStep = Math.Min(_radius * 1.80f, maximumVerticalStep);
+        var groupReach = _controlStep + _radius;
 
+        _joystickTravelRadius = Math.Min(_radius * 2.0f, height * 0.32f);
+        var joystickReach = _joystickTravelRadius + _radius * 0.58f;
         _dpadX = Math.Clamp(width * _settings.DpadX,
-            margin + groupReach, width * 0.48f - _radius);
+            margin + joystickReach, width * 0.48f - joystickReach);
         _dpadY = Math.Clamp(height * _settings.DpadY,
-            margin + groupReach, height - margin - groupReach);
+            margin + joystickReach, height - margin - joystickReach);
 
         _faceX = Math.Clamp(width * _settings.FaceX,
             width * 0.52f + _radius, width - margin - groupReach);
         _faceY = Math.Clamp(height * _settings.FaceY,
             margin + groupReach, height - margin - groupReach);
-        SetCircle(_triangle, _faceX, _faceY - step);
-        SetCircle(_circle, _faceX + step, _faceY);
-        SetCircle(_cross, _faceX, _faceY + step);
-        SetCircle(_square, _faceX - step, _faceY);
+        SetCircle(_triangle, _faceX, _faceY - _controlStep);
+        SetCircle(_circle, _faceX + _controlStep, _faceY);
+        SetCircle(_cross, _faceX, _faceY + _controlStep);
+        SetCircle(_square, _faceX - _controlStep, _faceY);
 
         var shoulderWidth = _radius * 1.85f;
         var shoulderHeight = _radius * 0.72f;
@@ -148,7 +160,7 @@ sealed class TouchControllerView : View
         base.OnDraw(canvas);
         if (_radius <= 0) LayoutControls(Width, Height);
 
-        DrawDpad(canvas);
+        DrawJoystick(canvas);
         DrawCircleButton(canvas, _triangle, "△", TriangleGreen, Controller.Triangle);
         DrawCircleButton(canvas, _circle, "○", CircleRed, Controller.Circle);
         DrawCircleButton(canvas, _cross, "×", CrossBlue, Controller.Cross);
@@ -165,26 +177,37 @@ sealed class TouchControllerView : View
         DrawPill(canvas, _start, "START", Controller.Start);
     }
 
-    void DrawDpad(Canvas canvas)
+    void DrawJoystick(Canvas canvas)
     {
-        var step = _radius * 1.38f;
-        DrawDirection(canvas, _dpadX, _dpadY - step, "▲", Controller.Up);
-        DrawDirection(canvas, _dpadX + step, _dpadY, "▶", Controller.Right);
-        DrawDirection(canvas, _dpadX, _dpadY + step, "▼", Controller.Down);
-        DrawDirection(canvas, _dpadX - step, _dpadY, "◀", Controller.Left);
+        var originX = _joystickActive ? _joystickOriginX : _dpadX;
+        var originY = _joystickActive ? _joystickOriginY : _dpadY;
+        var knobX = _joystickActive ? _joystickKnobX : originX;
+        var knobY = _joystickActive ? _joystickKnobY : originY;
+        var accent = _settings.UseColors ? Sand : Neutral;
+        var moving = (_pressedButtons &
+            (Controller.Up | Controller.Right | Controller.Down | Controller.Left)) != 0;
 
         _paint.SetStyle(Paint.Style.Fill);
-        _paint.Color = Color.Argb(76, 8, 14, 20);
-        canvas.DrawCircle(_dpadX, _dpadY, _radius * 0.58f, _paint);
-    }
+        _paint.Color = Color.Argb(_joystickActive ? 82 : 48, 8, 14, 20);
+        canvas.DrawCircle(originX, originY, _joystickTravelRadius, _paint);
 
-    void DrawDirection(Canvas canvas, float x, float y, string label, ushort bit)
-    {
-        var pressed = (_pressedButtons & bit) != 0;
-        var accent = _settings.UseColors ? Sand : Neutral;
-        DrawControlCircle(canvas, x, y, _radius, pressed, accent);
-        DrawCenteredLabel(canvas, label, x, y, _radius * 0.64f,
-            pressed ? Color.White : accent);
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(2f, _radius * 0.055f);
+        var baseAlpha = _settings.UseColors ? (_joystickActive ? 195 : 120) : (_joystickActive ? 145 : 90);
+        _paint.Color = Color.Argb(baseAlpha, accent.R, accent.G, accent.B);
+        canvas.DrawCircle(originX, originY, _joystickTravelRadius, _paint);
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = moving
+            ? Color.Argb(190, accent.R, accent.G, accent.B)
+            : Color.Argb(_joystickActive ? 120 : 74, accent.R, accent.G, accent.B);
+        canvas.DrawCircle(knobX, knobY, _radius * 0.58f, _paint);
+
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(2f, _radius * 0.045f);
+        _paint.Color = moving ? Color.White : Color.Argb(baseAlpha, accent.R, accent.G, accent.B);
+        canvas.DrawCircle(knobX, knobY, _radius * 0.58f, _paint);
+        _paint.SetStyle(Paint.Style.Fill);
     }
 
     void DrawCircleButton(Canvas canvas, RectF bounds, string label, Color accent, ushort bit)
@@ -246,8 +269,17 @@ sealed class TouchControllerView : View
         {
             case MotionEventActions.Down:
             case MotionEventActions.PointerDown:
-                UpdatePointer(e, e.ActionIndex);
+            {
+                var index = e.ActionIndex;
+                var x = e.GetX(index);
+                var y = e.GetY(index);
+                var pointerId = e.GetPointerId(index);
+                if (!_joystickActive && ShouldStartJoystick(x, y))
+                    BeginJoystick(pointerId, x, y);
+                else
+                    UpdatePointer(e, index);
                 return true;
+            }
 
             case MotionEventActions.Move:
                 for (var i = 0; i < e.PointerCount; i++) UpdatePointer(e, i);
@@ -257,7 +289,9 @@ sealed class TouchControllerView : View
             case MotionEventActions.PointerUp:
                 for (var i = 0; i < e.PointerCount; i++)
                     if (i != e.ActionIndex) UpdatePointer(e, i, publish: false);
-                _pointerButtons.Remove(e.GetPointerId(e.ActionIndex));
+                var releasedPointer = e.GetPointerId(e.ActionIndex);
+                _pointerButtons.Remove(releasedPointer);
+                if (releasedPointer == _joystickPointerId) EndJoystick();
                 PublishState();
                 PerformClick();
                 return true;
@@ -318,7 +352,7 @@ sealed class TouchControllerView : View
 
     TouchControlGroup? FindEditGroup(float x, float y)
     {
-        var reach = _radius * 2.55f;
+        var reach = _radius * 1.65f;
         if (DistanceSquared(x, y, _dpadX, _dpadY) <= reach * reach)
             return TouchControlGroup.Dpad;
         if (DistanceSquared(x, y, _faceX, _faceY) <= reach * reach)
@@ -340,30 +374,21 @@ sealed class TouchControllerView : View
 
     void UpdatePointer(MotionEvent e, int index, bool publish = true)
     {
-        _pointerButtons[e.GetPointerId(index)] = HitTest(e.GetX(index), e.GetY(index));
+        var pointerId = e.GetPointerId(index);
+        if (pointerId == _joystickPointerId)
+            UpdateJoystick(pointerId, e.GetX(index), e.GetY(index));
+        else
+            _pointerButtons[pointerId] = HitTest(e.GetX(index), e.GetY(index));
         if (publish) PublishState();
     }
 
     ushort HitTest(float x, float y)
     {
         ushort buttons = 0;
-        var dx = x - _dpadX;
-        var dy = y - _dpadY;
-        var reach = _radius * 2.45f;
-        if (dx * dx + dy * dy <= reach * reach)
-        {
-            var threshold = _radius * 0.32f;
-            if (dx < -threshold) buttons |= Controller.Left;
-            if (dx > threshold) buttons |= Controller.Right;
-            if (dy < -threshold) buttons |= Controller.Up;
-            if (dy > threshold) buttons |= Controller.Down;
-            return buttons;
-        }
-
-        if (CircleContains(_triangle, x, y)) buttons |= Controller.Triangle;
-        if (CircleContains(_circle, x, y)) buttons |= Controller.Circle;
-        if (CircleContains(_cross, x, y)) buttons |= Controller.Cross;
-        if (CircleContains(_square, x, y)) buttons |= Controller.Square;
+        if (CircleContains(_triangle, x, y, 1.15f)) buttons |= Controller.Triangle;
+        if (CircleContains(_circle, x, y, 1.15f)) buttons |= Controller.Circle;
+        if (CircleContains(_cross, x, y, 1.15f)) buttons |= Controller.Cross;
+        if (CircleContains(_square, x, y, 1.15f)) buttons |= Controller.Square;
         if (_settings.ShowShoulders)
         {
             if (_l1.Contains(x, y)) buttons |= Controller.L1;
@@ -376,11 +401,71 @@ sealed class TouchControllerView : View
         return buttons;
     }
 
-    static bool CircleContains(RectF bounds, float x, float y)
+    bool ShouldStartJoystick(float x, float y)
+    {
+        if (x >= Width * 0.48f || y <= Height * 0.16f) return false;
+        if (_select.Contains(x, y) || _start.Contains(x, y)) return false;
+        if (_settings.ShowShoulders && (_l1.Contains(x, y) || _l2.Contains(x, y))) return false;
+        return true;
+    }
+
+    void BeginJoystick(int pointerId, float x, float y)
+    {
+        _joystickActive = true;
+        _joystickPointerId = pointerId;
+        _joystickOriginX = _joystickKnobX = x;
+        _joystickOriginY = _joystickKnobY = y;
+        _pointerButtons[pointerId] = 0;
+        PublishState();
+        Invalidate();
+    }
+
+    void UpdateJoystick(int pointerId, float x, float y)
+    {
+        var dx = x - _joystickOriginX;
+        var dy = y - _joystickOriginY;
+        var distance = MathF.Sqrt(dx * dx + dy * dy);
+        var knobScale = distance > _joystickTravelRadius && distance > 0
+            ? _joystickTravelRadius / distance
+            : 1f;
+        _joystickKnobX = _joystickOriginX + dx * knobScale;
+        _joystickKnobY = _joystickOriginY + dy * knobScale;
+        _pointerButtons[pointerId] = JoystickDirection(dx, dy, distance);
+        Invalidate();
+    }
+
+    ushort JoystickDirection(float dx, float dy, float distance)
+    {
+        if (distance < _radius * 0.22f) return 0;
+
+        var absX = Math.Abs(dx);
+        var absY = Math.Abs(dy);
+        const float cardinalRatio = 2.41421356f;
+
+        if (absX > absY * cardinalRatio)
+            return dx < 0 ? Controller.Left : Controller.Right;
+        if (absY > absX * cardinalRatio)
+            return dy < 0 ? Controller.Up : Controller.Down;
+
+        ushort diagonal = dx < 0 ? Controller.Left : Controller.Right;
+        diagonal |= dy < 0 ? Controller.Up : Controller.Down;
+        return diagonal;
+    }
+
+    void EndJoystick()
+    {
+        _joystickActive = false;
+        _joystickPointerId = -1;
+        _joystickOriginX = _joystickKnobX = _dpadX;
+        _joystickOriginY = _joystickKnobY = _dpadY;
+        Invalidate();
+    }
+
+    static bool CircleContains(RectF bounds, float x, float y, float radiusScale = 1f)
     {
         var dx = x - bounds.CenterX();
         var dy = y - bounds.CenterY();
-        var radius = bounds.Width() * 0.5f;
+        var radius = bounds.Width() * 0.5f * radiusScale;
         return dx * dx + dy * dy <= radius * radius;
     }
 
@@ -396,8 +481,14 @@ sealed class TouchControllerView : View
 
     void ReleaseAll()
     {
+        var hadJoystick = _joystickActive;
         _pointerButtons.Clear();
-        if (_pressedButtons == 0) return;
+        EndJoystick();
+        if (_pressedButtons == 0)
+        {
+            if (hadJoystick) Invalidate();
+            return;
+        }
         _pressedButtons = 0;
         Controller.SetVirtualPadState(0);
         Invalidate();
