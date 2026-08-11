@@ -553,7 +553,7 @@ sealed class LauncherScreen : View
                 StartGameRequested?.Invoke();
                 break;
             case 1:
-                ShowComingSoon("Controls and touch mapping");
+                Post(() => TouchControlsDialog.Show(_activity));
                 break;
             case 2:
                 ShowComingSoon("Settings");

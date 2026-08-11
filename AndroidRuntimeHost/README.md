@@ -14,10 +14,15 @@ Current path:
 6. drive player one through a multitouch PlayStation controller overlay.
 
 The complete path above has been validated on a physical arm64 device through the
-Crash Bandicoot title screen. The touch overlay supports the D-pad, all four face
-buttons, L1/L2/R1/R2, Start, Select, diagonals, sliding between directions, and
-simultaneous direction/action presses. Audio and settings are the next runtime
-milestones. No retail disc or generated game output is bundled.
+Crash Bandicoot title screen. The multitouch overlay supports the D-pad, all four
+face buttons, Start, Select, diagonals, sliding between directions, and simultaneous
+direction/action presses. The overlay can be disabled completely for physical-controller
+play; its opacity, size, color/neutral appearance, and control-group positions are saved
+per device and can be edited from the launcher's Controls screen. L1/L2/R1/R2 are
+hidden by default for Crash Bandicoot but can be enabled from the same screen.
+Gameplay uses Android immersive fullscreen and restores hidden system bars only transiently
+when the user explicitly swipes for them.
+Audio is the next runtime milestone. No retail disc or generated game output is bundled.
 
 Build with JDK 21 (the Android Studio JDK 25 can still be used by the Gradle app):
 

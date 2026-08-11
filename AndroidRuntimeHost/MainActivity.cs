@@ -30,9 +30,9 @@ public sealed class MainActivity : Activity
     TextView _status = null!;
     ImageView _screen = null!;
     ProgressBar _progress = null!;
-    TouchControllerView _touchControls = null!;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
+    bool _gameUiVisible;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -59,6 +59,7 @@ public sealed class MainActivity : Activity
 
     void ShowLauncherUi()
     {
+        _gameUiVisible = false;
         _launcher = new LauncherScreen(this);
         _launcher.SelectDiscRequested += PickDiscFolder;
         _launcher.StartGameRequested += () => _ = StartGameAsync();
@@ -70,6 +71,8 @@ public sealed class MainActivity : Activity
 
     void ShowGameUi()
     {
+        _gameUiVisible = true;
+        EnterImmersiveGameMode();
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
         var root = new FrameLayout(this);
         root.SetBackgroundColor(Color.Rgb(7, 11, 18));
@@ -80,9 +83,13 @@ public sealed class MainActivity : Activity
         root.AddView(_screen, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
-        _touchControls = new TouchControllerView(this);
-        root.AddView(_touchControls, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        var touchSettings = new TouchControlSettings(this);
+        if (touchSettings.Enabled)
+        {
+            var touchControls = new TouchControllerView(this, touchSettings, editing: false);
+            root.AddView(touchControls, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        }
 
         _status = new TextView(this)
         {
@@ -106,6 +113,37 @@ public sealed class MainActivity : Activity
         _progress = new ProgressBar(this) { Indeterminate = true, Visibility = ViewStates.Gone };
         root.AddView(_progress, new FrameLayout.LayoutParams(Dp(42), Dp(42), GravityFlags.Center));
         SetContentView(root);
+    }
+
+    void EnterImmersiveGameMode()
+    {
+        if (Window == null) return;
+
+        Window.AddFlags(WindowManagerFlags.Fullscreen);
+        Window.DecorView.SystemUiFlags = SystemUiFlags.LayoutStable |
+                                         SystemUiFlags.LayoutHideNavigation |
+                                         SystemUiFlags.LayoutFullscreen |
+                                         SystemUiFlags.HideNavigation |
+                                         SystemUiFlags.Fullscreen |
+                                         SystemUiFlags.ImmersiveSticky;
+
+        if (OperatingSystem.IsAndroidVersionAtLeast(30))
+        {
+            Window.SetDecorFitsSystemWindows(false);
+            var controller = Window.InsetsController;
+            if (controller != null)
+            {
+                controller.Hide(WindowInsets.Type.SystemBars());
+                controller.SystemBarsBehavior =
+                    (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
+            }
+        }
+    }
+
+    public override void OnWindowFocusChanged(bool hasFocus)
+    {
+        base.OnWindowFocusChanged(hasFocus);
+        if (hasFocus && _gameUiVisible) EnterImmersiveGameMode();
     }
 
     protected override void OnPause()
