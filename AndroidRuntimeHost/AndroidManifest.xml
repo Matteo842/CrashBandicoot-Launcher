@@ -5,5 +5,15 @@
       android:icon="@drawable/app_icon"
       android:label="Crash Bandicoot Launcher"
       android:supportsRtl="true"
-      android:theme="@android:style/Theme.Material.NoActionBar" />
+      android:theme="@android:style/Theme.Material.NoActionBar">
+    <meta-data
+        android:name="com.google.test.loops"
+        android:value="1" />
+    <meta-data
+        android:name="com.google.test.loops.gpu_compatibility"
+        android:value="1" />
+    <meta-data
+        android:name="com.google.test.loops.performance"
+        android:value="1" />
+  </application>
 </manifest>

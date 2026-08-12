@@ -10,9 +10,12 @@ sealed class AndroidPlatformHost(
     TextView status,
     ProgressBar progress,
     AndroidEglContext egl,
-    GlBackend backend) : IRuntimePlatformHost
+    GlBackend backend,
+    GameGpuDiagnosticsSession diagnostics) : IRuntimePlatformHost
 {
     bool _firstFrame = true;
+    readonly int _surfaceWidth = egl.SurfaceWidth;
+    readonly int _surfaceHeight = egl.SurfaceHeight;
     long _fpsWindow = System.Diagnostics.Stopwatch.GetTimestamp();
     int _fpsFrames;
     double _prepareMilliseconds;
@@ -21,6 +24,7 @@ sealed class AndroidPlatformHost(
     long _flushes;
     long _writebacks;
     long _vertices;
+    long _lastPresentTimestamp;
 
     public void Initialize(string title) => SetStatus($"{title}: primo frame in arrivo…");
     public void WaitForValidDisc() { }
@@ -38,9 +42,13 @@ sealed class AndroidPlatformHost(
         if (nativeWidth <= 0 || nativeHeight <= 0)
             return;
 
-        var surfaceWidth = egl.SurfaceWidth;
-        var surfaceHeight = egl.SurfaceHeight;
+        var surfaceWidth = _surfaceWidth;
+        var surfaceHeight = _surfaceHeight;
         var phaseStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        var frameIntervalMilliseconds = _lastPresentTimestamp == 0
+            ? 0
+            : (phaseStart - _lastPresentTimestamp) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        _lastPresentTimestamp = phaseStart;
         var presented = backend.PresentDisplay(
             gpu.DisplayX, gpu.DisplayY, nativeWidth, nativeHeight, gpu.Display24Bit,
             surfaceWidth, surfaceHeight);
@@ -57,6 +65,14 @@ sealed class AndroidPlatformHost(
         _flushes += backend.LastFrameFlushes;
         _writebacks += backend.LastFrameWritebacks;
         _vertices += backend.LastFrameVertices;
+        diagnostics.RecordFrame(
+            frameIntervalMilliseconds,
+            (prepared - phaseStart) * ticksToMilliseconds,
+            (composited - prepared) * ticksToMilliseconds,
+            (swapped - composited) * ticksToMilliseconds,
+            backend.LastFrameFlushes,
+            backend.LastFrameWritebacks,
+            backend.LastFrameVertices);
 
         _fpsFrames++;
         var now = System.Diagnostics.Stopwatch.GetTimestamp();

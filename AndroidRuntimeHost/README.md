@@ -28,6 +28,23 @@ dedither, and software dejitter are applied by the current host; GPU-only enhanc
 values are persisted for the future Android GPU renderer.
 Gameplay uses optional Android immersive fullscreen and restores hidden system bars only
 transiently when the user explicitly swipes for them.
+The launcher GPU Lab runs without a disc and records the GLES vendor/renderer,
+extensions, active EXT/ARM/fallback framebuffer-fetch path, texture-barrier and
+QCOM shading-rate support, thermal status, and a fixed synthetic 1x/2x/4x/8x
+workload. Results and real-game frame-time percentiles are saved as a shareable
+JSON report. Mali devices use the distinct `GL_ARM_shader_framebuffer_fetch`
+shader syntax rather than being treated as EXT-compatible.
+For renderer validation over ADB, launch the activity with the string extra
+`gpu_framebuffer_fetch` set to `ext`, `arm`, or `fallback`; unsupported forced
+paths safely fall back to automatic detection.
+
+Firebase Test Lab can launch scenario 1 through
+`com.google.intent.action.TEST_LOOP`. This ROM-free game loop runs the same
+1x/2x/4x/8x GPU workload without interaction, writes driver details, the active
+shader path, thermal state, throughput, and frame-time percentiles to Test
+Lab's result URI, then closes the activity. It is labelled `gpu_compatibility`
+and `performance`; no game disc is uploaded.
+
 Audio is the next runtime milestone. No retail disc or generated game output is bundled.
 
 Build with JDK 21 (the Android Studio JDK 25 can still be used by the Gradle app):

@@ -26,6 +26,13 @@ sealed class AndroidEglContext : INativeContext
 
     public AndroidEglContext(Surface nativeWindow)
     {
+        // The emulated vblank is 60 Hz. Request that cadence explicitly on
+        // 90/120 Hz phones so the compositor follows the software 60 Hz
+        // frame pacer instead of presenting the same cadence at a higher mode.
+        if (OperatingSystem.IsAndroidVersionAtLeast(30))
+            nativeWindow.SetFrameRate(
+                60f, (int)SurfaceFrameRateCompatibility.Default);
+
         _display = EGL14.EglGetDisplay(EGL14.EglDefaultDisplay)
                    ?? throw new InvalidOperationException("EGL display non disponibile.");
         var major = new int[1];

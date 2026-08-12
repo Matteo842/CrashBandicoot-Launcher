@@ -1,4 +1,5 @@
 using Android.App;
+using Android.Content.PM;
 using Android.Graphics;
 using Android.Graphics.Drawables;
 using Android.Views;
@@ -17,7 +18,7 @@ sealed class LauncherScreen : View
 
     static readonly string[] MenuLabels =
     [
-        "START GAME", "CONTROLS", "SETTINGS", "MODS", "CHEAT", "EXIT",
+        "START GAME", "CONTROLS", "SETTINGS", "GPU LAB", "CHEAT", "EXIT",
     ];
 
     readonly Activity _activity;
@@ -27,6 +28,7 @@ sealed class LauncherScreen : View
     readonly Typeface _bodyFont;
     readonly Typeface _bodyBoldFont;
     readonly Bitmap? _map;
+    readonly string _versionLabel;
     readonly RectF[] _menuBounds = new RectF[MenuLabels.Length];
     readonly RectF _crateBounds = new();
     readonly RectF _infoBounds = new();
@@ -54,6 +56,7 @@ sealed class LauncherScreen : View
     public event Action? SelectDiscRequested;
     public event Action? StartGameRequested;
     public event Action? SettingsRequested;
+    public event Action? GpuLabRequested;
 
     public LauncherScreen(Activity activity) : base(activity)
     {
@@ -61,6 +64,7 @@ sealed class LauncherScreen : View
         _displayFont = LoadTypeface("Fonts/Bungee-Regular.ttf", Typeface.DefaultBold!);
         _bodyFont = LoadTypeface("Fonts/Nunito-SemiBold.ttf", Typeface.Default!);
         _bodyBoldFont = LoadTypeface("Fonts/Nunito-ExtraBold.ttf", Typeface.DefaultBold!);
+        _versionLabel = ReadVersionLabel(activity);
         for (var i = 0; i < _menuBounds.Length; i++)
             _menuBounds[i] = new RectF();
 
@@ -396,9 +400,23 @@ sealed class LauncherScreen : View
         _text.TextSize = 23f * FooterUiScale * _unit;
         _text.Color = Color.Argb(190, _sand.R, _sand.G, _sand.B);
         _text.TextAlign = Paint.Align.Right;
-        canvas.DrawText("v0.2.0", width - 18f * FooterUiScale * _unit,
+        canvas.DrawText(_versionLabel, width - 18f * FooterUiScale * _unit,
             height - 15f * FooterUiScale * _unit, _text);
         _text.TextAlign = Paint.Align.Left;
+    }
+
+    static string ReadVersionLabel(Activity activity)
+    {
+        try
+        {
+            var version = activity.PackageManager?
+                .GetPackageInfo(activity.PackageName!, PackageInfoFlags.MatchAll)?.VersionName;
+            return string.IsNullOrWhiteSpace(version) ? "development" : $"v{version}";
+        }
+        catch
+        {
+            return "development";
+        }
     }
 
     void DrawFooterLine(Canvas canvas, string value, Typeface font, float size,
@@ -560,7 +578,7 @@ sealed class LauncherScreen : View
                 SettingsRequested?.Invoke();
                 break;
             case 3:
-                ShowComingSoon("Mods");
+                GpuLabRequested?.Invoke();
                 break;
             case 4:
                 ShowComingSoon("Cheats");

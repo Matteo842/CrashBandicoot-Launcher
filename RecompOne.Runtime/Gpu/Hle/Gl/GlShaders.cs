@@ -2,6 +2,13 @@ using Silk.NET.OpenGL;
 
 namespace RecompOne.Runtime.Hle;
 
+public enum GlesFramebufferFetchPath
+{
+    None,
+    Ext,
+    Arm,
+}
+
 internal static class GlShaders
 {
     public const string FullscreenVs = """
@@ -112,8 +119,12 @@ internal static class GlShaders
         flat in int   vSemiTrans;
         flat in int   vBlendMode;
 
-        #ifdef GLES_FRAMEBUFFER_FETCH
+        #ifdef GLES_FRAMEBUFFER_FETCH_EXT
         layout(location = 0) inout vec4 FragColor;
+        #elif defined(GLES_FRAMEBUFFER_FETCH_ARM)
+        layout(location = 0) out vec4 FragColor;
+        #elif defined(GLES_OPAQUE_ONLY)
+        layout(location = 0) out vec4 FragColor;
         #else
         layout(location = 0, index = 0) out vec4 FragColor;
         layout(location = 0, index = 1) out vec4 BlendColor;
@@ -253,7 +264,7 @@ internal static class GlShaders
         vec4 outputColor(vec4 source, bool stp) {
         #ifdef GLES_FRAMEBUFFER_FETCH
             if (vSemiTrans == 0 || !stp) return source;
-            vec3 destination = FragColor.rgb;
+            vec3 destination = GLES_DESTINATION_COLOR.rgb;
             vec3 blended;
             if (vBlendMode == 0)
                 blended = (destination + source.rgb) * 0.5;
@@ -264,6 +275,8 @@ internal static class GlShaders
             else
                 blended = destination + source.rgb * 0.25;
             return vec4(clamp(blended, 0.0, 1.0), source.a);
+        #elif defined(GLES_OPAQUE_ONLY)
+            return source;
         #else
             BlendColor = blendFactors(stp);
             return source;
@@ -272,7 +285,7 @@ internal static class GlShaders
 
         void main() {
         #ifdef GLES_FRAMEBUFFER_FETCH
-            if (uCheckMask != 0 && FragColor.a >= 0.5) discard;
+            if (uCheckMask != 0 && GLES_DESTINATION_COLOR.a >= 0.5) discard;
         #else
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
         #endif
@@ -306,10 +319,11 @@ internal static class GlShaders
         """;
 
     public static uint Build(GL gl, string vsSrc, string fsSrc, string name, bool gles = false,
-        bool framebufferFetch = false)
+        GlesFramebufferFetchPath framebufferFetch = GlesFramebufferFetchPath.None,
+        bool opaqueOnly = false)
     {
-        uint vs = CompileStage(gl, ShaderType.VertexShader, AdaptSource(vsSrc, gles, framebufferFetch), name);
-        uint fs = CompileStage(gl, ShaderType.FragmentShader, AdaptSource(fsSrc, gles, framebufferFetch), name);
+        uint vs = CompileStage(gl, ShaderType.VertexShader, AdaptSource(vsSrc, gles, framebufferFetch, opaqueOnly), name);
+        uint fs = CompileStage(gl, ShaderType.FragmentShader, AdaptSource(fsSrc, gles, framebufferFetch, opaqueOnly), name);
         if (vs == 0 || fs == 0) return 0;
 
         uint prog = gl.CreateProgram();
@@ -335,15 +349,29 @@ internal static class GlShaders
         return new string(a);
     }
 
-    static string AdaptSource(string source, bool gles, bool framebufferFetch)
+    static string AdaptSource(string source, bool gles, GlesFramebufferFetchPath framebufferFetch,
+        bool opaqueOnly)
     {
         if (!gles) return source;
 
         var header = "#version 320 es";
         if (source.Contains("index = 1", StringComparison.Ordinal))
-            header += framebufferFetch
-                ? "\n#extension GL_EXT_shader_framebuffer_fetch : require\n#define GLES_FRAMEBUFFER_FETCH 1"
-                : "\n#extension GL_EXT_blend_func_extended : require";
+            header += opaqueOnly
+                ? "\n#define GLES_OPAQUE_ONLY 1"
+                : framebufferFetch switch
+            {
+                GlesFramebufferFetchPath.Ext =>
+                    "\n#extension GL_EXT_shader_framebuffer_fetch : require" +
+                    "\n#define GLES_FRAMEBUFFER_FETCH 1" +
+                    "\n#define GLES_FRAMEBUFFER_FETCH_EXT 1" +
+                    "\n#define GLES_DESTINATION_COLOR FragColor",
+                GlesFramebufferFetchPath.Arm =>
+                    "\n#extension GL_ARM_shader_framebuffer_fetch : require" +
+                    "\n#define GLES_FRAMEBUFFER_FETCH 1" +
+                    "\n#define GLES_FRAMEBUFFER_FETCH_ARM 1" +
+                    "\n#define GLES_DESTINATION_COLOR gl_LastFragColorARM",
+                _ => "\n#extension GL_EXT_blend_func_extended : require",
+            };
         header += "\n#define GLES_UNIFIED_BLEND 1\nprecision highp float;\nprecision highp int;";
         return source
             .Replace("#version 330 core", header, StringComparison.Ordinal)

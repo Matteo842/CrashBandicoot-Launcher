@@ -21,6 +21,10 @@ namespace CrashBandicoot.AndroidRuntime;
     Exported = true,
     ScreenOrientation = ScreenOrientation.Landscape,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize)]
+[IntentFilter(
+    new[] { FirebaseGameLoopRunner.Action },
+    Categories = new[] { Intent.CategoryDefault },
+    DataMimeType = "application/javascript")]
 public sealed class MainActivity : Activity
 {
     const int PickDiscFolderRequest = 949;
@@ -33,6 +37,7 @@ public sealed class MainActivity : Activity
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
     bool _gameUiVisible;
+    FirebaseGameLoopRunner? _firebaseGameLoop;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -46,6 +51,13 @@ public sealed class MainActivity : Activity
             Window.DecorView.SystemUiFlags = SystemUiFlags.LayoutStable |
                                              SystemUiFlags.LayoutHideNavigation |
                                              SystemUiFlags.ImmersiveSticky;
+        }
+
+        if (FirebaseGameLoopRunner.IsRequested(Intent))
+        {
+            _firebaseGameLoop = new FirebaseGameLoopRunner(this, Intent!);
+            _firebaseGameLoop.Start();
+            return;
         }
 
         ShowLauncherUi();
@@ -65,6 +77,7 @@ public sealed class MainActivity : Activity
         _launcher.SelectDiscRequested += PickDiscFolder;
         _launcher.StartGameRequested += () => _ = StartGameAsync();
         _launcher.SettingsRequested += () => SettingsDialog.Show(this, ApplyGameDisplayMode);
+        _launcher.GpuLabRequested += () => GpuLabDialog.Show(this);
         SetContentView(_launcher);
 
         if (_disc != null)
@@ -367,6 +380,7 @@ public sealed class MainActivity : Activity
             Surface? surface = null;
             Silk.NET.OpenGL.GL? gl = null;
             RecompOne.Runtime.Hle.GlBackend? backend = null;
+            GameGpuDiagnosticsSession? diagnostics = null;
             try
             {
                 surface = WaitForGameSurface();
@@ -374,50 +388,37 @@ public sealed class MainActivity : Activity
                 gl = Silk.NET.OpenGL.GL.GetApi(egl);
                 RecompOne.Runtime.Hle.GlVram.Scale = ConfigManager.View.InternalResolution;
                 backend = new RecompOne.Runtime.Hle.GlBackend(gl);
-
-                string extensions;
-                unsafe
-                {
-                    extensions = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-                        (nint)gl.GetString(Silk.NET.OpenGL.StringName.Extensions)) ?? string.Empty;
-                }
-                var extensionSet = new HashSet<string>(
-                    extensions.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
-                nint shadingRateAddress = extensionSet.Contains("GL_QCOM_shading_rate")
-                    ? egl.GetProcAddress("glShadingRateQCOM")
-                    : 0;
+                var gpuInfo = AndroidGlesInfo.Capture(
+                    gl, egl, Intent?.GetStringExtra(AndroidGlesInfo.ForceFramebufferFetchExtra));
                 // Framebuffer fetch keeps effects such as Crash's spin in one
-                // ordered batch. Qualcomm coarse shading is the fallback for
-                // drivers that cannot provide programmable framebuffer blending.
-                bool framebufferFetch = extensionSet.Contains("GL_EXT_shader_framebuffer_fetch");
-                bool requestCoarseShading = shadingRateAddress != 0 &&
-                                            ConfigManager.View.InternalResolution >= 8;
-                backend.InitGl(gles: true, framebufferFetch: framebufferFetch);
+                // ordered batch. EXT and ARM expose different shader syntax,
+                // so the selected path must be passed explicitly to the backend.
+                backend.InitGl(gles: true, framebufferFetch: gpuInfo.FramebufferFetchPath);
                 if (!backend.Ready)
                     throw new InvalidOperationException("Il renderer OpenGL ES Android non si è inizializzato.");
-                string? barrierName = extensionSet.Contains("GL_EXT_texture_barrier")
-                    ? "glTextureBarrierEXT"
-                    : extensionSet.Contains("GL_NV_texture_barrier")
-                        ? "glTextureBarrierNV"
-                        : null;
-                bool nativeBarrier = barrierName != null &&
-                                     backend.ConfigureGlesTextureBarrier(egl.GetProcAddress(barrierName));
-                bool coarseShading = requestCoarseShading &&
-                                     backend.ConfigureGlesShadingRate(shadingRateAddress);
-                Android.Util.Log.Info("CrashGPU", nativeBarrier
-                    ? $"GLES texture barrier: {barrierName}; framebuffer fetch: {framebufferFetch}; 2x2 shading: {coarseShading}"
-                    : $"GLES texture barrier unavailable; using flush fallback; framebuffer fetch: {framebufferFetch}; 2x2 shading: {coarseShading}");
+                var configured = gpuInfo.ConfigureBackend(
+                    backend, ConfigManager.View.InternalResolution);
+                Android.Util.Log.Info("CrashGPU",
+                    $"GPU {gpuInfo.Vendor} / {gpuInfo.Renderer}; " +
+                    $"framebuffer fetch: {gpuInfo.FramebufferFetchLabel}; " +
+                    $"texture barrier: {(configured.textureBarrier ? gpuInfo.TextureBarrierFunction : "flush fallback")}; " +
+                    $"2x2 shading: {configured.coarseShading}");
+                diagnostics = new GameGpuDiagnosticsSession(
+                    this, gpuInfo, ConfigManager.View.InternalResolution,
+                    configured.textureBarrier, configured.coarseShading);
 
                 RecompOne.Runtime.Hle.GpuHle.Backend = backend;
                 RecompOne.Runtime.Hle.GpuHle.Active = true;
                 RecompOne.Runtime.Hle.GpuHle.NativeResolution =
                     ConfigManager.View.InternalResolution <= 1;
                 RecompOne.Runtime.Runtime.SetPlatformHost(
-                    new AndroidPlatformHost(this, _status, _progress, egl, backend));
+                    new AndroidPlatformHost(this, _status, _progress, egl, backend, diagnostics));
                 GameLoader.Run(gameDll, cuePath);
             }
             finally
             {
+                diagnostics?.Complete();
+                RecompOne.Runtime.Runtime.SetPlatformHost(null);
                 RecompOne.Runtime.Hle.GpuHle.Active = false;
                 RecompOne.Runtime.Hle.GpuHle.Backend = null;
                 backend?.Dispose();
@@ -485,6 +486,9 @@ public sealed class MainActivity : Activity
         {
             IsBackground = true,
             Name = threadName,
+            Priority = threadName == "PS1 Game Core"
+                ? System.Threading.ThreadPriority.AboveNormal
+                : System.Threading.ThreadPriority.Normal,
         };
 
         gameThread.Start();

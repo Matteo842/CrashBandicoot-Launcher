@@ -30,7 +30,7 @@ public sealed class GlBackend : IGpuBackend
     int _presentW, _presentH;
     bool _presentNearest;
     bool _gles;
-    bool _glesFramebufferFetch;
+    GlesFramebufferFetchPath _glesFramebufferFetchPath;
     TextureBarrierProc? _glesTextureBarrier;
     ShadingRateProc? _glesShadingRate;
     byte[] _readback = [];
@@ -55,6 +55,7 @@ public sealed class GlBackend : IGpuBackend
     public int LastFrameFlushes { get; private set; }
     public int LastFrameWritebacks { get; private set; }
     public int LastFrameVertices { get; private set; }
+    public GlesFramebufferFetchPath FramebufferFetchPath => _glesFramebufferFetchPath;
 
     public GlBackend(GL gl) { _gl = gl; _vram = new GlVram(gl); }
 
@@ -72,20 +73,22 @@ public sealed class GlBackend : IGpuBackend
         return true;
     }
 
-    public unsafe void InitGl(bool gles = false, bool framebufferFetch = false)
+    public unsafe void InitGl(bool gles = false,
+        GlesFramebufferFetchPath framebufferFetch = GlesFramebufferFetchPath.None)
     {
         _gles = gles;
-        _glesFramebufferFetch = gles && framebufferFetch;
+        _glesFramebufferFetchPath = gles ? framebufferFetch : GlesFramebufferFetchPath.None;
         _vram.Init(gles);
         CheckError("vram.init");
 
-        _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim", gles, _glesFramebufferFetch);
-        if (_glesFramebufferFetch)
-            _progPrimFast = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim-fast", gles);
+        _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim", gles, _glesFramebufferFetchPath);
+        if (_glesFramebufferFetchPath != GlesFramebufferFetchPath.None)
+            _progPrimFast = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim-fast", gles,
+                opaqueOnly: true);
         _progPresent = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.PresentFs, "present", gles);
         _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24", gles);
         CheckError("shaders");
-        if (_progPrim == 0 || (_glesFramebufferFetch && _progPrimFast == 0) ||
+        if (_progPrim == 0 || (_glesFramebufferFetchPath != GlesFramebufferFetchPath.None && _progPrimFast == 0) ||
             _progPresent == 0 || _progPresent24 == 0) return;
 
         _uTexWindow = _gl.GetUniformLocation(_progPrim, "uTexWindow");
@@ -312,7 +315,7 @@ public sealed class GlBackend : IGpuBackend
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        bool blendMatches = _glesFramebufferFetch
+        bool blendMatches = _glesFramebufferFetchPath != GlesFramebufferFetchPath.None
             ? true
             : _gles
             ? _kSubtractBatch == (transparent && blend == 2)
@@ -523,7 +526,7 @@ public sealed class GlBackend : IGpuBackend
         // Crash batches therefore have no feedback dependency at all. Only
         // synchronize when the fragment shader genuinely reads the texture that
         // is currently attached for drawing (mask checks, or direct VRAM draws).
-        bool readsDrawTarget = (_kCheckMask != 0 && !_glesFramebufferFetch) ||
+        bool readsDrawTarget = (_kCheckMask != 0 && _glesFramebufferFetchPath == GlesFramebufferFetchPath.None) ||
                                (rt == null && BatchSamplesVram());
         if (readsDrawTarget)
         {
@@ -548,7 +551,7 @@ public sealed class GlBackend : IGpuBackend
         }
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
-        bool splitFetch = _glesFramebufferFetch && _progPrimFast != 0 &&
+        bool splitFetch = _glesFramebufferFetchPath != GlesFramebufferFetchPath.None && _progPrimFast != 0 &&
                           GlVram.Scale >= 8 && rt != null && _kCheckMask == 0;
         if (splitFetch)
         {
@@ -586,10 +589,11 @@ public sealed class GlBackend : IGpuBackend
 
             // Coarse shading cannot accelerate a mixed framebuffer-fetch shader,
             // but remains useful on the fixed-function fallback.
-            bool coarseShading = !_glesFramebufferFetch && _glesShadingRate != null && GlVram.Scale >= 8;
+            bool coarseShading = _glesFramebufferFetchPath == GlesFramebufferFetchPath.None &&
+                                 _glesShadingRate != null && GlVram.Scale >= 8;
             if (coarseShading) _glesShadingRate!(0x96A9); // GL_SHADING_RATE_2X2_PIXELS_QCOM
 
-            if (_glesFramebufferFetch)
+            if (_glesFramebufferFetchPath != GlesFramebufferFetchPath.None)
             {
                 _gl.Disable(EnableCap.Blend);
                 _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
