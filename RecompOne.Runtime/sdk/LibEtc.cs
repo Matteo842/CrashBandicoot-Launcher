@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Events;
 using RecompOne.Runtime.Memory;
@@ -8,6 +9,9 @@ public static class LibEtc
 {
     static int _vcount;
     static readonly VSyncEvent _vsyncEvent = new();
+    static readonly long VblankTicks = Stopwatch.Frequency / 60;
+    static long _lastVblankTs;
+    static int _catchUpGuard;
 
     // PsyQ polls this; Crash's VSync(0) waits until count >= target.
     const uint VBlankCountAddr = 0x800549F0u;
@@ -25,26 +29,93 @@ public static class LibEtc
     {
         uint target = c.A0;
         uint count = m.ReadU32(VBlankCountAddr);
-        Log.Sdk($"WaitVBlank(target={target}, count={count})");
 
         while (count < target)
         {
-            Runtime.PresentFrame();
-            count++;
-            m.WriteU32(VBlankCountAddr, count);
-            m.WriteU32(TicksElapsedAddr, m.ReadU32(TicksElapsedAddr) + TicksPerVBlank);
-            _vcount = (int)count;
-
-            if (Event.HasAnyListeners<VSyncEvent>())
-            {
-                var e = _vsyncEvent;
-                e.Context = c;
-                e.Memory = m;
-                e.Frame = _vcount;
-                Event.Dispatch(e);
-            }
+            count = AdvanceVBlank(c, m);
         }
 
         c.V0 = 0;
+    }
+
+    /// <summary>
+    /// Keep Crash's VBlank-driven sequencer moving during long CPU work
+    /// (decompress, copies) without presenting or sleeping — loads stay
+    /// instant, the display stays on the last frame, music does not freeze.
+    /// </summary>
+    public static void MaybeCatchUpVBlank()
+    {
+        if (_catchUpGuard != 0 || Runtime.Mem == null) return;
+        if (!CpuLooksSafeForIrq()) return;
+        long now = Stopwatch.GetTimestamp();
+        if (_lastVblankTs == 0)
+        {
+            _lastVblankTs = now;
+            return;
+        }
+        if (now - _lastVblankTs < VblankTicks) return;
+
+        _catchUpGuard++;
+        try
+        {
+            var m = Runtime.Mem;
+            if (m != null)
+                TickSequencer(Runtime.Cpu, m);
+        }
+        finally
+        {
+            _catchUpGuard--;
+        }
+    }
+
+    /// <summary>
+    /// Full emulated VBlank used by VSync: present, throttle, IRQ, counters.
+    /// </summary>
+    public static uint AdvanceVBlank(CpuContext? c, IMemory m)
+    {
+        _catchUpGuard++;
+        try
+        {
+            Runtime.PresentFrame();
+            return TickCounters(c, m);
+        }
+        finally
+        {
+            _catchUpGuard--;
+        }
+    }
+
+    static uint TickSequencer(CpuContext? c, IMemory m)
+    {
+        _lastVblankTs = Stopwatch.GetTimestamp();
+        Runtime.DispatchIrq(0);
+        return TickCounters(c, m);
+    }
+
+    static uint TickCounters(CpuContext? c, IMemory m)
+    {
+        _lastVblankTs = Stopwatch.GetTimestamp();
+        uint count = m.ReadU32(VBlankCountAddr) + 1;
+        m.WriteU32(VBlankCountAddr, count);
+        m.WriteU32(TicksElapsedAddr, m.ReadU32(TicksElapsedAddr) + TicksPerVBlank);
+        _vcount = (int)count;
+
+        if (c != null && Event.HasAnyListeners<VSyncEvent>())
+        {
+            var e = _vsyncEvent;
+            e.Context = c;
+            e.Memory = m;
+            e.Frame = _vcount;
+            Event.Dispatch(e);
+        }
+        return count;
+    }
+
+    static bool CpuLooksSafeForIrq()
+    {
+        var c = Runtime.Cpu;
+        if (c == null) return false;
+        return (c.GP & 0xFF000000u) == 0x80000000u
+            && (c.SP & 0xFF000000u) == 0x80000000u;
     }
 }

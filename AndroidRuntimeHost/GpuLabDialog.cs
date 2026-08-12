@@ -140,7 +140,9 @@ static class GpuLabDialog
                 try
                 {
                     using var nativeSurface = new Surface(texture!);
-                    using var egl = new AndroidEglContext(nativeSurface);
+                    using var egl = new AndroidEglContext(nativeSurface,
+                        () => new Surface(_surface.SurfaceTexture
+                            ?? throw new InvalidOperationException("SurfaceTexture non disponibile.")));
                     using var gl = Silk.NET.OpenGL.GL.GetApi(egl);
                     var report = GpuSyntheticBenchmark.Run(activity, egl, gl, SetProgress);
                     activity.RunOnUiThread(() => Finish(report));

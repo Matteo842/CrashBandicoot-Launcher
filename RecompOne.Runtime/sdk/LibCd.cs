@@ -104,8 +104,7 @@ public static class LibCd
             Dispatcher.LoadByLba(lba + i);
             byte[] data;
             lock (DiscLock) data = Runtime.Cd!.ReadSectorData(lba + i, size);
-            for (int j = 0; j < data.Length; j++)
-                m.WriteU8(buf + (uint)(i * size + j), data[j]);
+            m.LoadBytes(buf + (uint)(i * size), data);
         }
         _lastIntr = Complete;
         c.V0 = 1;

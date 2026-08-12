@@ -36,6 +36,7 @@ public sealed class MainActivity : Activity
     ProgressBar _progress = null!;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
+    bool _usingLocalDiscCopy;
     bool _gameUiVisible;
     FirebaseGameLoopRunner? _firebaseGameLoop;
 
@@ -82,6 +83,8 @@ public sealed class MainActivity : Activity
 
         if (_disc != null)
             ShowDiscReady();
+        else if (_usingLocalDiscCopy)
+            TryUseLocalDiscCopy();
     }
 
     void ShowGameUi()
@@ -179,10 +182,20 @@ public sealed class MainActivity : Activity
         if (hasFocus && _gameUiVisible) ApplyGameDisplayMode();
     }
 
+    AndroidPlatformHost? _activeHost;
+
     protected override void OnPause()
     {
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
+        // Never leak game audio into the home screen / lock screen.
+        _activeHost?.PauseAudio();
         base.OnPause();
+    }
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        _activeHost?.ResumeAudio();
     }
 
     void PickDiscFolder()
@@ -225,6 +238,7 @@ public sealed class MainActivity : Activity
             _disc = _treeUri == null ? null : FindDiscDocuments(_treeUri);
             if (_disc == null)
             {
+                if (TryUseLocalDiscCopy()) return;
                 _launcher.ShowDisc(
                     ready: false,
                     "Disco non valido",
@@ -236,11 +250,33 @@ public sealed class MainActivity : Activity
         }
         catch (Exception ex)
         {
+            // Document providers may grant session-only access: after a process
+            // restart the tree URI is dead, but the imported copy still works.
+            if (TryUseLocalDiscCopy()) return;
             _launcher.ShowDisc(
                 ready: false,
                 "Cartella non leggibile",
                 ex.Message);
         }
+    }
+
+    bool TryUseLocalDiscCopy()
+    {
+        var discDir = Path.Combine(FilesDir!.AbsolutePath, "disc");
+        var cue = Path.Combine(discDir, "game.cue");
+        var bin = Path.Combine(discDir, "game.bin");
+        var cachedSize = GetPreferences(FileCreationMode.Private).GetLong("cached_bin_size", -1);
+        if (!File.Exists(cue) || !File.Exists(bin) || cachedSize <= 0 ||
+            new FileInfo(bin).Length != cachedSize)
+            return false;
+
+        _usingLocalDiscCopy = true;
+        var sizeMb = cachedSize / (1024d * 1024d);
+        _launcher.ShowDisc(
+            ready: true,
+            "Copia locale del disco pronta",
+            $"game.bin ({sizeMb:0} MB) già importato nell'app.\nIl controllo completo SCUS-94900 verrà eseguito all'avvio.");
+        return true;
     }
 
     void ShowDiscReady()
@@ -297,7 +333,7 @@ public sealed class MainActivity : Activity
 
     async Task StartGameAsync()
     {
-        if (_disc == null) return;
+        if (_disc == null && !_usingLocalDiscCopy) return;
         _launcher.SetBusy(true, "Apro il runtime integrato e preparo i file del gioco.");
         ShowGameUi();
         _progress.Visibility = ViewStates.Visible;
@@ -310,8 +346,17 @@ public sealed class MainActivity : Activity
                 AppPaths.SetRoot(dataRoot);
                 AppPaths.EnsureCreated();
 
-                SetStatus("Copio il disco nello spazio privato dell'app (solo la prima volta)…");
-                var cuePath = await EnsureLocalDiscAsync(_disc);
+                string cuePath;
+                if (_usingLocalDiscCopy)
+                {
+                    SetStatus("Uso la copia del disco già importata…");
+                    cuePath = Path.Combine(FilesDir!.AbsolutePath, "disc", "game.cue");
+                }
+                else
+                {
+                    SetStatus("Copio il disco nello spazio privato dell'app (solo la prima volta)…");
+                    cuePath = await EnsureLocalDiscAsync(_disc!);
+                }
 
                 var bootstrap = Path.Combine(dataRoot, "bootstrap");
                 Directory.CreateDirectory(bootstrap);
@@ -381,10 +426,11 @@ public sealed class MainActivity : Activity
             Silk.NET.OpenGL.GL? gl = null;
             RecompOne.Runtime.Hle.GlBackend? backend = null;
             GameGpuDiagnosticsSession? diagnostics = null;
+            AndroidPlatformHost? host = null;
             try
             {
                 surface = WaitForGameSurface();
-                egl = new AndroidEglContext(surface);
+                egl = new AndroidEglContext(surface, AcquireCurrentGameSurface);
                 gl = Silk.NET.OpenGL.GL.GetApi(egl);
                 RecompOne.Runtime.Hle.GlVram.Scale = ConfigManager.View.InternalResolution;
                 backend = new RecompOne.Runtime.Hle.GlBackend(gl);
@@ -411,14 +457,19 @@ public sealed class MainActivity : Activity
                 RecompOne.Runtime.Hle.GpuHle.Active = true;
                 RecompOne.Runtime.Hle.GpuHle.NativeResolution =
                     ConfigManager.View.InternalResolution <= 1;
-                RecompOne.Runtime.Runtime.SetPlatformHost(
-                    new AndroidPlatformHost(this, _status, _progress, egl, backend, diagnostics));
+                host = new AndroidPlatformHost(this, _status, _progress, egl, backend, diagnostics);
+                _activeHost = host;
+                RecompOne.Runtime.Runtime.SetPlatformHost(host);
                 GameLoader.Run(gameDll, cuePath);
             }
             finally
             {
                 diagnostics?.Complete();
                 RecompOne.Runtime.Runtime.SetPlatformHost(null);
+                // If the core died before Runtime.Shutdown, this still releases
+                // the AudioTrack; AndroidPlatformHost.Shutdown is idempotent.
+                host?.Shutdown();
+                _activeHost = null;
                 RecompOne.Runtime.Hle.GpuHle.Active = false;
                 RecompOne.Runtime.Hle.GpuHle.Backend = null;
                 backend?.Dispose();
@@ -438,6 +489,13 @@ public sealed class MainActivity : Activity
         if (!_screen.IsAvailable || _screen.SurfaceTexture == null)
             throw new InvalidOperationException("La superficie video Android non è pronta.");
         return new Surface(_screen.SurfaceTexture);
+    }
+
+    Surface AcquireCurrentGameSurface()
+    {
+        var texture = _screen.SurfaceTexture
+                      ?? throw new InvalidOperationException("SurfaceTexture non disponibile.");
+        return new Surface(texture);
     }
 
     void InitializeRuntimeConfiguration()

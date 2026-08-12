@@ -13,9 +13,8 @@ sealed class AndroidPlatformHost(
     GlBackend backend,
     GameGpuDiagnosticsSession diagnostics) : IRuntimePlatformHost
 {
+    readonly AndroidAudioOutput _audio = new();
     bool _firstFrame = true;
-    readonly int _surfaceWidth = egl.SurfaceWidth;
-    readonly int _surfaceHeight = egl.SurfaceHeight;
     long _fpsWindow = System.Diagnostics.Stopwatch.GetTimestamp();
     int _fpsFrames;
     double _prepareMilliseconds;
@@ -28,9 +27,19 @@ sealed class AndroidPlatformHost(
 
     public void Initialize(string title) => SetStatus($"{title}: primo frame in arrivo…");
     public void WaitForValidDisc() { }
-    public void AttachAudio(Spu? spu) { }
-    public void SetMasterVolume(float volume) { }
+    public void AttachAudio(Spu? spu) => _audio.Attach(spu);
+    public void SetMasterVolume(float volume) => _audio.SetMasterVolume(volume);
     public void ShowNotice(string message) => SetStatus(message);
+    public void PauseAudio()
+    {
+        RecompOne.Runtime.Host.FrameClock.PauseTiming();
+        _audio.PauseOutput();
+    }
+    public void ResumeAudio()
+    {
+        _audio.ResumeOutput();
+        RecompOne.Runtime.Host.FrameClock.ResumeTiming();
+    }
 
     public void Present(Gpu? gpu)
     {
@@ -42,8 +51,10 @@ sealed class AndroidPlatformHost(
         if (nativeWidth <= 0 || nativeHeight <= 0)
             return;
 
-        var surfaceWidth = _surfaceWidth;
-        var surfaceHeight = _surfaceHeight;
+        // Queried per frame: the EGL window surface can be recreated with a
+        // new size after the TextureView is relaid out (immersive mode, …).
+        var surfaceWidth = egl.SurfaceWidth;
+        var surfaceHeight = egl.SurfaceHeight;
         var phaseStart = System.Diagnostics.Stopwatch.GetTimestamp();
         var frameIntervalMilliseconds = _lastPresentTimestamp == 0
             ? 0
@@ -108,6 +119,8 @@ sealed class AndroidPlatformHost(
 
     public void Shutdown()
     {
+        RecompOne.Runtime.Host.FrameClock.ResumeTiming();
+        _audio.Dispose();
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
         activity.RunOnUiThread(() =>
         {

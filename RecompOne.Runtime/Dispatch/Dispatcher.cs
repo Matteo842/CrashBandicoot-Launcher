@@ -168,6 +168,7 @@ public static class Dispatcher
 
     public static void Call(CpuContext c, IMemory m, uint addr)
     {
+        Sdk.LibEtc.MaybeCatchUpVBlank();
         if (BiosKernel.TryDispatch(c, m, addr)) return;
         if (!_funcMap.TryGetValue(addr, out var fn))
             throw new InvalidOperationException($"unmapped call: 0x{addr:X8}");

@@ -46,7 +46,7 @@ static class SettingsDialog
         var volume = AddSlider(activity, card, "Master volume", 0, 100,
             (int)MathF.Round(game.MasterVolume * 100f), bodyFont, bodyBold);
         card.AddView(Hint(activity,
-            "Il valore è già persistito; diventerà udibile quando collegheremo l'uscita audio Android.", bodyFont));
+            "Si applica all'avvio della sessione di gioco e resta salvato nel profilo Android.", bodyFont));
 
         var muted = AddSwitch(activity, card, "Muted", game.Muted, bodyBold);
         var fullscreen = AddSwitch(activity, card, "Fullscreen", view.Fullscreen, bodyBold);

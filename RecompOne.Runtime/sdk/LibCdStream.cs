@@ -114,6 +114,9 @@ public static class LibCdStream
     internal static void OnStopStream()
     {
         _reading = false;
+        // Drop the queued XA as well: with a deep ring the old audio would
+        // otherwise keep playing well past the Stop/Pause command.
+        XaAudio.Reset();
     }
 
     static void ResetRing(IMemory m)

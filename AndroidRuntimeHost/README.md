@@ -45,7 +45,10 @@ shader path, thermal state, throughput, and frame-time percentiles to Test
 Lab's result URI, then closes the activity. It is labelled `gpu_compatibility`
 and `performance`; no game disc is uploaded.
 
-Audio is the next runtime milestone. No retail disc or generated game output is bundled.
+In-game audio is emulated by the shared SPU/XA core and streamed to an Android
+`AudioTrack` (44.1 kHz stereo PCM) from a dedicated mixer thread; master
+volume/mute from the Settings screen is applied to the track. No retail disc or
+generated game output is bundled.
 
 Build with JDK 21 (the Android Studio JDK 25 can still be used by the Gradle app):
 

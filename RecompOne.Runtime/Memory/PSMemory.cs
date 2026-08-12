@@ -70,8 +70,15 @@ public sealed class PSMemory : IMemory
     // `jr` can leave that mask in place, so later `lw ..., 4($gp)` hits 0x01000003.
     const uint CrashBandicootGp = 0x800563FCu;
 
+    int _memYield = 65536;
+
     private Span<byte> Resolve(uint address, int size)
     {
+        if (--_memYield <= 0)
+        {
+            _memYield = 65536;
+            Sdk.LibEtc.MaybeCatchUpVBlank();
+        }
         if (TryMap(address, size, out var span))
             return span;
 
@@ -291,6 +298,14 @@ public sealed class PSMemory : IMemory
 
     public void LoadBytes(uint address, byte[] data)
     {
+        if (data.Length == 0) return;
+        uint phys = MemoryMap.ToPhysical(address);
+        if (phys < (uint)_ram.Length && (long)phys + data.Length <= _ram.Length)
+        {
+            Buffer.BlockCopy(data, 0, _ram, (int)phys, data.Length);
+            TrackWrite(phys, data.Length);
+            return;
+        }
         for (int i = 0; i < data.Length; i++)
             WriteU8(address + (uint)i, data[i]);
     }

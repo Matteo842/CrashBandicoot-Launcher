@@ -182,3 +182,12 @@ AndroidRuntimeHost/captures/
 *.jks
 *.keystore
 keystore.properties
+
+# --- Local debug captures (never commit) ------------------------------------
+/_tools/
+/_device_*
+/_intro-*
+/_log_*
+/_phone-*
+/_spu-*
+/_uidump.xml
