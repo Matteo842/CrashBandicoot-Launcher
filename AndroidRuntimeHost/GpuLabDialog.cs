@@ -109,6 +109,7 @@ static class GpuLabDialog
                 : BuildSummary(previous);
 
             _dialog.SetContentView(card);
+            AndroidGamepad.BindDialog(_dialog);
             _dialog.Show();
             _dialog.Window?.SetLayout(
                 Math.Min(activity.Resources?.DisplayMetrics?.WidthPixels ?? Dp(900), Dp(900)),

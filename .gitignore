@@ -182,6 +182,8 @@ AndroidRuntimeHost/captures/
 *.jks
 *.keystore
 keystore.properties
+/signing/android-release.keystore
+/signing/keystore.properties
 
 # --- Local debug captures (never commit) ------------------------------------
 /_tools/

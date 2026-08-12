@@ -144,6 +144,7 @@ static class SettingsDialog
 
         dialog.SetContentView(root);
         dialog.DismissEvent += (_, _) => dialog.Dispose();
+        AndroidGamepad.BindDialog(dialog);
         dialog.Show();
         ConfigureWindow(dialog, activity, 0.76f,
             (int)((activity.Resources?.DisplayMetrics?.HeightPixels ?? 900) * 0.89f), 0.78f);

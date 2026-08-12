@@ -23,7 +23,8 @@ namespace CrashBandicoot.AndroidRuntime;
     ScreenOrientation = ScreenOrientation.SensorLandscape,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize |
                            ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize |
-                           ConfigChanges.KeyboardHidden | ConfigChanges.UiMode)]
+                           ConfigChanges.Keyboard | ConfigChanges.KeyboardHidden |
+                           ConfigChanges.Navigation | ConfigChanges.UiMode)]
 [IntentFilter(
     new[] { FirebaseGameLoopRunner.Action },
     Categories = new[] { Intent.CategoryDefault },
@@ -43,6 +44,7 @@ public sealed class MainActivity : Activity
     TextView? _devHud;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
+    TouchControllerView? _touchOverlay;
     bool _usingLocalDiscCopy;
     bool _gameUiVisible;
     FirebaseGameLoopRunner? _firebaseGameLoop;
@@ -52,6 +54,16 @@ public sealed class MainActivity : Activity
         base.OnCreate(savedInstanceState);
         RequestedOrientation = ScreenOrientation.SensorLandscape;
         InitializeRuntimeConfiguration();
+        AndroidGamepad.Attach(this);
+        AndroidGamepad.ResolveRoute = () =>
+        {
+            if (_gameUiVisible && _devMenu?.IsOpen == true) return GamepadRoute.DevMenu;
+            if (_gameUiVisible) return GamepadRoute.Gameplay;
+            return GamepadRoute.Launcher;
+        };
+        AndroidGamepad.LauncherInput = action => _launcher?.HandlePad(action);
+        AndroidGamepad.CloseDevMenu = () => _devMenu?.Close();
+        AndroidGamepad.ConnectionChanged = _ => RunOnUiThread(SyncTouchOverlay);
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
         if (Window != null)
         {
@@ -84,6 +96,7 @@ public sealed class MainActivity : Activity
         _gameUiVisible = false;
         _devMenu = null;
         _devHud = null;
+        _touchOverlay = null;
         _launcher = new LauncherScreen(this);
         _launcher.SelectDiscRequested += PickDiscFolder;
         _launcher.StartGameRequested += () => _ = StartGameAsync();
@@ -104,6 +117,7 @@ public sealed class MainActivity : Activity
         _gameUiVisible = true;
         ApplyGameDisplayMode();
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
+        AndroidGamepad.ReleaseHeld();
         var root = new GameTouchRoot(this);
         root.SetBackgroundColor(Color.Rgb(7, 11, 18));
 
@@ -122,11 +136,13 @@ public sealed class MainActivity : Activity
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
         var touchSettings = new TouchControlSettings(this);
+        _touchOverlay = null;
         if (touchSettings.Enabled)
         {
-            var touchControls = new TouchControllerView(this, touchSettings, editing: false);
-            root.AddView(touchControls, new FrameLayout.LayoutParams(
+            _touchOverlay = new TouchControllerView(this, touchSettings, editing: false);
+            root.AddView(_touchOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+            SyncTouchOverlay();
         }
 
         _status = new TextView(this)
@@ -183,7 +199,7 @@ public sealed class MainActivity : Activity
                 if (_devHud == null) return;
                 _devHud.Visibility = visible ? ViewStates.Visible : ViewStates.Gone;
             });
-        devButton.Click += (_, _) => _devMenu?.Toggle();
+        devButton.Click += (_, _) => ToggleDevMenu();
         root.AddView(devButton, new FrameLayout.LayoutParams(Dp(56), Dp(36),
             GravityFlags.Top | GravityFlags.Right)
         {
@@ -192,8 +208,36 @@ public sealed class MainActivity : Activity
         });
         root.AddView(_devMenu, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
-        root.ThreeFingerHold = () => _devMenu?.Toggle();
+        root.ThreeFingerHold = ToggleDevMenu;
         SetContentView(root);
+    }
+
+    void ToggleDevMenu()
+    {
+        _devMenu?.Toggle();
+        AndroidGamepad.SyncGameplay();
+    }
+
+    void SyncTouchOverlay()
+    {
+        if (_touchOverlay == null) return;
+        var hide = AndroidGamepad.IsConnected;
+        _touchOverlay.Visibility = hide ? ViewStates.Gone : ViewStates.Visible;
+        if (hide) _touchOverlay.DismissInput();
+    }
+
+    public override bool DispatchKeyEvent(KeyEvent? e)
+    {
+        if (e != null && AndroidGamepad.TryHandleKey(e))
+            return true;
+        return base.DispatchKeyEvent(e);
+    }
+
+    public override bool DispatchGenericMotionEvent(MotionEvent? e)
+    {
+        if (e != null && AndroidGamepad.TryHandleMotion(e))
+            return true;
+        return base.DispatchGenericMotionEvent(e);
     }
 
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
@@ -201,6 +245,7 @@ public sealed class MainActivity : Activity
         if (keyCode == Keycode.Back && _gameUiVisible && _devMenu?.IsOpen == true)
         {
             _devMenu.Close();
+            AndroidGamepad.SyncGameplay();
             return true;
         }
 
@@ -295,6 +340,7 @@ public sealed class MainActivity : Activity
     protected override void OnPause()
     {
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
+        AndroidGamepad.ReleaseHeld();
         // Never leak game audio into the home screen / lock screen.
         _activeHost?.PauseAudio();
         base.OnPause();
@@ -304,6 +350,12 @@ public sealed class MainActivity : Activity
     {
         base.OnResume();
         _activeHost?.ResumeAudio();
+    }
+
+    protected override void OnDestroy()
+    {
+        AndroidGamepad.Detach();
+        base.OnDestroy();
     }
 
     void PickDiscFolder()

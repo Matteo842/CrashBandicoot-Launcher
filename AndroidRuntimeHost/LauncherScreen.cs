@@ -55,6 +55,7 @@ sealed class LauncherScreen : View
     bool _ready;
     bool _busy;
     int _pressed = -1;
+    int _focusIndex;
     float _unit = 1f;
     float _footerTop;
     string _status = "Select a legal Crash Bandicoot CUE/BIN dump";
@@ -111,6 +112,8 @@ sealed class LauncherScreen : View
         _status = title;
         _statusKind = ready ? "ok" : "error";
         _discLine = detail.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? detail;
+        if (!IsFocusSelectable(_focusIndex))
+            MoveFocus(1);
         Invalidate();
     }
 
@@ -403,7 +406,7 @@ sealed class LauncherScreen : View
         for (var i = 0; i < MenuLabels.Length; i++)
         {
             var disabled = i == 0 && (!_ready || _busy);
-            var hot = _pressed == i && !disabled;
+            var hot = (_pressed == i || _focusIndex == i) && !disabled;
             var bounds = _menuBounds[i];
             var color = disabled
                 ? Color.Argb(150, 122, 117, 104)
@@ -429,7 +432,7 @@ sealed class LauncherScreen : View
         canvas.DrawLine(0, _footerTop, width, _footerTop, _paint);
 
         _paint.SetStyle(Paint.Style.Fill);
-        _paint.Color = _pressed == 7
+        _paint.Color = _pressed == 7 || _focusIndex == 7
             ? Color.Argb(100, 255, 138, 0)
             : Color.Argb(55, 255, 138, 0);
         canvas.DrawOval(_infoBounds, _paint);
@@ -441,7 +444,7 @@ sealed class LauncherScreen : View
         DrawCenteredText(canvas, "i", _displayFont, 18f * FooterUiScale * _unit, _wumpaHot,
             _infoBounds.CenterX(), _infoBounds.CenterY());
 
-        _paint.Color = _pressed == 6
+        _paint.Color = _pressed == 6 || _focusIndex == 6
             ? Color.Argb(90, 255, 138, 0)
             : Color.Argb(38, 255, 138, 0);
         canvas.DrawRoundRect(_chipBounds, 17f * FooterUiScale * _unit,
@@ -590,6 +593,7 @@ sealed class LauncherScreen : View
         {
             case MotionEventActions.Down:
                 _pressed = hit;
+                if (hit >= 0) _focusIndex = hit;
                 Invalidate();
                 return hit >= 0;
             case MotionEventActions.Move:
@@ -623,6 +627,44 @@ sealed class LauncherScreen : View
         base.PerformClick();
         return true;
     }
+
+    public bool HandlePad(LauncherPadAction action)
+    {
+        if (_busy || action == LauncherPadAction.None) return false;
+        if (!IsFocusSelectable(_focusIndex))
+            MoveFocus(1);
+        if (action.HasFlag(LauncherPadAction.Up) || action.HasFlag(LauncherPadAction.Left))
+            MoveFocus(-1);
+        if (action.HasFlag(LauncherPadAction.Down) || action.HasFlag(LauncherPadAction.Right))
+            MoveFocus(1);
+        if (action.HasFlag(LauncherPadAction.Confirm) && IsFocusSelectable(_focusIndex))
+        {
+            Activate(_focusIndex);
+            return true;
+        }
+        return true;
+    }
+
+    void MoveFocus(int delta)
+    {
+        var start = _focusIndex;
+        for (var step = 0; step < 8; step++)
+        {
+            start = (start + delta + 8) % 8;
+            if (!IsFocusSelectable(start)) continue;
+            if (start == _focusIndex) return;
+            _focusIndex = start;
+            Invalidate();
+            return;
+        }
+    }
+
+    bool IsFocusSelectable(int index) => index switch
+    {
+        0 => _ready && !_busy,
+        >= 1 and <= 7 => true,
+        _ => false,
+    };
 
     int HitTest(float x, float y)
     {
@@ -740,6 +782,7 @@ sealed class LauncherScreen : View
             dialog.Dispose();
         };
         _aboutDialog = dialog;
+        AndroidGamepad.BindDialog(dialog);
         dialog.Show();
 
         if (dialog.Window != null)

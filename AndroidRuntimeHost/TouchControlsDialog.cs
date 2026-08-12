@@ -37,7 +37,8 @@ static class TouchControlsDialog
 
         var explanation = Text(activity,
             "Crash 1 uses the D-pad, X, Square/Circle, Triangle, and Start. " +
-            "Shoulder buttons are optional and stay hidden by default.",
+            "Shoulder buttons are optional and stay hidden by default. " +
+            "A Bluetooth or USB controller hides this overlay automatically.",
             11, Muted, bodyFont);
         explanation.SetLineSpacing(0, 1.08f);
         card.AddView(explanation, new LinearLayout.LayoutParams(
@@ -127,6 +128,7 @@ static class TouchControlsDialog
 
         dialog.SetContentView(root);
         dialog.DismissEvent += (_, _) => dialog.Dispose();
+        AndroidGamepad.BindDialog(dialog);
         dialog.Show();
         ConfigureWindow(dialog, activity, 0.68f,
             (int)((activity.Resources?.DisplayMetrics?.HeightPixels ?? 900) * 0.86f), 0.76f);
@@ -185,6 +187,7 @@ static class TouchControlsDialog
 
         dialog.SetContentView(root);
         dialog.DismissEvent += (_, _) => dialog.Dispose();
+        AndroidGamepad.BindDialog(dialog);
         dialog.Show();
         ConfigureWindow(dialog, activity, 0.96f,
             (int)((activity.Resources?.DisplayMetrics?.HeightPixels ?? 900) * 0.86f), 0.72f);

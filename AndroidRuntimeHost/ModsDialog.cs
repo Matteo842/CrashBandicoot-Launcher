@@ -117,6 +117,7 @@ static class ModsDialog
                 _dialog.Dispose();
             };
             _open = this;
+            AndroidGamepad.BindDialog(_dialog);
             _dialog.Show();
             ConfigureWindow(_dialog, _activity, 0.78f,
                 (int)((_activity.Resources?.DisplayMetrics?.HeightPixels ?? 900) * 0.89f), 0.78f);

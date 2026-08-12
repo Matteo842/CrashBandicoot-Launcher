@@ -367,8 +367,13 @@ internal static unsafe class InputManager
 
     static void ApplyVirtualPad()
     {
-        var pressed = Controller.VirtualButtons;
+        var pressed = (ushort)(Controller.VirtualButtons | Controller.PhysicalButtons);
         Controller.State = (ushort)(Controller.State & ~pressed);
+        if (!Controller.PhysicalConnected) return;
+        Controller.LeftX = Controller.PhysicalLeftX;
+        Controller.LeftY = Controller.PhysicalLeftY;
+        Controller.RightX = Controller.PhysicalRightX;
+        Controller.RightY = Controller.PhysicalRightY;
     }
 
     static ushort PadState(GameController* ctrl, GamepadBindings pad, ushort s)
@@ -424,11 +429,16 @@ internal static unsafe class InputManager
 
     public static void SetRumble(byte large, byte small)
     {
-        if (_sdl == null || _pad0 == null) return;
-        ushort lo = (ushort)(large * 257);
-        ushort hi = small != 0 ? (ushort)65535 : (ushort)0;
-        uint duration = large == 0 && small == 0 ? 0u : 500u;
-        _sdl.GameControllerRumble(_pad0, lo, hi, duration);
+        if (_sdl != null && _pad0 != null)
+        {
+            ushort lo = (ushort)(large * 257);
+            ushort hi = small != 0 ? (ushort)65535 : (ushort)0;
+            uint duration = large == 0 && small == 0 ? 0u : 500u;
+            _sdl.GameControllerRumble(_pad0, lo, hi, duration);
+            return;
+        }
+
+        Controller.RumbleRequested?.Invoke(large, small);
     }
 
     static void OnKeyDown(IKeyboard kb, Key key, int _)

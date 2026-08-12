@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-feature android:name="android.hardware.gamepad" android:required="false" />
   <application
       android:allowBackup="false"
       android:icon="@drawable/app_icon"

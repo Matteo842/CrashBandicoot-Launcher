@@ -494,6 +494,8 @@ sealed class TouchControllerView : View
         Invalidate();
     }
 
+    public void DismissInput() => ReleaseAll();
+
     protected override void OnDetachedFromWindow()
     {
         ReleaseAll();

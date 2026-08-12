@@ -3,6 +3,9 @@ namespace RecompOne.Runtime.Hardware;
 public static class Controller
 {
     static int _virtualButtons;
+    static int _physicalButtons;
+    static int _physicalAxes;
+    static int _physicalConnected;
 
     public const ushort Select = 1 << 0;
     public const ushort L3 = 1 << 1;
@@ -40,4 +43,34 @@ public static class Controller
 
     public static void SetVirtualPadState(ushort pressedButtons) =>
         System.Threading.Volatile.Write(ref _virtualButtons, pressedButtons);
+
+    /// <summary>True when a platform physical gamepad is currently connected.</summary>
+    public static bool PhysicalConnected =>
+        System.Threading.Volatile.Read(ref _physicalConnected) != 0;
+
+    /// <summary>Active-high buttons from a platform physical gamepad (Android HID, …).</summary>
+    public static ushort PhysicalButtons =>
+        (ushort)System.Threading.Volatile.Read(ref _physicalButtons);
+
+    public static byte PhysicalLeftX => AxisByte(0);
+    public static byte PhysicalLeftY => AxisByte(8);
+    public static byte PhysicalRightX => AxisByte(16);
+    public static byte PhysicalRightY => AxisByte(24);
+
+    /// <summary>
+    /// Host rumble when SDL does not own a pad (Android InputDevice vibrator).
+    /// </summary>
+    public static Action<byte, byte>? RumbleRequested;
+
+    public static void SetPhysicalPadState(ushort pressedButtons,
+        byte leftX, byte leftY, byte rightX, byte rightY, bool connected)
+    {
+        System.Threading.Volatile.Write(ref _physicalButtons, pressedButtons);
+        System.Threading.Volatile.Write(ref _physicalAxes,
+            leftX | (leftY << 8) | (rightX << 16) | (rightY << 24));
+        System.Threading.Volatile.Write(ref _physicalConnected, connected ? 1 : 0);
+    }
+
+    static byte AxisByte(int shift) =>
+        (byte)((System.Threading.Volatile.Read(ref _physicalAxes) >> shift) & 0xFF);
 }

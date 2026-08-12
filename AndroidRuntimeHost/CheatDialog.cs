@@ -73,6 +73,7 @@ static class CheatDialog
 
         dialog.SetContentView(root);
         dialog.DismissEvent += (_, _) => dialog.Dispose();
+        AndroidGamepad.BindDialog(dialog);
         dialog.Show();
         ConfigureWindow(dialog, activity, 0.62f, ViewGroup.LayoutParams.WrapContent, 0.78f);
     }
