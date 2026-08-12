@@ -24,6 +24,9 @@ public static class AssetHotReload
     /// <summary>Start watching when <see cref="GameConfig.AssetHotWatch"/> is true.</summary>
     public static void Start()
     {
+        if (OperatingSystem.IsAndroid())
+            return;
+
         bool enabled;
         try { enabled = ConfigManager.Game.AssetHotWatch; }
         catch { enabled = true; }

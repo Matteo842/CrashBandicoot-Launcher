@@ -31,6 +31,7 @@ namespace CrashBandicoot.AndroidRuntime;
 public sealed class MainActivity : Activity
 {
     const int PickDiscFolderRequest = 949;
+    const int PickModZipRequest = 950;
     const string DiscTreePreference = "disc_tree";
 
     LauncherScreen? _launcher;
@@ -86,8 +87,9 @@ public sealed class MainActivity : Activity
         _launcher = new LauncherScreen(this);
         _launcher.SelectDiscRequested += PickDiscFolder;
         _launcher.StartGameRequested += () => _ = StartGameAsync();
-        _launcher.SettingsRequested += () => SettingsDialog.Show(this, ApplyGameDisplayMode);
-        _launcher.GpuLabRequested += () => GpuLabDialog.Show(this);
+        _launcher.SettingsRequested += () => SettingsDialog.Show(
+            this, ApplyGameDisplayMode, () => GpuLabDialog.Show(this));
+        _launcher.ModsRequested += () => ModsDialog.Show(this, PickModZip);
         SetContentView(_launcher);
 
         if (_disc != null)
@@ -312,9 +314,25 @@ public sealed class MainActivity : Activity
         StartActivityForResult(intent, PickDiscFolderRequest);
     }
 
+    void PickModZip()
+    {
+        var intent = new Intent(Intent.ActionOpenDocument);
+        intent.AddCategory(Intent.CategoryOpenable);
+        intent.SetType("*/*");
+        intent.AddFlags(ActivityFlags.GrantReadUriPermission);
+        StartActivityForResult(intent, PickModZipRequest);
+    }
+
     protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
     {
         base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode == PickModZipRequest)
+        {
+            if (resultCode == Result.Ok && data?.Data != null)
+                ImportPickedMod(data.Data);
+            return;
+        }
+
         if (requestCode != PickDiscFolderRequest || resultCode != Result.Ok || data?.Data == null)
             return;
 
@@ -608,6 +626,7 @@ public sealed class MainActivity : Activity
     {
         var dataRoot = Path.Combine(FilesDir!.AbsolutePath, "runtime");
         AppPaths.SetRoot(dataRoot);
+        AndroidMods.SeedBundledSamples(this);
         AppPaths.EnsureCreated();
         ConfigManager.Load();
 
@@ -690,6 +709,33 @@ public sealed class MainActivity : Activity
         var localCue = fileLine.Replace(disc.CueText, "FILE \"game.bin\" BINARY", 1);
         await File.WriteAllTextAsync(cuePath, localCue);
         return cuePath;
+    }
+
+    void ImportPickedMod(Android.Net.Uri uri)
+    {
+        try
+        {
+            var info = AndroidMods.ImportZip(this, uri);
+            if (ConfigManager.Game.ModsConfigured)
+            {
+                var active = ConfigManager.Game.ActiveMods ?? [];
+                if (!active.Exists(id => string.Equals(id, info.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    active.Add(info.Id);
+                    ConfigManager.Game.ActiveMods = active;
+                    ConfigManager.SaveGame();
+                }
+            }
+
+            ModsDialog.NotifyImported(info.Id);
+            var label = string.IsNullOrWhiteSpace(info.Name) ? info.Id : info.Name;
+            Toast.MakeText(this, $"Imported {label}. Save, then restart the game.",
+                ToastLength.Long)?.Show();
+        }
+        catch (Exception ex)
+        {
+            Toast.MakeText(this, ex.GetBaseException().Message, ToastLength.Long)?.Show();
+        }
     }
 
     void CopyAsset(string assetPath, string destination)

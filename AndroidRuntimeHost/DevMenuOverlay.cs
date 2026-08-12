@@ -147,6 +147,7 @@ sealed partial class DevMenuOverlay : FrameLayout
         Category("Display", "display");
         Category("Rendering", "rendering");
         Category("Audio", "audio");
+        Category("Mods", "mods");
         Category("Debug", "debug");
         Category("Engine", "engine");
         Divider();
@@ -217,6 +218,10 @@ sealed partial class DevMenuOverlay : FrameLayout
             case "debug-console":
                 _title.Text = "CONSOLE";
                 BuildConsole();
+                break;
+            case "mods":
+                _title.Text = "MODS";
+                BuildMods();
                 break;
             default:
                 _title.Text = "ENGINE";
@@ -380,6 +385,35 @@ sealed partial class DevMenuOverlay : FrameLayout
                 });
         }
         Hint("Filters auto-off on menus and cutscenes.");
+    }
+
+    void BuildMods()
+    {
+        Hint("Enable or disable packs in the launcher Mods menu. C# hooks apply on the next game start.");
+        var mods = RecompOne.Runtime.Modding.ModLoader.LoadedMods;
+        Body($"{mods.Count} mod(s) loaded this session");
+        if (mods.Count == 0)
+            Hint("None loaded. Import a zip from the launcher, Save, then start the game.");
+        else
+        {
+            foreach (var mod in mods)
+            {
+                var line = string.IsNullOrWhiteSpace(mod.Version) ? mod.Name : $"{mod.Name}  v{mod.Version}";
+                if (!string.IsNullOrWhiteSpace(mod.Author))
+                    line += $"  —  {mod.Author}";
+                Body(line);
+                Hint(mod.Id);
+            }
+        }
+
+        Divider();
+        FullButton("Reload assets", () =>
+        {
+            RecompOne.Runtime.Modding.ModLoader.ReloadAssets();
+            Toast("Texture / disc packs reloaded.");
+            ShowSection("mods");
+        });
+        Hint("Refreshes PNG and disc overlays. Does not recompile C#.");
     }
 
     void BuildAudio()

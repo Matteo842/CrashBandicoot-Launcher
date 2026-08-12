@@ -20,7 +20,7 @@ static class SettingsDialog
     static readonly string[] ResolutionLabels = ["Native (1x)", "2x", "4x", "8x (4K)"];
     static readonly string[] FilterLabels = ["Off", "Bilinear", "Sharp bilinear", "Soft smooth"];
 
-    public static void Show(Activity activity, Action? settingsApplied = null)
+    public static void Show(Activity activity, Action? settingsApplied = null, Action? gpuLabRequested = null)
     {
         var game = ConfigManager.Game;
         var view = ConfigManager.View;
@@ -81,6 +81,25 @@ static class SettingsDialog
         card.AddView(Hint(activity,
             "Texture filters auto-off on menus and cutscenes. Dedither and dejitter apply everywhere.",
             bodyFont));
+
+        if (gpuLabRequested != null)
+        {
+            card.AddView(Hint(activity, "Diagnostics", bodyBold), Margin(activity, top: 10, bottom: 2));
+            var gpuLab = Button(activity, "GPU LAB", bodyBold, primary: false);
+            gpuLab.Click += (_, _) =>
+            {
+                dialog.Dismiss();
+                gpuLabRequested();
+            };
+            card.AddView(gpuLab, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, Dp(activity, 40))
+            {
+                TopMargin = Dp(activity, 4),
+                BottomMargin = Dp(activity, 2),
+            });
+            card.AddView(Hint(activity,
+                "Driver test and synthetic benchmark. Does not use the disc.", bodyFont));
+        }
 
         var scroll = new ScrollView(activity)
         {

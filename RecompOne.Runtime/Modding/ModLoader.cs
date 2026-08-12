@@ -129,10 +129,17 @@ public static class ModLoader
             catch (Exception ex) { Console.Error.WriteLine($"[Mods] hook install failed: {ex.Message}"); }
         });
 
-        while (!work.IsCompleted)
+        if (OperatingSystem.IsAndroid())
         {
-            HostWindow.Pump();
-            Thread.Sleep(16);
+            work.GetAwaiter().GetResult();
+        }
+        else
+        {
+            while (!work.IsCompleted)
+            {
+                HostWindow.Pump();
+                Thread.Sleep(16);
+            }
         }
         ModLoadingPopup.End();
 

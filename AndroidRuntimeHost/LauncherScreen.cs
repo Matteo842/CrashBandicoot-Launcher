@@ -18,7 +18,7 @@ sealed class LauncherScreen : View
 
     static readonly string[] MenuLabels =
     [
-        "START GAME", "CONTROLS", "SETTINGS", "GPU LAB", "CHEAT", "EXIT",
+        "START GAME", "CONTROLS", "SETTINGS", "MODS", "CHEAT", "EXIT",
     ];
 
     readonly Activity _activity;
@@ -63,7 +63,7 @@ sealed class LauncherScreen : View
     public event Action? SelectDiscRequested;
     public event Action? StartGameRequested;
     public event Action? SettingsRequested;
-    public event Action? GpuLabRequested;
+    public event Action? ModsRequested;
 
     public LauncherScreen(Activity activity) : base(activity)
     {
@@ -648,7 +648,7 @@ sealed class LauncherScreen : View
                 SettingsRequested?.Invoke();
                 break;
             case 3:
-                GpuLabRequested?.Invoke();
+                ModsRequested?.Invoke();
                 break;
             case 4:
                 ShowComingSoon("Cheats");

@@ -48,10 +48,52 @@ public static class ModCompiler
     static List<MetadataReference> References()
     {
         if (_references != null) return _references;
-        _references = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
-            .Select(a => (MetadataReference)MetadataReference.CreateFromFile(a.Location))
-            .ToList();
+
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<MetadataReference>();
+
+        void Add(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            path = Path.GetFullPath(path);
+            if (!set.Add(path)) return;
+            list.Add(MetadataReference.CreateFromFile(path));
+        }
+
+        // Android packs assemblies inside the APK, so Assembly.Location is empty.
+        // The host copies BCL + RecompOne.Runtime into compiler-refs for Roslyn.
+        var refsDir = Path.Combine(AppPaths.Root, "compiler-refs");
+        if (Directory.Exists(refsDir))
+        {
+            foreach (var path in Directory.EnumerateFiles(refsDir, "*.dll"))
+                Add(path);
+        }
+
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.IsDynamic) continue;
+            try { Add(asm.Location); } catch { /* ignore */ }
+        }
+
+        Add(typeof(object).Assembly.Location);
+        Add(typeof(Console).Assembly.Location);
+        Add(typeof(Enumerable).Assembly.Location);
+        Add(typeof(RecompOne.Runtime.Runtime).Assembly.Location);
+
+        var tpa = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
+        if (!string.IsNullOrEmpty(tpa))
+        {
+            foreach (var path in tpa.Split(Path.PathSeparator))
+                Add(path);
+        }
+
+        if (list.Count == 0)
+        {
+            Console.Error.WriteLine("[Mods] no compiler references found (compiler-refs missing?)");
+            return list;
+        }
+
+        _references = list;
         return _references;
     }
 }

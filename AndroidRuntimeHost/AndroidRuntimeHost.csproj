@@ -53,6 +53,10 @@
                   Link="Recomp\CrashBandicoot.json" />
     <AndroidAsset Include="..\CrashBandicoot.Launcher\Recomp\Patches\main.cs.patch"
                   Link="Recomp\Patches\main.cs.patch" />
+    <AndroidAsset Include="..\examples\mods\auto-spin\mod.json"
+                  Link="ExampleMods\auto-spin\mod.json" />
+    <AndroidAsset Include="..\examples\mods\auto-spin\AutoSpinMod.cs"
+                  Link="ExampleMods\auto-spin\AutoSpinMod.cs" />
     <!-- Roslyn needs reference assemblies as real files on Android. -->
     <AndroidAsset Include="$(NetCoreTargetingPackRoot)\Microsoft.NETCore.App.Ref\10.0.*\ref\net10.0\*.dll"
                   Link="CompilerRefs\%(Filename)%(Extension)" />
