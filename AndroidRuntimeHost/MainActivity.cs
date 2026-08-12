@@ -20,7 +20,7 @@ namespace CrashBandicoot.AndroidRuntime;
     Label = "Crash Bandicoot Launcher",
     MainLauncher = true,
     Exported = true,
-    ScreenOrientation = ScreenOrientation.FullUser,
+    ScreenOrientation = ScreenOrientation.SensorLandscape,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize |
                            ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize |
                            ConfigChanges.KeyboardHidden | ConfigChanges.UiMode)]
@@ -38,6 +38,8 @@ public sealed class MainActivity : Activity
     TextureView _screen = null!;
     ProgressBar _progress = null!;
     FrameLayout.LayoutParams? _statusLayout;
+    DevMenuOverlay? _devMenu;
+    TextView? _devHud;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
     bool _usingLocalDiscCopy;
@@ -47,7 +49,7 @@ public sealed class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        RequestedOrientation = ScreenOrientation.FullUser;
+        RequestedOrientation = ScreenOrientation.SensorLandscape;
         InitializeRuntimeConfiguration();
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
         if (Window != null)
@@ -79,6 +81,8 @@ public sealed class MainActivity : Activity
     void ShowLauncherUi()
     {
         _gameUiVisible = false;
+        _devMenu = null;
+        _devHud = null;
         _launcher = new LauncherScreen(this);
         _launcher.SelectDiscRequested += PickDiscFolder;
         _launcher.StartGameRequested += () => _ = StartGameAsync();
@@ -97,7 +101,7 @@ public sealed class MainActivity : Activity
         _gameUiVisible = true;
         ApplyGameDisplayMode();
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
-        var root = new FrameLayout(this);
+        var root = new GameTouchRoot(this);
         root.SetBackgroundColor(Color.Rgb(7, 11, 18));
 
         _screen = new TextureView(this);
@@ -139,7 +143,65 @@ public sealed class MainActivity : Activity
 
         _progress = new ProgressBar(this) { Indeterminate = true, Visibility = ViewStates.Gone };
         root.AddView(_progress, new FrameLayout.LayoutParams(Dp(42), Dp(42), GravityFlags.Center));
+
+        _devHud = new TextView(this)
+        {
+            TextSize = 12,
+            Gravity = GravityFlags.Right,
+            Visibility = ConfigManager.View.ShowDevHud ? ViewStates.Visible : ViewStates.Gone,
+        };
+        _devHud.SetTextColor(Color.Rgb(244, 228, 188));
+        _devHud.SetBackgroundColor(Color.Argb(120, 8, 8, 8));
+        _devHud.SetPadding(Dp(8), Dp(4), Dp(8), Dp(4));
+        root.AddView(_devHud, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent,
+            GravityFlags.Top | GravityFlags.Right)
+        {
+            TopMargin = Dp(52),
+            RightMargin = Dp(10),
+        });
+
+        var devButton = new Button(this)
+        {
+            Text = "DEV",
+            TextSize = 11,
+            Gravity = GravityFlags.Center,
+            StateListAnimator = null,
+        };
+        devButton.SetTextColor(Color.Argb(200, 255, 255, 255));
+        devButton.SetMinHeight(0);
+        devButton.SetMinWidth(0);
+        devButton.SetPadding(Dp(10), Dp(4), Dp(10), Dp(4));
+        devButton.Background = new Android.Graphics.Drawables.ColorDrawable(Color.Transparent);
+        _devMenu = new DevMenuOverlay(this,
+            volume => _activeHost?.SetMasterVolume(volume),
+            visible =>
+            {
+                if (_devHud == null) return;
+                _devHud.Visibility = visible ? ViewStates.Visible : ViewStates.Gone;
+            });
+        devButton.Click += (_, _) => _devMenu?.Toggle();
+        root.AddView(devButton, new FrameLayout.LayoutParams(Dp(56), Dp(36),
+            GravityFlags.Top | GravityFlags.Right)
+        {
+            TopMargin = Dp(10),
+            RightMargin = Dp(10),
+        });
+        root.AddView(_devMenu, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        root.ThreeFingerHold = () => _devMenu?.Toggle();
         SetContentView(root);
+    }
+
+    public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
+    {
+        if (keyCode == Keycode.Back && _gameUiVisible && _devMenu?.IsOpen == true)
+        {
+            _devMenu.Close();
+            return true;
+        }
+
+        return base.OnKeyDown(keyCode, e);
     }
 
     void EnterImmersiveGameMode()
@@ -200,6 +262,7 @@ public sealed class MainActivity : Activity
         {
             ApplyGameDisplayMode();
             ApplyStatusBarLayout();
+            _devMenu?.RelayoutCard();
         }
         else if (_launcher != null)
         {
@@ -500,6 +563,7 @@ public sealed class MainActivity : Activity
                 RecompOne.Runtime.Hle.GpuHle.NativeResolution =
                     ConfigManager.View.InternalResolution <= 1;
                 host = new AndroidPlatformHost(this, _status, _progress, egl, backend, diagnostics);
+                host.AttachHud(_devHud);
                 _activeHost = host;
                 RecompOne.Runtime.Runtime.SetPlatformHost(host);
                 GameLoader.Run(gameDll, cuePath);
@@ -563,6 +627,8 @@ public sealed class MainActivity : Activity
         RecompOne.Runtime.Hle.GpuHle.TextureFilterStrength = view.TextureFilterStrength;
         RecompOne.Runtime.Hle.GpuHle.Dedither = view.Dedither;
         RecompOne.Runtime.Hle.GpuHle.Dejitter = view.Dejitter;
+        RecompOne.Runtime.Hle.GpuHle.PresentNearest = view.PresentNearest;
+        RecompOne.Runtime.Host.FrameClock.SkipThrottle = view.VSync;
         RecompOne.Runtime.Hle.GpuHle.RefreshWideFov();
     }
 

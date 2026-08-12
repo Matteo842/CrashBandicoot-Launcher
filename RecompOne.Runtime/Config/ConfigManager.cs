@@ -133,7 +133,15 @@ public static class ConfigManager
         View = new();
         foreach (var p in panels)
             p.IsOpen = PanelDefaults.IsOpenByDefault(p);
-        ImGui.LoadIniSettingsFromMemory("");
+        try
+        {
+            if (ImGui.GetCurrentContext() != IntPtr.Zero)
+                ImGui.LoadIniSettingsFromMemory("");
+        }
+        catch
+        {
+            // Android (and any host without a live ImGui context) only resets ViewConfig.
+        }
         SaveView(panels);
     }
 

@@ -1,7 +1,9 @@
 using Android.App;
 using Android.Widget;
 using RecompOne.Runtime;
+using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hle;
+using RecompOne.Runtime.Host.Cheats;
 
 namespace CrashBandicoot.AndroidRuntime;
 
@@ -24,11 +26,16 @@ sealed class AndroidPlatformHost(
     long _writebacks;
     long _vertices;
     long _lastPresentTimestamp;
+    TextView? _hud;
+    long _hudWindow = System.Diagnostics.Stopwatch.GetTimestamp();
+    int _hudFrames;
+    double _hudFps;
 
     public void Initialize(string title) => SetStatus($"{title}: first frame incoming…");
     public void WaitForValidDisc() { }
     public void AttachAudio(Spu? spu) => _audio.Attach(spu);
     public void SetMasterVolume(float volume) => _audio.SetMasterVolume(volume);
+    public void AttachHud(TextView? hud) => _hud = hud;
     public void ShowNotice(string message) => SetStatus(message);
     public void PauseAudio()
     {
@@ -44,6 +51,9 @@ sealed class AndroidPlatformHost(
 
     public void Present(Gpu? gpu)
     {
+        CheatManager.Apply();
+        TickHud();
+
         if (gpu == null || !gpu.DisplayEnabled || !backend.Ready)
             return;
 
@@ -128,6 +138,41 @@ sealed class AndroidPlatformHost(
             status.Text = "Session ended.";
             status.Visibility = Android.Views.ViewStates.Visible;
         });
+    }
+
+    void TickHud()
+    {
+        if (_hud == null || !ConfigManager.View.ShowDevHud)
+            return;
+
+        _hudFrames++;
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var elapsed = (now - _hudWindow) / (double)System.Diagnostics.Stopwatch.Frequency;
+        if (elapsed < 0.5)
+            return;
+
+        _hudFps = _hudFrames / Math.Max(elapsed, 0.001);
+        _hudFrames = 0;
+        _hudWindow = now;
+        var fps = _hudFps;
+        long workingSet = 0;
+        try { workingSet = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64; }
+        catch { /* HUD is best-effort */ }
+
+        var text = $"{fps:0.0} fps\n{FormatBytes(workingSet)}";
+        activity.RunOnUiThread(() =>
+        {
+            if (_hud == null) return;
+            _hud.Text = text;
+        });
+    }
+
+    static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):0.0} MB";
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):0.00} GB";
     }
 
     void SetStatus(string text) => activity.RunOnUiThread(() =>
