@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using ImGuiNET;
 
 namespace RecompOne.Runtime.Host.Window;
 
@@ -18,10 +19,10 @@ internal static unsafe class DockBuilder
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     static extern void igDockBuilderFinish(uint nodeId);
 
-    public static void SetupCenterLayout(uint dockId, Vector2 size, string windowName)
+    public static void SetupCenterLayout(uint dockId, Vector2 size, string windowName, ImGuiDockNodeFlags flags)
     {
         igDockBuilderRemoveNode(dockId);
-        igDockBuilderAddNode(dockId, 0);
+        igDockBuilderAddNode(dockId, (int)flags);
         igDockBuilderSetNodeSize(dockId, size);
 
         var bytes = System.Text.Encoding.UTF8.GetBytes(windowName + "\0");

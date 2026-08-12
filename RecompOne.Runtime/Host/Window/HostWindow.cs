@@ -597,9 +597,12 @@ internal static class HostWindow
             if (Hle.GpuHle.Active && _glBackend is { Ready: true } && gpu.DisplayEnabled)
             {
                 var wf = _window!.FramebufferSize;
+                int displayY = gpu.DisplayY;
+                int displayHeight = gpu.DisplayHeight;
+                CropNtscOverscan(ref displayY, ref displayHeight);
                 var (tex, tw, th, aspect) = _glBackend.PresentDisplay(
-                    gpu.DisplayX, gpu.DisplayY,
-                    gpu.DisplayWidth, gpu.DisplayHeight,
+                    gpu.DisplayX, displayY,
+                    gpu.DisplayWidth, displayHeight,
                     gpu.Display24Bit,
                     outW: wf.X, outH: wf.Y);
                 if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
@@ -671,7 +674,7 @@ internal static class HostWindow
         if (_layoutPending)
         {
             _layoutPending = false;
-            DockBuilder.SetupCenterLayout(dockId, viewport.WorkSize, "Output");
+            DockBuilder.SetupCenterLayout(dockId, viewport.WorkSize, "Output", dockFlags);
         }
 
         ImGui.End();
@@ -709,15 +712,27 @@ internal static class HostWindow
 
     static void UploadDisplayTexture(GL gl, Gpu gpu)
     {
-        int w = gpu.DisplayWidth, h = gpu.DisplayHeight;
+        int w = gpu.DisplayWidth, y = gpu.DisplayY, h = gpu.DisplayHeight;
+        CropNtscOverscan(ref y, ref h);
         if (!gpu.DisplayEnabled || w <= 0 || h <= 0) return;
         int needed = w * h * 3;
         if (_rgbDisplay.Length < needed) _rgbDisplay = new byte[needed];
-        ConvertDisplay(gpu, w, h);
+        ConvertDisplay(gpu, w, y, h);
         gl.BindTexture(TextureTarget.Texture2D, _displayTex);
         gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgb, (uint)w, (uint)h, 0,
             PixelFormat.Rgb, PixelType.UnsignedByte, _rgbDisplay.AsSpan(0, needed));
         OutputPanel.SetTexture(_displayTex, w, h);
+    }
+
+    static void CropNtscOverscan(ref int displayY, ref int displayHeight)
+    {
+        // Crash renders 216 content lines inside its 240-line NTSC display area.
+        // The remaining twelve rows at each edge are blank TV overscan, not part
+        // of the image, so presenting them produces visible horizontal bands.
+        int crop = displayHeight switch { 240 => 12, 480 => 24, _ => 0 };
+        if (crop == 0) return;
+        displayY += crop;
+        displayHeight -= crop * 2;
     }
 
     static ushort[] _vramView = new ushort[Gpu.VramWidth * Gpu.VramHeight];
@@ -776,10 +791,10 @@ internal static class HostWindow
         RamMapPanel.SetTexture(_ramTex);
     }
 
-    static void ConvertDisplay(Gpu gpu, int w, int h)
+    static void ConvertDisplay(Gpu gpu, int w, int displayY, int h)
     {
         var vram = gpu.Vram;
-        int dx = gpu.DisplayX, dy = gpu.DisplayY;
+        int dx = gpu.DisplayX, dy = displayY;
         int o = 0;
         if (gpu.Display24Bit)
         {
