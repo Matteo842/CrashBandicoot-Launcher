@@ -25,16 +25,26 @@ sealed class AndroidEglContext : INativeContext
     nint _glesLibrary;
     bool _disposed;
     int _surfaceRecreateFailures;
+    volatile int _expectedWidth;
+    volatile int _expectedHeight;
+    int _resizedForWidth;
+    int _resizedForHeight;
 
     public int SurfaceWidth => QuerySurface(EGL14.EglWidth);
     public int SurfaceHeight => QuerySurface(EGL14.EglHeight);
+
+    public void SetExpectedSize(int width, int height)
+    {
+        _expectedWidth = width;
+        _expectedHeight = height;
+    }
 
     public AndroidEglContext(Surface nativeWindow, Func<Surface> surfaceSource)
     {
         _surfaceSource = surfaceSource;
 
         _display = EGL14.EglGetDisplay(EGL14.EglDefaultDisplay)
-                   ?? throw new InvalidOperationException("EGL display non disponibile.");
+                   ?? throw new InvalidOperationException("EGL display is not available.");
         var major = new int[1];
         var minor = new int[1];
         if (!EGL14.EglInitialize(_display, major, 0, minor, 0))
@@ -116,6 +126,22 @@ sealed class AndroidEglContext : INativeContext
     /// </summary>
     public bool SwapBuffers()
     {
+        if (_expectedWidth > 0 && _expectedHeight > 0)
+        {
+            var width = SurfaceWidth;
+            var height = SurfaceHeight;
+            var sizeChanged = Math.Abs(width - _expectedWidth) > 8 || Math.Abs(height - _expectedHeight) > 8;
+            var alreadyTried = _resizedForWidth == _expectedWidth && _resizedForHeight == _expectedHeight;
+            if (sizeChanged && !alreadyTried && RecreateWindowSurface())
+            {
+                _surfaceRecreateFailures = 0;
+                _resizedForWidth = _expectedWidth;
+                _resizedForHeight = _expectedHeight;
+                Android.Util.Log.Info("CrashGPU",
+                    $"EGL window surface recreated after resize ({width}x{height} → {_expectedWidth}x{_expectedHeight}).");
+            }
+        }
+
         if (EGL14.EglSwapBuffers(_display, _surface))
         {
             _surfaceRecreateFailures = 0;
@@ -124,7 +150,7 @@ sealed class AndroidEglContext : INativeContext
 
         var error = EGL14.EglGetError();
         if (error != EglBadSurface)
-            throw new InvalidOperationException($"eglSwapBuffers fallita (EGL 0x{error:X}).");
+            throw new InvalidOperationException($"eglSwapBuffers failed (EGL 0x{error:X}).");
 
         if (!RecreateWindowSurface())
             return false; // surface mid-relayout; frame dropped, retry next frame
@@ -163,7 +189,7 @@ sealed class AndroidEglContext : INativeContext
         // Keep throwing only after a sustained failure streak: transient misses
         // just drop frames while the TextureView is mid-relayout.
         if (++_surfaceRecreateFailures >= MaxSurfaceRecreateFailures)
-            throw new InvalidOperationException("La superficie video Android non è recuperabile.");
+            throw new InvalidOperationException("The Android video surface cannot be recovered.");
         return false;
     }
 
@@ -186,7 +212,7 @@ sealed class AndroidEglContext : INativeContext
     }
 
     static InvalidOperationException Error(string operation) =>
-        new($"{operation} fallita (EGL 0x{EGL14.EglGetError():X}).");
+        new($"{operation} failed (EGL 0x{EGL14.EglGetError():X}).");
 
     [DllImport("libEGL.so", EntryPoint = "eglGetProcAddress")]
     static extern nint EglGetProcAddress([MarshalAs(UnmanagedType.LPUTF8Str)] string procname);

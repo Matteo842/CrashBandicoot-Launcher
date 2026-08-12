@@ -36,8 +36,8 @@ static class TouchControlsDialog
         card.AddView(title);
 
         var explanation = Text(activity,
-            "Crash 1 usa croce direzionale, X, Quadrato/Cerchio, Triangolo e Start. " +
-            "I dorsali sono opzionali e restano nascosti di default.",
+            "Crash 1 uses the D-pad, X, Square/Circle, Triangle, and Start. " +
+            "Shoulder buttons are optional and stay hidden by default.",
             11, Muted, bodyFont);
         explanation.SetLineSpacing(0, 1.08f);
         card.AddView(explanation, new LinearLayout.LayoutParams(
@@ -49,7 +49,7 @@ static class TouchControlsDialog
 
         var enabled = new Switch(activity)
         {
-            Text = "Controlli touch attivi",
+            Text = "Touch controls enabled",
             TextSize = 12,
             Checked = settings.Enabled,
         };
@@ -61,7 +61,7 @@ static class TouchControlsDialog
 
         var colors = new Switch(activity)
         {
-            Text = "Colori pulsanti",
+            Text = "Colored buttons",
             TextSize = 12,
             Checked = settings.UseColors,
         };
@@ -71,16 +71,16 @@ static class TouchControlsDialog
         card.AddView(colors, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, Dp(activity, 36)));
 
-        AddSlider(activity, card, "Opacità", 20, 100,
+        AddSlider(activity, card, "Opacity", 20, 100,
             (int)MathF.Round(settings.Opacity * 100f), value => settings.SetOpacity(value / 100f),
             bodyFont, bodyBold);
-        AddSlider(activity, card, "Dimensione", 70, 140,
+        AddSlider(activity, card, "Size", 70, 140,
             (int)MathF.Round(settings.Scale * 100f), value => settings.SetScale(value / 100f),
             bodyFont, bodyBold);
 
         var shoulders = new Switch(activity)
         {
-            Text = "Mostra L1 / L2 / R1 / R2",
+            Text = "Show L1 / L2 / R1 / R2",
             TextSize = 12,
             Checked = settings.ShowShoulders,
         };
@@ -156,7 +156,7 @@ static class TouchControlsDialog
         toolbar.Background = RoundedBackground(Color.Argb(220, 5, 14, 20),
             Color.Argb(150, 255, 176, 32), Dp(activity, 1), Dp(activity, 2));
 
-        var hint = Text(activity, "TRASCINA I GRUPPI", 11, Sand, bodyBold);
+        var hint = Text(activity, "DRAG THE GROUPS", 11, Sand, bodyBold);
         hint.Gravity = GravityFlags.Center;
         toolbar.AddView(hint, new LinearLayout.LayoutParams(Dp(activity, 150), Dp(activity, 34)));
         var reset = Button(activity, "RESET", bodyBold);

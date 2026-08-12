@@ -69,8 +69,8 @@ sealed class TouchControllerView : View
         Clickable = true;
         Focusable = true;
         ContentDescription = editing
-            ? "Editor posizione controller touch"
-            : "Controller touch PlayStation";
+            ? "Touch controller position editor"
+            : "PlayStation touch controller";
         SetBackgroundColor(Color.Transparent);
         Alpha = settings.Opacity;
     }

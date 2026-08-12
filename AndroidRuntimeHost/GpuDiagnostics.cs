@@ -166,7 +166,7 @@ static class GpuDiagnosticsStore
         var send = new Intent(Intent.ActionSend);
         send.SetType("application/json");
         send.PutExtra(Intent.ExtraText, File.ReadAllText(path));
-        activity.StartActivity(Intent.CreateChooser(send, "Condividi report GPU JSON"));
+        activity.StartActivity(Intent.CreateChooser(send, "Share GPU JSON report"));
     }
 
     public static DeviceDiagnostics ReadDevice(Activity activity)

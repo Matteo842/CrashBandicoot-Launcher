@@ -64,7 +64,7 @@ static class GpuSyntheticBenchmark
             backend.InitGl(gles: true, framebufferFetch: gpu.FramebufferFetchPath);
             if (!backend.Ready)
                 throw new InvalidOperationException(
-                    $"Inizializzazione renderer fallita: {backend.LastDiagnostic}");
+                    $"Renderer initialization failed: {backend.LastDiagnostic}");
 
             var configured = gpu.ConfigureBackend(backend, scale);
             result.TextureBarrierActive = configured.textureBarrier;

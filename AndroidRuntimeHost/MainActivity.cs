@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Android.App;
 using Android.Content;
 using Android.Content.PM;
+using Android.Content.Res;
 using Android.Database;
 using Android.Net;
 using Android.OS;
@@ -19,8 +20,10 @@ namespace CrashBandicoot.AndroidRuntime;
     Label = "Crash Bandicoot Launcher",
     MainLauncher = true,
     Exported = true,
-    ScreenOrientation = ScreenOrientation.Landscape,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize)]
+    ScreenOrientation = ScreenOrientation.FullUser,
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize |
+                           ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize |
+                           ConfigChanges.KeyboardHidden | ConfigChanges.UiMode)]
 [IntentFilter(
     new[] { FirebaseGameLoopRunner.Action },
     Categories = new[] { Intent.CategoryDefault },
@@ -30,10 +33,11 @@ public sealed class MainActivity : Activity
     const int PickDiscFolderRequest = 949;
     const string DiscTreePreference = "disc_tree";
 
-    LauncherScreen _launcher = null!;
+    LauncherScreen? _launcher;
     TextView _status = null!;
     TextureView _screen = null!;
     ProgressBar _progress = null!;
+    FrameLayout.LayoutParams? _statusLayout;
     Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
     bool _usingLocalDiscCopy;
@@ -43,6 +47,7 @@ public sealed class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        RequestedOrientation = ScreenOrientation.FullUser;
         InitializeRuntimeConfiguration();
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
         if (Window != null)
@@ -96,6 +101,16 @@ public sealed class MainActivity : Activity
         root.SetBackgroundColor(Color.Rgb(7, 11, 18));
 
         _screen = new TextureView(this);
+        _screen.LayoutChange += (_, e) =>
+        {
+            var width = e.Right - e.Left;
+            var height = e.Bottom - e.Top;
+            if (width > 0 && height > 0)
+            {
+                _screen.SurfaceTexture?.SetDefaultBufferSize(width, height);
+                _activeHost?.NotifySurfaceSize(width, height);
+            }
+        };
         root.AddView(_screen, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
@@ -109,22 +124,18 @@ public sealed class MainActivity : Activity
 
         _status = new TextView(this)
         {
-            Text = "Seleziona la cartella che contiene il tuo CUE/BIN.",
+            Text = "Select the folder that contains your CUE/BIN.",
             TextSize = 13,
             Gravity = GravityFlags.Center,
         };
         _status.SetTextColor(Color.White);
         _status.SetBackgroundColor(Color.Argb(145, 3, 9, 14));
         _status.SetPadding(Dp(12), Dp(5), Dp(12), Dp(5));
-        var statusLayout = new FrameLayout.LayoutParams(
+        _statusLayout = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent,
-            GravityFlags.Top | GravityFlags.CenterHorizontal)
-        {
-            LeftMargin = Dp(150),
-            RightMargin = Dp(150),
-            TopMargin = Dp(34),
-        };
-        root.AddView(_status, statusLayout);
+            GravityFlags.Top | GravityFlags.CenterHorizontal);
+        ApplyStatusBarLayout();
+        root.AddView(_status, _statusLayout);
 
         _progress = new ProgressBar(this) { Indeterminate = true, Visibility = ViewStates.Gone };
         root.AddView(_progress, new FrameLayout.LayoutParams(Dp(42), Dp(42), GravityFlags.Center));
@@ -180,6 +191,37 @@ public sealed class MainActivity : Activity
     {
         base.OnWindowFocusChanged(hasFocus);
         if (hasFocus && _gameUiVisible) ApplyGameDisplayMode();
+    }
+
+    public override void OnConfigurationChanged(Configuration newConfig)
+    {
+        base.OnConfigurationChanged(newConfig);
+        if (_gameUiVisible)
+        {
+            ApplyGameDisplayMode();
+            ApplyStatusBarLayout();
+        }
+        else if (_launcher != null)
+        {
+            _launcher.RequestLayout();
+            _launcher.Invalidate();
+        }
+    }
+
+    void ApplyStatusBarLayout()
+    {
+        if (_statusLayout == null) return;
+        var landscape = IsLandscape();
+        _statusLayout.LeftMargin = Dp(landscape ? 150 : 20);
+        _statusLayout.RightMargin = Dp(landscape ? 150 : 20);
+        _statusLayout.TopMargin = Dp(landscape ? 34 : 48);
+        _status.LayoutParameters = _statusLayout;
+    }
+
+    bool IsLandscape()
+    {
+        var metrics = Resources?.DisplayMetrics;
+        return metrics != null && metrics.WidthPixels >= metrics.HeightPixels;
     }
 
     AndroidPlatformHost? _activeHost;
@@ -239,10 +281,10 @@ public sealed class MainActivity : Activity
             if (_disc == null)
             {
                 if (TryUseLocalDiscCopy()) return;
-                _launcher.ShowDisc(
+                _launcher?.ShowDisc(
                     ready: false,
-                    "Disco non valido",
-                    "Nella cartella servono un file .cue e il relativo .bin.");
+                    "Invalid disc",
+                    "The folder needs a .cue file and its matching .bin.");
                 return;
             }
 
@@ -253,9 +295,9 @@ public sealed class MainActivity : Activity
             // Document providers may grant session-only access: after a process
             // restart the tree URI is dead, but the imported copy still works.
             if (TryUseLocalDiscCopy()) return;
-            _launcher.ShowDisc(
+            _launcher?.ShowDisc(
                 ready: false,
-                "Cartella non leggibile",
+                "Folder is not readable",
                 ex.Message);
         }
     }
@@ -272,10 +314,10 @@ public sealed class MainActivity : Activity
 
         _usingLocalDiscCopy = true;
         var sizeMb = cachedSize / (1024d * 1024d);
-        _launcher.ShowDisc(
+        _launcher?.ShowDisc(
             ready: true,
-            "Copia locale del disco pronta",
-            $"game.bin ({sizeMb:0} MB) già importato nell'app.\nIl controllo completo SCUS-94900 verrà eseguito all'avvio.");
+            "Local disc copy ready",
+            $"game.bin ({sizeMb:0} MB) already imported into the app.\nFull SCUS-94900 validation runs at launch.");
         return true;
     }
 
@@ -283,10 +325,10 @@ public sealed class MainActivity : Activity
     {
         if (_disc == null) return;
         var sizeMb = _disc.BinSize / (1024d * 1024d);
-        _launcher.ShowDisc(
+        _launcher?.ShowDisc(
             ready: true,
-            "File del disco pronti",
-            $"{_disc.CueName}  •  {_disc.BinName} ({sizeMb:0} MB)\nIl controllo completo SCUS-94900 verrà eseguito all'avvio.");
+            "Disc files ready",
+            $"{_disc.CueName}  •  {_disc.BinName} ({sizeMb:0} MB)\nFull SCUS-94900 validation runs at launch.");
     }
 
     DiscDocuments? FindDiscDocuments(Android.Net.Uri treeUri)
@@ -319,7 +361,7 @@ public sealed class MainActivity : Activity
         if (cue == null) return null;
         string cueText;
         using (var input = ContentResolver.OpenInputStream(cue.Uri)
-                           ?? throw new IOException("Impossibile aprire il CUE."))
+                           ?? throw new IOException("Unable to open the CUE."))
         using (var reader = new StreamReader(input))
             cueText = reader.ReadToEnd();
 
@@ -334,7 +376,7 @@ public sealed class MainActivity : Activity
     async Task StartGameAsync()
     {
         if (_disc == null && !_usingLocalDiscCopy) return;
-        _launcher.SetBusy(true, "Apro il runtime integrato e preparo i file del gioco.");
+        _launcher?.SetBusy(true, "Opening the bundled runtime and preparing the game files.");
         ShowGameUi();
         _progress.Visibility = ViewStates.Visible;
 
@@ -349,12 +391,12 @@ public sealed class MainActivity : Activity
                 string cuePath;
                 if (_usingLocalDiscCopy)
                 {
-                    SetStatus("Uso la copia del disco già importata…");
+                    SetStatus("Using the disc copy already imported…");
                     cuePath = Path.Combine(FilesDir!.AbsolutePath, "disc", "game.cue");
                 }
                 else
                 {
-                    SetStatus("Copio il disco nello spazio privato dell'app (solo la prima volta)…");
+                    SetStatus("Copying the disc into the app's private storage (first time only)…");
                     cuePath = await EnsureLocalDiscAsync(_disc!);
                 }
 
@@ -373,7 +415,7 @@ public sealed class MainActivity : Activity
                 ConfigManager.SaveGame();
                 ApplyRuntimeGraphicsSettings();
 
-                SetStatus("Controllo che sia Crash Bandicoot NTSC-U…");
+                SetStatus("Checking that this is Crash Bandicoot NTSC-U…");
                 var validation = DiscValidator.Validate(cuePath);
                 if (!validation.Ok)
                     throw new InvalidOperationException($"{validation.Title}: {validation.Problem} {validation.Fix}");
@@ -381,7 +423,7 @@ public sealed class MainActivity : Activity
                 string gameDll;
                 if (GameStore.TryGetValid(validation.Fingerprint, cuePath, out gameDll))
                 {
-                    SetStatus("Gioco già preparato. Avvio…");
+                    SetStatus("Game already prepared. Starting…");
                 }
                 else
                 {
@@ -400,7 +442,7 @@ public sealed class MainActivity : Activity
                     GameStore.WriteManifest(validation.Fingerprint, cuePath, validation.BinPath, gameDll);
                 }
 
-                SetStatus("Avvio del core PS1…");
+                SetStatus("Starting the PS1 core…");
                 RunGameCore(gameDll, cuePath);
             });
         }
@@ -413,7 +455,7 @@ public sealed class MainActivity : Activity
             {
                 _progress.Visibility = ViewStates.Gone;
                 ShowLauncherUi();
-                _launcher.ShowError(ex.GetBaseException().Message);
+                _launcher?.ShowError(ex.GetBaseException().Message);
             });
         }
     }
@@ -441,7 +483,7 @@ public sealed class MainActivity : Activity
                 // so the selected path must be passed explicitly to the backend.
                 backend.InitGl(gles: true, framebufferFetch: gpuInfo.FramebufferFetchPath);
                 if (!backend.Ready)
-                    throw new InvalidOperationException("Il renderer OpenGL ES Android non si è inizializzato.");
+                    throw new InvalidOperationException("The Android OpenGL ES renderer failed to initialize.");
                 var configured = gpuInfo.ConfigureBackend(
                     backend, ConfigManager.View.InternalResolution);
                 Android.Util.Log.Info("CrashGPU",
@@ -487,14 +529,14 @@ public sealed class MainActivity : Activity
             Thread.Sleep(10);
 
         if (!_screen.IsAvailable || _screen.SurfaceTexture == null)
-            throw new InvalidOperationException("La superficie video Android non è pronta.");
+            throw new InvalidOperationException("The Android video surface is not ready.");
         return new Surface(_screen.SurfaceTexture);
     }
 
     Surface AcquireCurrentGameSurface()
     {
         var texture = _screen.SurfaceTexture
-                      ?? throw new InvalidOperationException("SurfaceTexture non disponibile.");
+                      ?? throw new InvalidOperationException("SurfaceTexture is not available.");
         return new Surface(texture);
     }
 
@@ -569,7 +611,7 @@ public sealed class MainActivity : Activity
             cachedSize != disc.BinSize || !string.Equals(cachedKey, sourceKey, StringComparison.Ordinal))
         {
             using var input = ContentResolver.OpenInputStream(disc.BinUri)
-                              ?? throw new IOException("Impossibile aprire il BIN.");
+                              ?? throw new IOException("Unable to open the BIN.");
             using var output = File.Create(binPath);
             await input.CopyToAsync(output);
             prefs.Edit()!.PutString("cached_disc", sourceKey)!.PutLong("cached_bin_size", disc.BinSize)!.Apply();

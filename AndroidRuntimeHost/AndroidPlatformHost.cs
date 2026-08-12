@@ -25,7 +25,7 @@ sealed class AndroidPlatformHost(
     long _vertices;
     long _lastPresentTimestamp;
 
-    public void Initialize(string title) => SetStatus($"{title}: primo frame in arrivo…");
+    public void Initialize(string title) => SetStatus($"{title}: first frame incoming…");
     public void WaitForValidDisc() { }
     public void AttachAudio(Spu? spu) => _audio.Attach(spu);
     public void SetMasterVolume(float volume) => _audio.SetMasterVolume(volume);
@@ -40,6 +40,7 @@ sealed class AndroidPlatformHost(
         _audio.ResumeOutput();
         RecompOne.Runtime.Host.FrameClock.ResumeTiming();
     }
+    public void NotifySurfaceSize(int width, int height) => egl.SetExpectedSize(width, height);
 
     public void Present(Gpu? gpu)
     {
@@ -111,7 +112,7 @@ sealed class AndroidPlatformHost(
         _firstFrame = false;
         activity.RunOnUiThread(() =>
         {
-            status.Text = $"Gioco in esecuzione • {presented.w}×{presented.h} ({GlVram.Scale}x reale)";
+            status.Text = $"Game running • {presented.w}×{presented.h} ({GlVram.Scale}x native)";
             status.Visibility = Android.Views.ViewStates.Gone;
             progress.Visibility = Android.Views.ViewStates.Gone;
         });
@@ -124,7 +125,7 @@ sealed class AndroidPlatformHost(
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
         activity.RunOnUiThread(() =>
         {
-            status.Text = "Sessione terminata.";
+            status.Text = "Session ended.";
             status.Visibility = Android.Views.ViewStates.Visible;
         });
     }

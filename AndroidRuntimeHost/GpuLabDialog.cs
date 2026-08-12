@@ -18,9 +18,9 @@ static class GpuLabDialog
         readonly TextView _details = new(activity);
         readonly ProgressBar _progress = new(activity) { Indeterminate = true };
         readonly TextureView _surface = new(activity);
-        readonly Button _run = new(activity) { Text = "ESEGUI TEST" };
-        readonly Button _share = new(activity) { Text = "CONDIVIDI JSON" };
-        readonly Button _close = new(activity) { Text = "CHIUDI" };
+        readonly Button _run = new(activity) { Text = "RUN TEST" };
+        readonly Button _share = new(activity) { Text = "SHARE JSON" };
+        readonly Button _close = new(activity) { Text = "CLOSE" };
         bool _pendingRun;
         bool _running;
 
@@ -44,7 +44,7 @@ static class GpuLabDialog
 
             var intro = new TextView(activity)
             {
-                Text = "Diagnostica driver e benchmark sintetico PS1. Non usa la ROM e dura circa 8 secondi.",
+                Text = "Driver diagnostics and a synthetic PS1 benchmark. It does not use the ROM and takes about 8 seconds.",
                 TextSize = 13,
             };
             intro.SetTextColor(Color.Rgb(238, 225, 190));
@@ -57,7 +57,7 @@ static class GpuLabDialog
 
             _status.TextSize = 13;
             _status.SetTextColor(Color.Rgb(132, 255, 163));
-            _status.Text = "Pronto";
+            _status.Text = "Ready";
             card.AddView(_status);
 
             _progress.Visibility = ViewStates.Gone;
@@ -105,7 +105,7 @@ static class GpuLabDialog
             var previous = GpuDiagnosticsStore.Load(activity);
             _share.Enabled = previous != null;
             _details.Text = previous == null
-                ? "Nessun report ancora salvato. Esegui il test per identificare GPU, estensioni e percorso attivo."
+                ? "No report saved yet. Run the test to identify the GPU, extensions, and active path."
                 : BuildSummary(previous);
 
             _dialog.SetContentView(card);
@@ -121,7 +121,7 @@ static class GpuLabDialog
             if (!_surface.IsAvailable || _surface.SurfaceTexture == null)
             {
                 _pendingRun = true;
-                _status.Text = "Preparo il contesto GPU…";
+                _status.Text = "Preparing the GPU context…";
                 return;
             }
 
@@ -131,7 +131,7 @@ static class GpuLabDialog
             _share.Enabled = false;
             _close.Enabled = false;
             _progress.Visibility = ViewStates.Visible;
-            _details.Text = "Il test usa la stessa pipeline GLES del gioco, con primitive opache e trasparenti a 1x, 2x, 4x e 8x.";
+            _details.Text = "The test uses the same GLES pipeline as the game, with opaque and transparent primitives at 1x, 2x, 4x, and 8x.";
             _dialog.SetCancelable(false);
 
             var texture = _surface.SurfaceTexture;
@@ -142,7 +142,7 @@ static class GpuLabDialog
                     using var nativeSurface = new Surface(texture!);
                     using var egl = new AndroidEglContext(nativeSurface,
                         () => new Surface(_surface.SurfaceTexture
-                            ?? throw new InvalidOperationException("SurfaceTexture non disponibile.")));
+                            ?? throw new InvalidOperationException("SurfaceTexture is not available.")));
                     using var gl = Silk.NET.OpenGL.GL.GetApi(egl);
                     var report = GpuSyntheticBenchmark.Run(activity, egl, gl, SetProgress);
                     activity.RunOnUiThread(() => Finish(report));
@@ -159,7 +159,7 @@ static class GpuLabDialog
         void Finish(GpuDiagnosticsReport report)
         {
             _running = false;
-            _status.Text = report.Error == null ? "Test completato" : "Test completato con errori";
+            _status.Text = report.Error == null ? "Test completed" : "Test completed with errors";
             _details.Text = BuildSummary(report);
             _progress.Visibility = ViewStates.Gone;
             _run.Enabled = true;
@@ -171,7 +171,7 @@ static class GpuLabDialog
         void Fail(Exception ex)
         {
             _running = false;
-            _status.Text = "Test non riuscito";
+            _status.Text = "Test failed";
             _details.Text = ex.GetBaseException().Message;
             _progress.Visibility = ViewStates.Gone;
             _run.Enabled = true;
@@ -188,19 +188,19 @@ static class GpuLabDialog
             text.AppendLine($"Driver: {report.Gpu.Version}");
             text.AppendLine($"Framebuffer fetch: {report.Gpu.FramebufferFetchPath}");
             text.AppendLine($"Texture barrier: {report.Gpu.TextureBarrierPath}");
-            text.AppendLine($"QCOM shading rate: {(report.Gpu.QcomShadingRateAvailable ? "disponibile" : "non disponibile")}");
-            text.AppendLine($"Termica: {report.Thermal.Status}" +
-                            (report.Thermal.BatteryTemperatureC is { } t ? $" • batteria {t:F1} °C" : ""));
+            text.AppendLine($"QCOM shading rate: {(report.Gpu.QcomShadingRateAvailable ? "available" : "unavailable")}");
+            text.AppendLine($"Thermal: {report.Thermal.Status}" +
+                            (report.Thermal.BatteryTemperatureC is { } t ? $" • battery {t:F1} °C" : ""));
 
             if (report.Benchmarks.Count > 0)
             {
                 text.AppendLine();
-                text.AppendLine("BENCHMARK ROM-FREE (throughput non limitato dal display)");
+                text.AppendLine("BENCHMARK ROM-FREE (throughput not display-limited)");
                 foreach (var item in report.Benchmarks)
                 {
                     if (item.Error != null)
                     {
-                        text.AppendLine($"{item.Scale}x • errore: {FirstLine(item.Error)}");
+                        text.AppendLine($"{item.Scale}x • error: {FirstLine(item.Error)}");
                         continue;
                     }
                     text.AppendLine($"{item.Scale}x {item.RenderWidth}×{item.RenderHeight} • " +
@@ -213,15 +213,15 @@ static class GpuLabDialog
             if (report.LastGameSession is { } game)
             {
                 text.AppendLine();
-                text.AppendLine("ULTIMA SESSIONE REALE");
-                text.AppendLine($"{game.InternalScale}x • {game.AverageFps:F1} FPS medi • " +
-                                $"p95 {game.FrameTime.P95Ms:F2} ms • termica max {game.ThermalPeak}");
+                text.AppendLine("LAST REAL SESSION");
+                text.AppendLine($"{game.InternalScale}x • {game.AverageFps:F1} avg FPS • " +
+                                $"p95 {game.FrameTime.P95Ms:F2} ms • thermal peak {game.ThermalPeak}");
             }
 
             if (report.Error != null)
             {
                 text.AppendLine();
-                text.AppendLine($"Errore: {FirstLine(report.Error)}");
+                text.AppendLine($"Error: {FirstLine(report.Error)}");
             }
             return text.ToString().TrimEnd();
         }

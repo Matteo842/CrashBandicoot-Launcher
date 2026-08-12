@@ -64,7 +64,7 @@ sealed class FirebaseGameLoopRunner(
                 using var nativeSurface = new Surface(texture);
                 using var egl = new AndroidEglContext(nativeSurface,
                     () => new Surface(_surface.SurfaceTexture
-                        ?? throw new InvalidOperationException("SurfaceTexture non disponibile.")));
+                        ?? throw new InvalidOperationException("SurfaceTexture is not available.")));
                 using var gl = Silk.NET.OpenGL.GL.GetApi(egl);
                 report = GpuSyntheticBenchmark.Run(
                     activity,

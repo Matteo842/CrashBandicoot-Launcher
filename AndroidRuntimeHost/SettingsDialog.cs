@@ -40,27 +40,27 @@ static class SettingsDialog
         var card = new LinearLayout(activity) { Orientation = Orientation.Vertical };
         card.AddView(Text(activity, "SETTINGS", 19, Wumpa, displayFont));
         card.AddView(Text(activity,
-            "Le stesse opzioni del launcher Windows, salvate nel profilo del runtime Android.",
+            "The same options as the Windows launcher, saved in the Android runtime profile.",
             10.5f, Muted, bodyFont), Margin(activity, top: 5, bottom: 8));
 
         var volume = AddSlider(activity, card, "Master volume", 0, 100,
             (int)MathF.Round(game.MasterVolume * 100f), bodyFont, bodyBold);
         card.AddView(Hint(activity,
-            "Si applica all'avvio della sessione di gioco e resta salvato nel profilo Android.", bodyFont));
+            "Applied when the game session starts and stays saved in the Android profile.", bodyFont));
 
         var muted = AddSwitch(activity, card, "Muted", game.Muted, bodyBold);
         var fullscreen = AddSwitch(activity, card, "Fullscreen", view.Fullscreen, bodyBold);
         card.AddView(Hint(activity,
-            "Nasconde completamente le barre di stato e navigazione durante il gioco.", bodyFont));
+            "Hides the status and navigation bars completely during gameplay.", bodyFont));
 
         var widescreen = AddSwitch(activity, card, "Widescreen 16:9", view.Widescreen, bodyBold);
         card.AddView(Hint(activity,
-            "Hack attivo solo nel gameplay; menu, mappa e filmati restano in 4:3.", bodyFont));
+            "Hack active during gameplay only; menus, map, and cutscenes stay 4:3.", bodyFont));
 
         var resolution = AddChoice(activity, card, "Internal resolution",
             ResolutionLabels, IndexOf(ResolutionValues, view.InternalResolution), bodyFont, bodyBold);
         card.AddView(Hint(activity,
-            "Viene conservata per il renderer GPU; il renderer software Android attuale resta nativo 1x.", bodyFont));
+            "Applies on the next game start. Use 8x on 4K displays.", bodyFont));
 
         var filter = AddChoice(activity, card, "Texture filter",
             FilterLabels, Math.Clamp(view.TextureFilter, 0, FilterLabels.Length - 1), bodyFont, bodyBold);
@@ -79,7 +79,7 @@ static class SettingsDialog
         var dedither = AddSwitch(activity, card, "Dedither", view.Dedither, bodyBold);
         var dejitter = AddSwitch(activity, card, "Dejitter", view.Dejitter, bodyBold);
         card.AddView(Hint(activity,
-            "I filtri texture si disattivano automaticamente nei menu e nei filmati. Dedither e dejitter restano globali.",
+            "Texture filters auto-off on menus and cutscenes. Dedither and dejitter apply everywhere.",
             bodyFont));
 
         var scroll = new ScrollView(activity)

@@ -33,7 +33,14 @@ sealed class LauncherScreen : View
     readonly RectF _crateBounds = new();
     readonly RectF _infoBounds = new();
     readonly RectF _chipBounds = new();
+    readonly RectF _mapBounds = new();
     Dialog? _aboutDialog;
+    bool _portrait;
+    float _brandX;
+    float _brandY;
+    float _brandSize;
+    float _recompSize;
+    float _menuTextSize;
 
     readonly Color _night = Color.Rgb(6, 16, 24);
     readonly Color _jungleTop = Color.Rgb(10, 40, 24);
@@ -121,26 +128,59 @@ sealed class LauncherScreen : View
 
         LayoutScene(Width, Height);
         DrawBackground(canvas, Width, Height);
-        DrawMap(canvas, Width, Height);
+        DrawMap(canvas);
         DrawBrand(canvas);
         DrawCrate(canvas);
         DrawMenu(canvas);
         DrawFooter(canvas, Width, Height);
     }
 
+    protected override void OnSizeChanged(int w, int h, int oldw, int oldh)
+    {
+        base.OnSizeChanged(w, h, oldw, oldh);
+        if (w > 0 && h > 0)
+        {
+            LayoutScene(w, h);
+            Invalidate();
+        }
+    }
+
     void LayoutScene(float width, float height)
+    {
+        _portrait = height > width * 1.05f;
+        if (_portrait)
+            LayoutPortrait(width, height);
+        else
+            LayoutLandscape(width, height);
+
+        var footerY = _footerTop + 16f * FooterUiScale * _unit;
+        _infoBounds.Set(28f * FooterUiScale * _unit, footerY,
+            64f * FooterUiScale * _unit, footerY + 36f * FooterUiScale * _unit);
+        var chipRight = (_portrait ? 292f : 244f) * FooterUiScale * _unit;
+        _chipBounds.Set(76f * FooterUiScale * _unit, footerY + FooterUiScale * _unit,
+            chipRight, footerY + 35f * FooterUiScale * _unit);
+    }
+
+    void LayoutLandscape(float width, float height)
     {
         _unit = Math.Clamp(height / 760f, 0.75f, 1.65f);
         var footerHeight = 78f * FooterUiScale * _unit;
         _footerTop = height - footerHeight;
         var contentHeight = _footerTop;
 
-        var brandX = 40f * _unit;
-        var brandY = Math.Max(56f * _unit, contentHeight * 0.18f);
-        var crateSize = Math.Min(width * 0.17f, contentHeight * 0.40f);
-        _crateBounds.Set(brandX, brandY + 165f * _unit,
-            brandX + crateSize, brandY + 165f * _unit + crateSize);
+        _brandX = 40f * _unit;
+        _brandY = Math.Max(56f * _unit, contentHeight * 0.18f);
+        _brandSize = 64f * _unit;
+        _recompSize = 28f * _unit;
 
+        var crateSize = Math.Min(width * 0.17f, contentHeight * 0.40f);
+        _crateBounds.Set(_brandX, _brandY + 165f * _unit,
+            _brandX + crateSize, _brandY + 165f * _unit + crateSize);
+
+        LayoutMap(width * 0.505f, contentHeight * 0.49f,
+            Math.Min(width * 0.43f, contentHeight * 1.02f), contentHeight * 0.72f);
+
+        _menuTextSize = 45.6f * _unit;
         var menuX = width * 0.72f;
         var menuY = Math.Max(54f * _unit, contentHeight * 0.15f);
         var menuRow = 69f * _unit;
@@ -150,12 +190,57 @@ sealed class LauncherScreen : View
             _menuBounds[i].Set(menuX - 12f * _unit, top,
                 width - 24f * _unit, top + 62f * _unit);
         }
+    }
 
-        var footerY = _footerTop + 16f * FooterUiScale * _unit;
-        _infoBounds.Set(28f * FooterUiScale * _unit, footerY,
-            64f * FooterUiScale * _unit, footerY + 36f * FooterUiScale * _unit);
-        _chipBounds.Set(76f * FooterUiScale * _unit, footerY + FooterUiScale * _unit,
-            244f * FooterUiScale * _unit, footerY + 35f * FooterUiScale * _unit);
+    void LayoutPortrait(float width, float height)
+    {
+        _unit = Math.Clamp(Math.Min(width / 400f, height / 900f), 0.70f, 1.30f);
+        var footerHeight = 92f * FooterUiScale * _unit;
+        _footerTop = height - footerHeight;
+        var contentHeight = _footerTop;
+
+        _brandX = 22f * _unit;
+        _brandY = Math.Max(36f * _unit, contentHeight * 0.035f);
+        _brandSize = 48f * _unit;
+        _recompSize = 20f * _unit;
+
+        var crateSize = Math.Min(width * 0.20f, contentHeight * 0.16f);
+        _crateBounds.Set(width - 22f * _unit - crateSize, _brandY + 6f * _unit,
+            width - 22f * _unit, _brandY + 6f * _unit + crateSize);
+
+        var mapTop = _brandY + 112f * _unit;
+        var mapHeight = contentHeight * 0.30f;
+        LayoutMap(width * 0.5f, mapTop + mapHeight * 0.5f, width * 0.82f, mapHeight);
+
+        _menuTextSize = 34f * _unit;
+        var menuX = 22f * _unit;
+        var menuY = Math.Min(_mapBounds.Bottom + 16f * _unit, contentHeight * 0.48f);
+        var available = Math.Max(48f * _unit, contentHeight - menuY - 10f * _unit);
+        var menuRow = Math.Min(52f * _unit, available / MenuLabels.Length);
+        for (var i = 0; i < _menuBounds.Length; i++)
+        {
+            var top = menuY + i * menuRow;
+            _menuBounds[i].Set(menuX, top, width - 18f * _unit, top + menuRow - 4f * _unit);
+        }
+    }
+
+    void LayoutMap(float centerX, float centerY, float maxWidth, float maxHeight)
+    {
+        if (_map == null)
+        {
+            _mapBounds.Set(centerX - maxWidth / 2f, centerY - maxHeight / 2f,
+                centerX + maxWidth / 2f, centerY + maxHeight / 2f);
+            return;
+        }
+
+        var scale = Math.Min(maxWidth / _map.Width, maxHeight / _map.Height);
+        var drawWidth = _map.Width * scale;
+        var drawHeight = _map.Height * scale;
+        _mapBounds.Set(
+            centerX - drawWidth / 2f,
+            centerY - drawHeight / 2f,
+            centerX + drawWidth / 2f,
+            centerY + drawHeight / 2f);
     }
 
     void DrawBackground(Canvas canvas, float width, float height)
@@ -196,39 +281,24 @@ sealed class LauncherScreen : View
             canvas.DrawLine(x, 0, x + height, height, _paint);
     }
 
-    void DrawMap(Canvas canvas, float width, float height)
+    void DrawMap(Canvas canvas)
     {
-        if (_map == null) return;
-        var contentHeight = _footerTop;
-        var maxWidth = Math.Min(width * 0.43f, contentHeight * 1.02f);
-        var maxHeight = contentHeight * 0.72f;
-        var scale = Math.Min(maxWidth / _map.Width, maxHeight / _map.Height);
-        var drawWidth = _map.Width * scale;
-        var drawHeight = _map.Height * scale;
-        var centerX = width * 0.505f;
-        var centerY = contentHeight * 0.49f;
-        var destination = new RectF(
-            centerX - drawWidth / 2f,
-            centerY - drawHeight / 2f,
-            centerX + drawWidth / 2f,
-            centerY + drawHeight / 2f);
+        if (_map == null || _mapBounds.Width() <= 0) return;
 
         _paint.Alpha = 88;
-        var shadow = new RectF(destination);
+        var shadow = new RectF(_mapBounds);
         shadow.Offset(7f * _unit, 14f * _unit);
         canvas.DrawBitmap(_map, null, shadow, _paint);
         _paint.Alpha = 255;
-        canvas.DrawBitmap(_map, null, destination, _paint);
+        canvas.DrawBitmap(_map, null, _mapBounds, _paint);
     }
 
     void DrawBrand(Canvas canvas)
     {
-        var x = 40f * _unit;
-        var y = Math.Max(56f * _unit, _footerTop * 0.18f);
-        DrawOutlinedText(canvas, "CRASH", _displayFont, 64f * _unit,
-            _wumpa, Color.Rgb(58, 21, 0), x, y, 3f * _unit, true);
-        DrawOutlinedText(canvas, "RECOMPILED", _displayFont, 28f * _unit,
-            _danger, Color.Rgb(58, 0, 0), x, y + 90f * _unit, 2f * _unit, true);
+        DrawOutlinedText(canvas, "CRASH", _displayFont, _brandSize,
+            _wumpa, Color.Rgb(58, 21, 0), _brandX, _brandY, 3f * _unit, true);
+        DrawOutlinedText(canvas, "RECOMPILED", _displayFont, _recompSize,
+            _danger, Color.Rgb(58, 0, 0), _brandX, _brandY + _brandSize * 1.40f, 2f * _unit, true);
     }
 
     void DrawCrate(Canvas canvas)
@@ -338,7 +408,7 @@ sealed class LauncherScreen : View
                 : hot ? _wumpaHot : _sand;
             var bounds = _menuBounds[i];
             var x = bounds.Left + (hot ? 10f * _unit : 0);
-            DrawTextAtTop(canvas, MenuLabels[i], _displayFont, 45.6f * _unit,
+            DrawTextAtTop(canvas, MenuLabels[i], _displayFont, _menuTextSize,
                 color, x, bounds.Top + 2f * _unit, shadow: true);
         }
     }
@@ -628,7 +698,7 @@ sealed class LauncherScreen : View
         var body = new TextView(_activity)
         {
             Text = "Unofficial fan project — not affiliated with Sony, Activision, or Naughty Dog.\n\n" +
-                   "Unofficial tools for a disc you own. First prepare writes a game folder next to the exe — later Starts reuse that.\n\n" +
+                   "Unofficial tools for a disc you own. The first prepare writes game files into app storage; later Starts reuse them.\n\n" +
                    "Prepared files never replace your dump: you still need a valid NTSC-U .cue + .bin (SCUS-94900) every time you play.",
             TextSize = 12,
         };
@@ -676,8 +746,9 @@ sealed class LauncherScreen : View
             dialog.Window.AddFlags(WindowManagerFlags.DimBehind);
             dialog.Window.SetDimAmount(0.72f);
             var displayWidth = Resources?.DisplayMetrics?.WidthPixels ?? Width;
+            var fraction = Height > Width ? 0.90f : 0.62f;
             dialog.Window.SetLayout(
-                (int)(displayWidth * 0.62f),
+                (int)(displayWidth * fraction),
                 ViewGroup.LayoutParams.WrapContent);
             dialog.Window.SetGravity(GravityFlags.Center);
         }
@@ -697,7 +768,7 @@ sealed class LauncherScreen : View
         (int)(value * (Resources?.DisplayMetrics?.Density ?? 1f) + 0.5f);
 
     void ShowComingSoon(string feature) =>
-        Toast.MakeText(_activity, $"{feature}: prossimo passaggio del port Android.",
+        Toast.MakeText(_activity, $"{feature}: next step of the Android port.",
             ToastLength.Short)?.Show();
 
     Typeface LoadTypeface(string assetPath, Typeface fallback)
