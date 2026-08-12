@@ -90,6 +90,7 @@ public sealed class MainActivity : Activity
         _launcher.SettingsRequested += () => SettingsDialog.Show(
             this, ApplyGameDisplayMode, () => GpuLabDialog.Show(this));
         _launcher.ModsRequested += () => ModsDialog.Show(this, PickModZip);
+        _launcher.CheatsRequested += () => CheatDialog.Show(this);
         SetContentView(_launcher);
 
         if (_disc != null)
@@ -648,7 +649,7 @@ public sealed class MainActivity : Activity
         RecompOne.Runtime.Hle.GpuHle.Dejitter = view.Dejitter;
         RecompOne.Runtime.Hle.GpuHle.PresentNearest = view.PresentNearest;
         RecompOne.Runtime.Hle.GpuHle.IntegerScale = view.IntegerScale;
-        RecompOne.Runtime.Host.FrameClock.SkipThrottle = view.VSync;
+        RecompOne.Runtime.Host.FrameClock.SkipThrottle = false;
         RecompOne.Runtime.Hle.GpuHle.RefreshWideFov();
     }
 

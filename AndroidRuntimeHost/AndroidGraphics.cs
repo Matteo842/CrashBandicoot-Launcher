@@ -65,7 +65,10 @@ static class AndroidGraphics
         GpuHle.PresentNearest = view.PresentNearest;
         GpuHle.IntegerScale = view.IntegerScale;
         GpuHle.NativeResolution = view.InternalResolution <= 1;
-        FrameClock.SkipThrottle = view.VSync;
+        // EGL swap interval is 0 so SPU music stays in lockstep with the
+        // software VBlank. Never skip FrameClock on Android or the game
+        // runs uncapped (the VSync checkbox only applies on desktop).
+        FrameClock.SkipThrottle = false;
         ConfigManager.SaveView(Array.Empty<IPanel>());
     }
 }

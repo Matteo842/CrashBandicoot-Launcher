@@ -354,7 +354,7 @@ sealed partial class DevMenuOverlay : FrameLayout
         {
             view.VSync = value;
             AndroidGraphics.ApplyLive();
-        }, "Less tearing, slight lag.");
+        }, "Desktop swap-interval. Android always uses the software 60 Hz clock so audio stays in sync.");
         Divider();
         Choice("Internal resolution", ViewConfig.InternalResolutionOptions
                 .Select(scale => scale == 1 ? "Native (1x)" : scale == 8 ? "8x (4K)" : $"{scale}x")

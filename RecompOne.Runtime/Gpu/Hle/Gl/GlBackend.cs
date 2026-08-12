@@ -791,7 +791,6 @@ public sealed class GlBackend : IGpuBackend
             _gl.Uniform2(_uPresentTexSize, (float)VramShadow.Width, VramShadow.Height);
         }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
-        CheckError("present");
 
         LastFrameFlushes = _frameFlushes;
         LastFrameWritebacks = _frameWritebacks;
@@ -921,7 +920,6 @@ public sealed class GlBackend : IGpuBackend
         _gl.Uniform2(_uPresentSize, (float)_presentW, (float)-_presentH);
         _gl.Uniform2(_uPresentTexSize, (float)_presentW, (float)_presentH);
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
-        CheckError("surface present");
     }
 
     void CheckError(string stage)

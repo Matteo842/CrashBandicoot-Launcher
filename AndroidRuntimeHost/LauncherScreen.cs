@@ -41,6 +41,7 @@ sealed class LauncherScreen : View
     float _brandSize;
     float _recompSize;
     float _menuTextSize;
+    float _menuTextX;
 
     readonly Color _night = Color.Rgb(6, 16, 24);
     readonly Color _jungleTop = Color.Rgb(10, 40, 24);
@@ -64,6 +65,7 @@ sealed class LauncherScreen : View
     public event Action? StartGameRequested;
     public event Action? SettingsRequested;
     public event Action? ModsRequested;
+    public event Action? CheatsRequested;
 
     public LauncherScreen(Activity activity) : base(activity)
     {
@@ -181,14 +183,14 @@ sealed class LauncherScreen : View
             Math.Min(width * 0.43f, contentHeight * 1.02f), contentHeight * 0.72f);
 
         _menuTextSize = 45.6f * _unit;
-        var menuX = width * 0.72f;
+        _menuTextX = width * 0.72f;
         var menuY = Math.Max(54f * _unit, contentHeight * 0.15f);
-        var menuRow = 69f * _unit;
+        var menuRow = 74f * _unit;
         for (var i = 0; i < _menuBounds.Length; i++)
         {
             var top = menuY + i * menuRow;
-            _menuBounds[i].Set(menuX - 12f * _unit, top,
-                width - 24f * _unit, top + 62f * _unit);
+            _menuBounds[i].Set(_menuTextX - 22f * _unit, top,
+                width - 12f * _unit, top + menuRow);
         }
     }
 
@@ -213,14 +215,14 @@ sealed class LauncherScreen : View
         LayoutMap(width * 0.5f, mapTop + mapHeight * 0.5f, width * 0.82f, mapHeight);
 
         _menuTextSize = 34f * _unit;
-        var menuX = 22f * _unit;
+        _menuTextX = 22f * _unit;
         var menuY = Math.Min(_mapBounds.Bottom + 16f * _unit, contentHeight * 0.48f);
         var available = Math.Max(48f * _unit, contentHeight - menuY - 10f * _unit);
-        var menuRow = Math.Min(52f * _unit, available / MenuLabels.Length);
+        var menuRow = Math.Min(56f * _unit, available / MenuLabels.Length);
         for (var i = 0; i < _menuBounds.Length; i++)
         {
             var top = menuY + i * menuRow;
-            _menuBounds[i].Set(menuX, top, width - 18f * _unit, top + menuRow - 4f * _unit);
+            _menuBounds[i].Set(8f * _unit, top, width - 8f * _unit, top + menuRow);
         }
     }
 
@@ -402,12 +404,12 @@ sealed class LauncherScreen : View
         {
             var disabled = i == 0 && (!_ready || _busy);
             var hot = _pressed == i && !disabled;
+            var bounds = _menuBounds[i];
             var color = disabled
                 ? Color.Argb(150, 122, 117, 104)
-                : i is 0 or 5 ? (hot ? _wumpaHot : _wumpa)
+                : i == 0 ? (hot ? _wumpaHot : _wumpa)
                 : hot ? _wumpaHot : _sand;
-            var bounds = _menuBounds[i];
-            var x = bounds.Left + (hot ? 10f * _unit : 0);
+            var x = _menuTextX + (hot ? 10f * _unit : 0);
             DrawTextAtTop(canvas, MenuLabels[i], _displayFont, _menuTextSize,
                 color, x, bounds.Top + 2f * _unit, shadow: true);
         }
@@ -651,7 +653,7 @@ sealed class LauncherScreen : View
                 ModsRequested?.Invoke();
                 break;
             case 4:
-                ShowComingSoon("Cheats");
+                CheatsRequested?.Invoke();
                 break;
             case 5:
                 _activity.Finish();
@@ -766,10 +768,6 @@ sealed class LauncherScreen : View
 
     int Dp(float value) =>
         (int)(value * (Resources?.DisplayMetrics?.Density ?? 1f) + 0.5f);
-
-    void ShowComingSoon(string feature) =>
-        Toast.MakeText(_activity, $"{feature}: next step of the Android port.",
-            ToastLength.Short)?.Show();
 
     Typeface LoadTypeface(string assetPath, Typeface fallback)
     {

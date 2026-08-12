@@ -303,7 +303,6 @@ sealed class GameGpuDiagnosticsSession
     readonly GameSessionDiagnostics _session;
     readonly Queue<double> _frameTimes = new(MaxFrameSamples);
     readonly long _started = Stopwatch.GetTimestamp();
-    long _lastSave;
     long _lastThermalSample;
     double _prepareTotal;
     double _surfaceTotal;
@@ -334,7 +333,6 @@ sealed class GameGpuDiagnosticsSession
             ThermalPeak = GpuDiagnosticsStore.ThermalStatusName(thermal.StatusCode),
         };
         _report.LastGameSession = _session;
-        _lastSave = _started;
         _lastThermalSample = _started;
         GpuDiagnosticsStore.Save(activity, _report);
     }
@@ -358,7 +356,7 @@ sealed class GameGpuDiagnosticsSession
 
         var now = Stopwatch.GetTimestamp();
         var secondsSinceThermal = (now - _lastThermalSample) / (double)Stopwatch.Frequency;
-        if (secondsSinceThermal >= 10)
+        if (secondsSinceThermal >= 30)
         {
             _session.ThermalLatest = GpuDiagnosticsStore.ReadThermal(_activity);
             _thermalPeak = Math.Max(_thermalPeak, _session.ThermalLatest.StatusCode ?? -1);
@@ -367,12 +365,8 @@ sealed class GameGpuDiagnosticsSession
             _lastThermalSample = now;
         }
 
-        if ((now - _lastSave) / (double)Stopwatch.Frequency >= 5)
-        {
-            Snapshot(now);
-            GpuDiagnosticsStore.Save(_activity, _report);
-            _lastSave = now;
-        }
+        // Persist only on Complete(). A JSON rewrite every few seconds on the
+        // GL thread was hitching the 60 Hz pacer.
     }
 
     public void Complete()

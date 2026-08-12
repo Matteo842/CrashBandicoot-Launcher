@@ -8,8 +8,9 @@ namespace RecompOne.Runtime.Diagnostics;
 /// </summary>
 public static class SessionLog
 {
-    // TEMP playtest: leave true while hunting Generator Room / audio bugs.
-    public static bool Enabled = true;
+    // Playtest file log. Leave false in shipping builds — AutoFlush on every
+    // BIOS/card line hits storage and hitch the game thread.
+    public static bool Enabled = false;
 
     static readonly object Gate = new();
     static StreamWriter? _writer;
