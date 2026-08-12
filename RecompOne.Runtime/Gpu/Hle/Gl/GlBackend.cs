@@ -880,15 +880,35 @@ public sealed class GlBackend : IGpuBackend
         _gl.ClearColor(0f, 0f, 0f, 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit);
 
-        int targetWidth = surfaceWidth;
-        int targetHeight = Math.Max(1, (int)MathF.Round(targetWidth / aspect));
+        int targetWidth;
+        int targetHeight;
+        int targetX;
+        int targetY;
+        if (GpuHle.IntegerScale && _presentW > 0 && _presentH > 0)
+        {
+            int scale = (int)MathF.Floor(MathF.Min(
+                surfaceWidth / (float)_presentW, surfaceHeight / (float)_presentH));
+            if (scale >= 1)
+            {
+                targetWidth = _presentW * scale;
+                targetHeight = _presentH * scale;
+                targetX = (surfaceWidth - targetWidth) / 2;
+                targetY = (surfaceHeight - targetHeight) / 2;
+                goto blit;
+            }
+        }
+
+        targetWidth = surfaceWidth;
+        targetHeight = Math.Max(1, (int)MathF.Round(targetWidth / aspect));
         if (targetHeight > surfaceHeight)
         {
             targetHeight = surfaceHeight;
             targetWidth = Math.Max(1, (int)MathF.Round(targetHeight * aspect));
         }
-        int targetX = (surfaceWidth - targetWidth) / 2;
-        int targetY = (surfaceHeight - targetHeight) / 2;
+        targetX = (surfaceWidth - targetWidth) / 2;
+        targetY = (surfaceHeight - targetHeight) / 2;
+
+        blit:
         _gl.Viewport(targetX, targetY, (uint)targetWidth, (uint)targetHeight);
 
         _gl.UseProgram(_progPresent);

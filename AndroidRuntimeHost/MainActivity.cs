@@ -242,7 +242,7 @@ public sealed class MainActivity : Activity
         }
     }
 
-    void ApplyGameDisplayMode()
+    internal void ApplyGameDisplayMode()
     {
         if (!_gameUiVisible) return;
         if (ConfigManager.View.Fullscreen) EnterImmersiveGameMode();
@@ -628,6 +628,7 @@ public sealed class MainActivity : Activity
         RecompOne.Runtime.Hle.GpuHle.Dedither = view.Dedither;
         RecompOne.Runtime.Hle.GpuHle.Dejitter = view.Dejitter;
         RecompOne.Runtime.Hle.GpuHle.PresentNearest = view.PresentNearest;
+        RecompOne.Runtime.Hle.GpuHle.IntegerScale = view.IntegerScale;
         RecompOne.Runtime.Host.FrameClock.SkipThrottle = view.VSync;
         RecompOne.Runtime.Hle.GpuHle.RefreshWideFov();
     }

@@ -25,6 +25,9 @@ public static class GpuHle
     /// <summary>Force nearest filtering on the present texture (crisp pixels when upscaled).</summary>
     public static bool PresentNearest { get; set; }
 
+    /// <summary>Largest whole-pixel scale that still fits the window (black bars).</summary>
+    public static bool IntegerScale { get; set; }
+
     /// <summary>
     /// When widescreen is on, expand GTE FOV into side margins during gameplay only.
     /// Off on title/menu/map/cinema — those expose unfinished sides / stale RT junk.

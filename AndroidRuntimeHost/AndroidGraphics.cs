@@ -63,6 +63,7 @@ static class AndroidGraphics
         GpuHle.Dedither = view.Dedither;
         GpuHle.Dejitter = view.Dejitter;
         GpuHle.PresentNearest = view.PresentNearest;
+        GpuHle.IntegerScale = view.IntegerScale;
         GpuHle.NativeResolution = view.InternalResolution <= 1;
         FrameClock.SkipThrottle = view.VSync;
         ConfigManager.SaveView(Array.Empty<IPanel>());

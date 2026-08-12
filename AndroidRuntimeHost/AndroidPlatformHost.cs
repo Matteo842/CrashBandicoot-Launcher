@@ -31,6 +31,8 @@ sealed class AndroidPlatformHost(
     int _hudFrames;
     double _hudFps;
 
+    public static double LastFps { get; private set; }
+
     public void Initialize(string title) => SetStatus($"{title}: first frame incoming…");
     public void WaitForValidDisc() { }
     public void AttachAudio(Spu? spu) => _audio.Attach(spu);
@@ -52,6 +54,7 @@ sealed class AndroidPlatformHost(
     public void Present(Gpu? gpu)
     {
         CheatManager.Apply();
+        Runtime.RamLog.Tick();
         TickHud();
 
         if (gpu == null || !gpu.DisplayEnabled || !backend.Ready)
@@ -74,6 +77,7 @@ sealed class AndroidPlatformHost(
         var presented = backend.PresentDisplay(
             gpu.DisplayX, gpu.DisplayY, nativeWidth, nativeHeight, gpu.Display24Bit,
             surfaceWidth, surfaceHeight);
+        AndroidVramCapture.CaptureFromGlThread(backend);
         var prepared = System.Diagnostics.Stopwatch.GetTimestamp();
         backend.PresentToDefaultFramebuffer(surfaceWidth, surfaceHeight, presented.aspect);
         var composited = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -152,6 +156,7 @@ sealed class AndroidPlatformHost(
             return;
 
         _hudFps = _hudFrames / Math.Max(elapsed, 0.001);
+        LastFps = _hudFps;
         _hudFrames = 0;
         _hudWindow = now;
         var fps = _hudFps;

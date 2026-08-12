@@ -18,7 +18,7 @@ namespace CrashBandicoot.AndroidRuntime;
 /// Touch-first Developer Menu. Same sections as the desktop F3 book, with
 /// finger-sized rows and no ImGui debug panels.
 /// </summary>
-sealed class DevMenuOverlay : FrameLayout
+sealed partial class DevMenuOverlay : FrameLayout
 {
     static readonly Color Panel = Color.Argb(179, 28, 28, 28);
     static readonly Color Sand = Color.Rgb(244, 228, 188);
@@ -75,7 +75,13 @@ sealed class DevMenuOverlay : FrameLayout
 
         _back = ActionButton("<  BACK", compact: false);
         _back.Visibility = ViewStates.Gone;
-        _back.Click += (_, _) => ShowRoot();
+        _back.Click += (_, _) =>
+        {
+            if (_section.StartsWith("debug-", StringComparison.Ordinal))
+                ShowSection("debug");
+            else
+                ShowRoot();
+        };
         _card.AddView(_back, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, Dp(48))
         {
@@ -112,17 +118,29 @@ sealed class DevMenuOverlay : FrameLayout
 
     public void Close()
     {
+        StopLiveRefresh();
         Visibility = ViewStates.Gone;
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
+        RecompOne.Runtime.Memory.RamLogger.TrackReads = false;
     }
 
     void ShowRoot()
     {
+        StopLiveRefresh();
         _section = "";
         _title.Text = "DEVELOPER MENU";
         _back.Visibility = ViewStates.Gone;
         _body.RemoveAllViews();
         Hint("DEVELOPER");
+        Divider();
+        Toggle("Show FPS / Mem HUD", ConfigManager.View.ShowDevHud, value =>
+        {
+            ConfigManager.View.ShowDevHud = value;
+            ConfigManager.SaveView(Array.Empty<IPanel>());
+            _hudChanged(value);
+        }, "Top-right overlay. Independent of this menu.");
+        LiveMono();
+        UpdateRootFps();
         Divider();
         Category("Cheats", "cheats");
         Category("Levels", "levels");
@@ -133,10 +151,12 @@ sealed class DevMenuOverlay : FrameLayout
         Category("Engine", "engine");
         Divider();
         Hint("Hold 3 fingers for ½ second, or tap DEV.");
+        StartLiveRefresh(UpdateRootFps);
     }
 
     void ShowSection(string id)
     {
+        StopLiveRefresh();
         _section = id;
         _back.Visibility = ViewStates.Visible;
         _body.RemoveAllViews();
@@ -165,6 +185,38 @@ sealed class DevMenuOverlay : FrameLayout
             case "debug":
                 _title.Text = "DEBUG";
                 BuildDebug();
+                break;
+            case "debug-cpu":
+                _title.Text = "CPU STATE";
+                BuildCpu();
+                break;
+            case "debug-mem":
+                _title.Text = "MEMORY EDITOR";
+                BuildMemory();
+                break;
+            case "debug-ram":
+                _title.Text = "RAM MAP";
+                BuildRamMap();
+                break;
+            case "debug-vram":
+                _title.Text = "VRAM VIEWER";
+                BuildVram();
+                break;
+            case "debug-spu":
+                _title.Text = "SPU VIEWER";
+                BuildSpu();
+                break;
+            case "debug-cd":
+                _title.Text = "CD DEBUG";
+                BuildCd();
+                break;
+            case "debug-overlay":
+                _title.Text = "OVERLAY EVENTS";
+                BuildOverlays();
+                break;
+            case "debug-console":
+                _title.Text = "CONSOLE";
+                BuildConsole();
                 break;
             default:
                 _title.Text = "ENGINE";
@@ -243,6 +295,14 @@ sealed class DevMenuOverlay : FrameLayout
             view.Dejitter = value;
             AndroidGraphics.ApplyLive();
         }, "Less polygon wobble.");
+        Toggle("Fullscreen", view.Fullscreen, value =>
+        {
+            view.Fullscreen = value;
+            ConfigManager.SaveView(Array.Empty<IPanel>());
+            if (_activity is MainActivity main)
+                main.ApplyGameDisplayMode();
+        }, "Hides the status and navigation bars.");
+        Hint("Menu bar (F1) is desktop-only.");
         Hint("More options: Rendering.");
     }
 
@@ -279,7 +339,7 @@ sealed class DevMenuOverlay : FrameLayout
         {
             view.IntegerScale = value;
             AndroidGraphics.ApplyLive();
-        }, "Saved for the desktop host. Android already letterboxes.");
+        }, "Sharp upscale, black bars.");
         Toggle("Crisp pixels (nearest)", view.PresentNearest, value =>
         {
             view.PresentNearest = value;
@@ -341,7 +401,23 @@ sealed class DevMenuOverlay : FrameLayout
 
     void BuildDebug()
     {
-        Hint("VRAM viewer, CPU state, memory editor, and CD debug stay on the desktop host.");
+        Hint("Same tools as the desktop Debug menu.");
+        Divider();
+        Hint("GPU");
+        Category("VRAM Viewer", "debug-vram");
+        Divider();
+        Hint("CPU / Memory");
+        Category("CPU State", "debug-cpu");
+        Category("RAM Map", "debug-ram");
+        Category("Memory Editor", "debug-mem");
+        Divider();
+        Hint("Hardware");
+        Category("SPU Viewer", "debug-spu");
+        Category("CD Debug", "debug-cd");
+        Divider();
+        Hint("System");
+        Category("Overlay Events", "debug-overlay");
+        Category("Console", "debug-console");
         Divider();
         FullButton("Reset view settings", () =>
         {
@@ -354,20 +430,21 @@ sealed class DevMenuOverlay : FrameLayout
 
     void BuildEngine()
     {
-        var view = ConfigManager.View;
-        Toggle("Show FPS / Mem HUD", view.ShowDevHud, value =>
-        {
-            view.ShowDevHud = value;
-            ConfigManager.SaveView(Array.Empty<IPanel>());
-            _hudChanged(value);
-        }, "Top-right overlay, independent of this menu.");
-        Divider();
         Hint("Host process");
+        Body($"FPS: {AndroidPlatformHost.LastFps:0.00}");
         _process.Refresh();
         Body($"Working set: {FormatBytes(_process.WorkingSet64)}");
         Body($"Private bytes: {FormatBytes(_process.PrivateMemorySize64)}");
         Body($"GC heap: {FormatBytes(GC.GetTotalMemory(false))}");
         Body($"GC collections: gen0={GC.CollectionCount(0)}  gen1={GC.CollectionCount(1)}  gen2={GC.CollectionCount(2)}");
+        Divider();
+        Hint("Known pools (explains ~100–300 MB)");
+        Hint("Managed / estimated GPU — not a full process accounting.");
+        var pools = KnownPools(out var accounted);
+        foreach (var (name, bytes, note) in pools)
+            Body($"{name}: {(bytes > 0 ? FormatBytes(bytes) : "—")}  ·  {note}");
+        Body($"Accounted (non-zero rows): {FormatBytes(accounted)}");
+        Hint("+ JIT of game.recomp.dll, .NET, display RTs, driver overhead");
         Divider();
         Hint("Guest watches (SCUS-94900)");
         Body(GuestLine("ticks_elapsed", 0x80034520));
