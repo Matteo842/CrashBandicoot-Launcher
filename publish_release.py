@@ -459,6 +459,16 @@ def verify_release_apk_native_symbols(apk: Path) -> None:
             + ", ".join(missing)
             + ". Enable AndroidEnableAssemblyCompression and rebuild."
         )
+    # LLVM marshal methods export TypeManager.activate and skip RegisterNatives.
+    # If MainActivity's JNI stub is missing too, open crashes with n_onCreate.
+    has_llvm_typemanager = b"Java_mono_android_TypeManager_n_1activate" in data
+    has_oncreate_stub = b"MainActivity_n_1onCreate" in data
+    if has_llvm_typemanager and not has_oncreate_stub:
+        die(
+            f"{apk.name} would crash on start: LLVM marshal methods are on but "
+            "MainActivity JNI stubs are missing. Set AndroidEnableMarshalMethods=false "
+            "and rebuild."
+        )
     print("[publish] native symbol check OK (libxamarin-app.so)")
 
 
@@ -488,6 +498,7 @@ def publish_android(out_dir: Path) -> Path:
         f"-p:JavaSdkDirectory={java_home}",
         "-p:AndroidPackageFormat=apk",
         "-p:AndroidEnableAssemblyCompression=true",
+        "-p:AndroidEnableMarshalMethods=false",
         "-p:RunAOTCompilation=false",
         "-p:AndroidEnableProfiledAot=false",
         "-p:AndroidKeyStore=true",

@@ -58,11 +58,25 @@ public static class GameCompiler
             var errors = result.Diagnostics
                 .Where(d => d.Severity == DiagnosticSeverity.Error)
                 .Take(20)
-                .Select(d => d.ToString());
+                .Select(FormatDiagnostic);
             throw new InvalidOperationException("Game compile failed:\n" + string.Join("\n", errors));
         }
 
         progress?.Report("Compile OK.");
+    }
+
+    static string FormatDiagnostic(Diagnostic d)
+    {
+        var loc = d.Location.GetLineSpan();
+        var path = loc.Path;
+        if (d.Location.SourceTree != null && File.Exists(path))
+        {
+            var lines = File.ReadAllLines(path);
+            var lineNo = loc.StartLinePosition.Line;
+            if (lineNo >= 0 && lineNo < lines.Length)
+                return $"{d}\n  {lines[lineNo].Trim()}";
+        }
+        return d.ToString();
     }
 
     static ImmutableArray<MetadataReference> BuildReferences(string? metadataReferencesDir)

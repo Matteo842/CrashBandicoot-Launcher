@@ -25,6 +25,12 @@
          Debug libmonodroid does not, so a Debug APK can look fine while the
          signed Release APK dies in MonoRuntimeProvider before MainActivity. -->
     <AndroidEnableAssemblyCompression>true</AndroidEnableAssemblyCompression>
+    <!-- .NET 10 / Android SDK 36 defaults this to true for MonoVM Release.
+         That skips JNI RegisterNatives and expects Java_* stubs in
+         libxamarin-app.so; if those stubs are missing, open crashes with
+         UnsatisfiedLinkError n_onCreate. Debug forces this off (and works).
+         The shipping 1.7.0 APK was built with SDK 35 where it defaulted off. -->
+    <AndroidEnableMarshalMethods>false</AndroidEnableMarshalMethods>
   </PropertyGroup>
 
   <ItemGroup>

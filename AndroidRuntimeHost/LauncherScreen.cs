@@ -58,7 +58,7 @@ sealed class LauncherScreen : View
     int _focusIndex;
     float _unit = 1f;
     float _footerTop;
-    string _status = "Select a legal Crash Bandicoot CUE/BIN dump";
+    string _status = "Grant file access, then pick the .cue next to its .bin";
     string _statusKind = "";
     string _discLine = "(none)";
 

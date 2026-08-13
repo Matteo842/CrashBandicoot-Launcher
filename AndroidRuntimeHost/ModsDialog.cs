@@ -153,7 +153,7 @@ static class ModsDialog
             {
                 seen.Add(mod.Id);
                 if (_enabled.ContainsKey(mod.Id)) continue;
-                _enabled[mod.Id] = _imported.Contains(mod.Id) || !configured || active.Contains(mod.Id);
+                _enabled[mod.Id] = _imported.Contains(mod.Id) || (configured && active.Contains(mod.Id));
             }
 
             foreach (var stale in _enabled.Keys.Where(id => !seen.Contains(id)).ToList())

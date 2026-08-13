@@ -43,14 +43,32 @@ static class AndroidMods
         input.CopyTo(output);
     }
 
+    public static ModInfo ImportFromPath(Activity activity, string path)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("The selected zip is not readable.", path);
+        var temp = Path.Combine(activity.CacheDir!.AbsolutePath, "import-mod.zip");
+        File.Copy(path, temp, overwrite: true);
+        return ImportTempZip(temp);
+    }
+
     public static ModInfo ImportZip(Activity activity, Android.Net.Uri uri)
     {
+        var path = AndroidStorageAccess.TryFilesystemPath(activity, uri);
+        if (path != null)
+            return ImportFromPath(activity, path);
+
         var temp = Path.Combine(activity.CacheDir!.AbsolutePath, "import-mod.zip");
         using (var input = activity.ContentResolver?.OpenInputStream(uri)
                            ?? throw new IOException("Unable to open the selected file."))
         using (var output = File.Create(temp))
             input.CopyTo(output);
 
+        return ImportTempZip(temp);
+    }
+
+    static ModInfo ImportTempZip(string temp)
+    {
         ModInfo info;
         string prefix;
         bool copyAsZip;

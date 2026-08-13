@@ -1,12 +1,8 @@
-using System.Text.RegularExpressions;
 using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.Content.Res;
-using Android.Database;
-using Android.Net;
 using Android.OS;
-using Android.Provider;
 using Android.Views;
 using Android.Widget;
 using CrashBandicoot.Launcher.Recomp;
@@ -31,9 +27,8 @@ namespace CrashBandicoot.AndroidRuntime;
     DataMimeType = "application/javascript")]
 public sealed class MainActivity : Activity
 {
-    const int PickDiscFolderRequest = 949;
-    const int PickModZipRequest = 950;
-    const string DiscTreePreference = "disc_tree";
+    const string DiscCuePathPreference = "disc_cue_path";
+    const string DiscBinPathPreference = "disc_bin_path";
 
     LauncherScreen? _launcher;
     TextView _status = null!;
@@ -42,11 +37,12 @@ public sealed class MainActivity : Activity
     FrameLayout.LayoutParams? _statusLayout;
     DevMenuOverlay? _devMenu;
     TextView? _devHud;
-    Android.Net.Uri? _treeUri;
     DiscDocuments? _disc;
     TouchControllerView? _touchOverlay;
     bool _usingLocalDiscCopy;
     bool _gameUiVisible;
+    bool _openBrowserWhenResumed;
+    bool _openZipBrowserWhenResumed;
     FirebaseGameLoopRunner? _firebaseGameLoop;
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -83,12 +79,10 @@ public sealed class MainActivity : Activity
 
         ShowLauncherUi();
 
-        var saved = GetPreferences(FileCreationMode.Private).GetString(DiscTreePreference, null);
-        if (!string.IsNullOrWhiteSpace(saved))
-        {
-            _treeUri = Android.Net.Uri.Parse(saved);
-            ScanSelectedFolder();
-        }
+        if (TryUseLocalDiscCopy())
+            return;
+
+        TryRestoreSavedDisc();
     }
 
     void ShowLauncherUi()
@@ -222,6 +216,8 @@ public sealed class MainActivity : Activity
     {
         if (_touchOverlay == null) return;
         var hide = AndroidGamepad.IsConnected;
+        Android.Util.Log.Info("CrashPad",
+            hide ? "hiding touch overlay (physical pad reported)" : "showing touch overlay");
         _touchOverlay.Visibility = hide ? ViewStates.Gone : ViewStates.Visible;
         if (hide) _touchOverlay.DismissInput();
     }
@@ -350,6 +346,29 @@ public sealed class MainActivity : Activity
     {
         base.OnResume();
         _activeHost?.ResumeAudio();
+        if (_openBrowserWhenResumed)
+        {
+            _openBrowserWhenResumed = false;
+            OpenDiscBrowserOrExplain();
+        }
+        else if (_openZipBrowserWhenResumed)
+        {
+            _openZipBrowserWhenResumed = false;
+            OpenZipBrowserOrExplain();
+        }
+    }
+
+    public override void OnRequestPermissionsResult(
+        int requestCode, string[] permissions, Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != AndroidStorageAccess.RequestLegacyRead)
+            return;
+        if (grantResults.Length > 0 && grantResults[0] == Permission.Granted)
+            OpenDiscBrowserOrExplain();
+        else
+            _launcher?.ShowDisc(false, "File access required",
+                "Storage permission is needed to read the .cue/.bin dump.");
     }
 
     protected override void OnDestroy()
@@ -358,81 +377,80 @@ public sealed class MainActivity : Activity
         base.OnDestroy();
     }
 
-    void PickDiscFolder()
-    {
-        var intent = new Intent(Intent.ActionOpenDocumentTree);
-        intent.AddFlags(ActivityFlags.GrantReadUriPermission |
-                        ActivityFlags.GrantPersistableUriPermission |
-                        ActivityFlags.GrantPrefixUriPermission);
-        StartActivityForResult(intent, PickDiscFolderRequest);
-    }
+    void PickDiscFolder() => OpenDiscBrowserOrExplain();
 
-    void PickModZip()
-    {
-        var intent = new Intent(Intent.ActionOpenDocument);
-        intent.AddCategory(Intent.CategoryOpenable);
-        intent.SetType("*/*");
-        intent.AddFlags(ActivityFlags.GrantReadUriPermission);
-        StartActivityForResult(intent, PickModZipRequest);
-    }
+    void PickModZip() => OpenZipBrowserOrExplain();
 
-    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    void OpenDiscBrowserOrExplain()
     {
-        base.OnActivityResult(requestCode, resultCode, data);
-        if (requestCode == PickModZipRequest)
+        if (!AndroidStorageAccess.HasFullAccess(this))
         {
-            if (resultCode == Result.Ok && data?.Data != null)
-                ImportPickedMod(data.Data);
+            AndroidStorageAccess.ExplainAndRequest(this, () => _openBrowserWhenResumed = true);
             return;
         }
 
-        if (requestCode != PickDiscFolderRequest || resultCode != Result.Ok || data?.Data == null)
-            return;
-
-        _treeUri = data.Data;
-        try
-        {
-            ContentResolver.TakePersistableUriPermission(
-                _treeUri,
-                data.Flags & (ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantWriteUriPermission));
-        }
-        catch
-        {
-            // Some document providers grant access only for this app session.
-        }
-
-        GetPreferences(FileCreationMode.Private).Edit()!
-            .PutString(DiscTreePreference, _treeUri.ToString())!
-            .Apply();
-        ScanSelectedFolder();
+        StorageFileBrowser.ShowDisc(this, ApplyDiscFiles);
     }
 
-    void ScanSelectedFolder()
+    void OpenZipBrowserOrExplain()
+    {
+        if (!AndroidStorageAccess.HasFullAccess(this))
+        {
+            AndroidStorageAccess.ExplainAndRequest(this, () => _openZipBrowserWhenResumed = true);
+            return;
+        }
+
+        StorageFileBrowser.ShowZip(this, path => ImportPickedModPath(path));
+    }
+
+    void TryRestoreSavedDisc()
+    {
+        if (!AndroidStorageAccess.HasFullAccess(this))
+            return;
+
+        var prefs = GetPreferences(FileCreationMode.Private);
+        var cue = prefs.GetString(DiscCuePathPreference, null);
+        var bin = prefs.GetString(DiscBinPathPreference, null);
+        if (!string.IsNullOrWhiteSpace(cue) && !string.IsNullOrWhiteSpace(bin) &&
+            File.Exists(cue) && File.Exists(bin))
+            ApplyDiscFiles(cue, bin);
+    }
+
+    void ApplyDiscFiles(string cuePath, string binPath)
     {
         try
         {
-            _disc = _treeUri == null ? null : FindDiscDocuments(_treeUri);
-            if (_disc == null)
+            if (!File.Exists(cuePath) || !File.Exists(binPath))
             {
-                if (TryUseLocalDiscCopy()) return;
-                _launcher?.ShowDisc(
-                    ready: false,
-                    "Invalid disc",
-                    "The folder needs a .cue file and its matching .bin.");
+                _launcher?.ShowDisc(false, "Disc files not readable",
+                    "Enable All files access, then pick the .cue next to its .bin.");
                 return;
             }
 
+            var size = new FileInfo(binPath).Length;
+            if (size < 80L * 1024 * 1024)
+            {
+                _launcher?.ShowDisc(false, "Cannot read the .bin",
+                    $"The file is {size / (1024 * 1024)} MB. If this is 0, the app still cannot access the dump.");
+                return;
+            }
+
+            var cueText = File.ReadAllText(cuePath);
+            _disc = new DiscDocuments(
+                Path.GetFileName(cuePath), cuePath, cueText,
+                Path.GetFileName(binPath), binPath, size);
+            _usingLocalDiscCopy = false;
+            GetPreferences(FileCreationMode.Private).Edit()!
+                .PutString(DiscCuePathPreference, cuePath)!
+                .PutString(DiscBinPathPreference, binPath)!
+                .Apply();
+            Android.Util.Log.Info("CrashDisc", $"cue={cuePath} bin={binPath} size={size}");
             ShowDiscReady();
         }
         catch (Exception ex)
         {
-            // Document providers may grant session-only access: after a process
-            // restart the tree URI is dead, but the imported copy still works.
             if (TryUseLocalDiscCopy()) return;
-            _launcher?.ShowDisc(
-                ready: false,
-                "Folder is not readable",
-                ex.Message);
+            _launcher?.ShowDisc(false, "Cannot open disc", ex.Message);
         }
     }
 
@@ -465,48 +483,6 @@ public sealed class MainActivity : Activity
             $"{_disc.CueName}  •  {_disc.BinName} ({sizeMb:0} MB)\nFull SCUS-94900 validation runs at launch.");
     }
 
-    DiscDocuments? FindDiscDocuments(Android.Net.Uri treeUri)
-    {
-        var treeId = DocumentsContract.GetTreeDocumentId(treeUri);
-        var children = DocumentsContract.BuildChildDocumentsUriUsingTree(treeUri, treeId);
-        var projection = new[]
-        {
-            DocumentsContract.Document.ColumnDocumentId,
-            DocumentsContract.Document.ColumnDisplayName,
-            DocumentsContract.Document.ColumnSize,
-        };
-
-        var docs = new List<DocumentInfo>();
-        using ICursor? cursor = ContentResolver.Query(children, projection, null, null, null);
-        if (cursor == null) return null;
-        var idColumn = cursor.GetColumnIndex(DocumentsContract.Document.ColumnDocumentId);
-        var nameColumn = cursor.GetColumnIndex(DocumentsContract.Document.ColumnDisplayName);
-        var sizeColumn = cursor.GetColumnIndex(DocumentsContract.Document.ColumnSize);
-        while (cursor.MoveToNext())
-        {
-            var id = cursor.GetString(idColumn);
-            var name = cursor.GetString(nameColumn);
-            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name)) continue;
-            var size = !cursor.IsNull(sizeColumn) ? cursor.GetLong(sizeColumn) : 0L;
-            docs.Add(new DocumentInfo(name, DocumentsContract.BuildDocumentUriUsingTree(treeUri, id), size));
-        }
-
-        var cue = docs.FirstOrDefault(d => d.Name.EndsWith(".cue", StringComparison.OrdinalIgnoreCase));
-        if (cue == null) return null;
-        string cueText;
-        using (var input = ContentResolver.OpenInputStream(cue.Uri)
-                           ?? throw new IOException("Unable to open the CUE."))
-        using (var reader = new StreamReader(input))
-            cueText = reader.ReadToEnd();
-
-        var match = Regex.Match(cueText, "(?im)^\\s*FILE\\s+\"([^\"]+)\"\\s+(?:BINARY|MOTOROLA)\\s*$");
-        if (!match.Success) return null;
-        var binName = Path.GetFileName(match.Groups[1].Value.Replace('\\', '/'));
-        var bin = docs.FirstOrDefault(d => d.Name.Equals(binName, StringComparison.OrdinalIgnoreCase));
-        if (bin == null) return null;
-        return new DiscDocuments(cue.Name, cue.Uri, cueText, bin.Name, bin.Uri, bin.Size);
-    }
-
     async Task StartGameAsync()
     {
         if (_disc == null && !_usingLocalDiscCopy) return;
@@ -516,7 +492,7 @@ public sealed class MainActivity : Activity
 
         try
         {
-            await Task.Run(async () =>
+            await Task.Run(() =>
             {
                 var dataRoot = Path.Combine(FilesDir!.AbsolutePath, "runtime");
                 AppPaths.SetRoot(dataRoot);
@@ -530,8 +506,8 @@ public sealed class MainActivity : Activity
                 }
                 else
                 {
-                    SetStatus("Copying the disc into the app's private storage (first time only)…");
-                    cuePath = await EnsureLocalDiscAsync(_disc!);
+                    SetStatus("Using the selected disc files…");
+                    cuePath = _disc!.CuePath;
                 }
 
                 var bootstrap = Path.Combine(dataRoot, "bootstrap");
@@ -735,40 +711,11 @@ public sealed class MainActivity : Activity
         failure?.Throw();
     }
 
-    async Task<string> EnsureLocalDiscAsync(DiscDocuments disc)
-    {
-        var discDir = Path.Combine(FilesDir!.AbsolutePath, "disc");
-        Directory.CreateDirectory(discDir);
-        var cuePath = Path.Combine(discDir, "game.cue");
-        var binPath = Path.Combine(discDir, "game.bin");
-        var prefs = GetPreferences(FileCreationMode.Private);
-        var sourceKey = $"{disc.CueUri}|{disc.BinUri}";
-        var cachedKey = prefs.GetString("cached_disc", null);
-        var cachedSize = prefs.GetLong("cached_bin_size", -1);
-
-        if (!File.Exists(binPath) || new FileInfo(binPath).Length != disc.BinSize ||
-            cachedSize != disc.BinSize || !string.Equals(cachedKey, sourceKey, StringComparison.Ordinal))
-        {
-            using var input = ContentResolver.OpenInputStream(disc.BinUri)
-                              ?? throw new IOException("Unable to open the BIN.");
-            using var output = File.Create(binPath);
-            await input.CopyToAsync(output);
-            prefs.Edit()!.PutString("cached_disc", sourceKey)!.PutLong("cached_bin_size", disc.BinSize)!.Apply();
-        }
-
-        var fileLine = new Regex(
-            "^\\s*FILE\\s+\"[^\"]+\"\\s+(?:BINARY|MOTOROLA)\\s*$",
-            RegexOptions.IgnoreCase | RegexOptions.Multiline);
-        var localCue = fileLine.Replace(disc.CueText, "FILE \"game.bin\" BINARY", 1);
-        await File.WriteAllTextAsync(cuePath, localCue);
-        return cuePath;
-    }
-
-    void ImportPickedMod(Android.Net.Uri uri)
+    void ImportPickedModPath(string path)
     {
         try
         {
-            var info = AndroidMods.ImportZip(this, uri);
+            var info = AndroidMods.ImportFromPath(this, path);
             if (ConfigManager.Game.ModsConfigured)
             {
                 var active = ConfigManager.Game.ActiveMods ?? [];
@@ -809,12 +756,11 @@ public sealed class MainActivity : Activity
     void SetStatus(string text) => RunOnUiThread(() => _status.Text = text);
     int Dp(int value) => (int)(value * Resources!.DisplayMetrics!.Density + 0.5f);
 
-    sealed record DocumentInfo(string Name, Android.Net.Uri Uri, long Size);
     sealed record DiscDocuments(
         string CueName,
-        Android.Net.Uri CueUri,
+        string CuePath,
         string CueText,
         string BinName,
-        Android.Net.Uri BinUri,
+        string BinPath,
         long BinSize);
 }

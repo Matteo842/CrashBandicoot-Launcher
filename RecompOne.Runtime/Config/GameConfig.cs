@@ -68,8 +68,9 @@ public class GameConfig
     public GamepadBindings Pad2 { get; set; } = GamepadBindings.Empty();
 
     /// <summary>
-    /// False until the launcher Mods sheet is saved once. While false, every
-    /// discovered mod loads (first-run / demos). When true, only <see cref="ActiveMods"/> load.
+    /// False until the launcher Mods sheet is saved once. While false, no
+    /// discovered mod loads (opt-in; bundled samples like auto-spin stay off).
+    /// When true, only <see cref="ActiveMods"/> load.
     /// </summary>
     public bool ModsConfigured { get; set; }
 

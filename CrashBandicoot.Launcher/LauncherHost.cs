@@ -200,7 +200,7 @@ public sealed class LauncherHost : Form
             version = m.Version,
             author = m.Author,
             category = m.ResolvedCategory,
-            enabled = !modsConfigured || activeSet.Contains(m.Id),
+            enabled = modsConfigured && activeSet.Contains(m.Id),
         }).ToArray();
 
         var state = new

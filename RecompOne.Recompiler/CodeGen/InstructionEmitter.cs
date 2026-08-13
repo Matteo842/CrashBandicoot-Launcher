@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using RecompOne.Recompiler.Analysis;
 using RecompOne.Recompiler.Disasm;
@@ -28,6 +29,18 @@ public static class InstructionEmitter
         if (imm == 0) return R(rs);
         if (imm > 0) return $"({R(rs)} + 0x{(uint)imm:X}u)";
         return $"({R(rs)} - 0x{unchecked((uint)(-(int)imm)):X}u)";
+    }
+
+    /// <summary>
+    /// Decimal immediate for generated C#. Never use interpolation / ToString
+    /// with CurrentCulture: sv-SE and fi-FI emit U+2212 MINUS SIGN, and Roslyn
+    /// reports CS1525 at that character (main.cs line 802, slti -254).
+    /// </summary>
+    static string SignedImm(short imm)
+    {
+        if (imm >= 0)
+            return imm.ToString(CultureInfo.InvariantCulture);
+        return "-" + (-(int)imm).ToString(CultureInfo.InvariantCulture);
     }
     static string Cop0Read(int rd) => rd switch
     {
@@ -124,7 +137,7 @@ public static class InstructionEmitter
         return (int)op switch
         {
             8  or 9 =>  rt == 0 ? "" : rs == 0 ? $"{RT} = 0x{unchecked((uint)(int)imm):X8}u;" : imm >= 0 ? $"{RT} = {RS} + 0x{(uint)imm:X}u;" : $"{RT} = {RS} - 0x{unchecked((uint)(-(int)imm)):X}u;",
-            10 => rt == 0 ? "" : $"{RT} = (int){RS} < {(int)imm} ? 1u : 0u;",
+            10 => rt == 0 ? "" : $"{RT} = (int){RS} < {SignedImm(imm)} ? 1u : 0u;",
             11 => rt == 0 ? "" : $"{RT} = {RS} < 0x{(uint)(int)imm:X8}u ? 1u : 0u;",
             12 => rt == 0 ? "" : $"{RT} = {RS} & 0x{immU:X4}u;",
             13 => rt == 0 ? "" : immU == 0 ? $"{RT} = {RS};" : $"{RT} = {RS} | 0x{immU:X4}u;",

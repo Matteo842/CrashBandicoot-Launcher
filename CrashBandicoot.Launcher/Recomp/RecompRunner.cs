@@ -1,3 +1,4 @@
+using System.Globalization;
 using RecompOne.Recompiler.CodeGen;
 using RecompOne.Recompiler.Config;
 using RecompOne.Runtime.Cdrom;
@@ -12,6 +13,30 @@ public static class RecompRunner
         string outDir,
         IProgress<string>? progress = null,
         string? postPassPatchPath = null)
+    {
+        // Generated C# must not pick up the phone/OS thousands separator
+        // (it-IT "1.024", sv-SE "1 024") or Roslyn reports CS1525.
+        var restoreCulture = CultureInfo.CurrentCulture;
+        var restoreUi = CultureInfo.CurrentUICulture;
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+        CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+        try
+        {
+            RunCore(configTemplatePath, cuePath, outDir, progress, postPassPatchPath);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = restoreCulture;
+            CultureInfo.CurrentUICulture = restoreUi;
+        }
+    }
+
+    static void RunCore(
+        string configTemplatePath,
+        string cuePath,
+        string outDir,
+        IProgress<string>? progress,
+        string? postPassPatchPath)
     {
         progress?.Report("Loading recompiler config…");
         if (!File.Exists(configTemplatePath))

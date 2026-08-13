@@ -119,7 +119,10 @@ static class AndroidGamepad
             _connectedIds.Clear();
             foreach (var id in ids)
             {
-                if (!IsPadDevice(InputDevice.GetDevice(id))) continue;
+                var device = InputDevice.GetDevice(id);
+                if (!IsPadDevice(device)) continue;
+                Android.Util.Log.Info("CrashPad",
+                    $"connected '{device?.Name}' id={id} sources={device?.Sources}");
                 _connectedIds.Add(id);
                 if (_rumbleDeviceId < 0) _rumbleDeviceId = id;
             }
@@ -400,13 +403,26 @@ static class AndroidGamepad
     {
         if (device == null || device.IsVirtual) return false;
         var sources = device.Sources;
-        return sources.HasFlag(InputSourceType.Gamepad)
-               || sources.HasFlag(InputSourceType.Joystick);
+        var gamepad = sources.HasFlag(InputSourceType.Gamepad);
+        var joystick = sources.HasFlag(InputSourceType.Joystick);
+        if (!gamepad && !joystick) return false;
+
+        // OEM game-tools, keyboards and some touchscreens advertise joystick
+        // bits. Treating them as pads hides the on-screen controller.
+        var name = device.Name ?? "";
+        if (name.Contains("uinput", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("virtual", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gpio-keys", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("touchscreen", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("ts-adc", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return true;
     }
 
     static void RememberDevice(int deviceId)
     {
         if (deviceId < 0) return;
+        if (!IsPadDevice(InputDevice.GetDevice(deviceId))) return;
         bool became;
         lock (Gate)
         {

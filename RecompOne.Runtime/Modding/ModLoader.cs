@@ -254,13 +254,14 @@ public static class ModLoader
 
     /// <summary>
     /// Until the launcher saves Mods once (<see cref="GameConfig.ModsConfigured"/>),
-    /// load everything. After that, only ids in ActiveMods (empty = none).
+    /// load nothing. After that, only ids in ActiveMods (empty = none).
+    /// Bundled samples such as auto-spin stay off until the user enables them.
     /// Dependencies of enabled mods are kept so Order can still resolve them.
     /// </summary>
     static List<Candidate> FilterActive(List<Candidate> candidates)
     {
         if (!ConfigManager.Game.ModsConfigured)
-            return candidates;
+            return [];
 
         var active = ConfigManager.Game.ActiveMods ?? [];
         var enabled = new HashSet<string>(

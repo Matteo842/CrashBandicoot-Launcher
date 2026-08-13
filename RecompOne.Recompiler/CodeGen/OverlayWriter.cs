@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using RecompOne.Recompiler.Analysis;
@@ -329,7 +330,7 @@ public static class OverlayWriter
         sb.AppendLine($"public sealed class {DispatchTableName(overlayName)} : IOverlay");
         sb.AppendLine("{");
         sb.AppendLine($"    public string Name => \"{overlayName}\";");
-        sb.AppendLine($"    public int LbaStart => {lbaStart};");
+        sb.AppendLine($"    public int LbaStart => {lbaStart.ToString(CultureInfo.InvariantCulture)};");
         sb.AppendLine($"    public uint Base => 0x{ovlBase:X8}u;");
         sb.AppendLine($"    public uint Size => 0x{ovlSize:X}u;");
         sb.AppendLine("    public IReadOnlyDictionary<uint, Action<CpuContext, IMemory>> Functions { get; } =");

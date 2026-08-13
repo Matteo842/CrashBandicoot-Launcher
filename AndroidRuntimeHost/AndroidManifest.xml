@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
   <uses-feature android:name="android.hardware.gamepad" android:required="false" />
   <application
       android:allowBackup="false"
-      android:icon="@drawable/app_icon"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher_round"
       android:label="Crash Bandicoot Launcher"
+      android:requestLegacyExternalStorage="true"
+      android:preserveLegacyExternalStorage="true"
       android:supportsRtl="true"
       android:theme="@android:style/Theme.Material.NoActionBar">
     <meta-data
