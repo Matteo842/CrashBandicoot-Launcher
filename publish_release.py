@@ -24,6 +24,7 @@ import struct
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -435,6 +436,32 @@ def find_signed_apk(search_roots: list[Path]) -> Path | None:
     return None
 
 
+# Release libmonodroid.so dlopens libxamarin-app.so and requires these symbols.
+# A Debug APK can boot without them (different libmonodroid). Shipping without
+# them is the instant-open crash from GitHub issue #17.
+_RELEASE_XAMARIN_APP_SYMBOLS = (
+    b"compressed_assembly_count",
+    b"compressed_assembly_descriptors",
+    b"uncompressed_assemblies_data_size",
+)
+
+
+def verify_release_apk_native_symbols(apk: Path) -> None:
+    with zipfile.ZipFile(apk) as z:
+        xa_names = [n for n in z.namelist() if n.endswith("libxamarin-app.so")]
+        if not xa_names:
+            die(f"{apk.name} is missing libxamarin-app.so")
+        data = z.read(xa_names[0])
+    missing = [s.decode() for s in _RELEASE_XAMARIN_APP_SYMBOLS if s not in data]
+    if missing:
+        die(
+            f"{apk.name} would crash on start: libxamarin-app.so is missing "
+            + ", ".join(missing)
+            + ". Enable AndroidEnableAssemblyCompression and rebuild."
+        )
+    print("[publish] native symbol check OK (libxamarin-app.so)")
+
+
 def publish_android(out_dir: Path) -> Path:
     if not ANDROID_PROJECT.is_file():
         die(f"project not found: {ANDROID_PROJECT}")
@@ -460,7 +487,9 @@ def publish_android(out_dir: Path) -> Path:
         f"-p:AndroidSdkDirectory={sdk}",
         f"-p:JavaSdkDirectory={java_home}",
         "-p:AndroidPackageFormat=apk",
-        "-p:RuntimeIdentifiers=android-arm64",
+        "-p:AndroidEnableAssemblyCompression=true",
+        "-p:RunAOTCompilation=false",
+        "-p:AndroidEnableProfiledAot=false",
         "-p:AndroidKeyStore=true",
         f"-p:AndroidSigningKeyStore={store}",
         f"-p:AndroidSigningKeyAlias={props['keyAlias']}",
@@ -493,10 +522,21 @@ def publish_android(out_dir: Path) -> Path:
     dest = out_dir / f"CrashBandicoot-{version}.apk"
     if apk.resolve() != dest.resolve():
         shutil.copy2(apk, dest)
+
+    verify_release_apk_native_symbols(dest)
+
+    for leftover in out_dir.iterdir():
+        if leftover.resolve() == dest.resolve():
+            continue
+        if leftover.is_file():
+            leftover.unlink()
+        elif leftover.is_dir():
+            shutil.rmtree(leftover)
+
     size_mb = dest.stat().st_size / (1024 * 1024)
     print()
     print("[publish] OK")
-    print("  platform: android (arm64)")
+    print("  platform: android")
     print(f"  apk     : {dest}")
     print(f"  size    : {size_mb:.1f} MB")
     print()

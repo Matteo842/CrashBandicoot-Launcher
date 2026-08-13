@@ -7,16 +7,24 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationId>io.github.matteo842.crashlauncher.runtime</ApplicationId>
-    <ApplicationVersion>7</ApplicationVersion>
+    <ApplicationVersion>8</ApplicationVersion>
     <ApplicationDisplayVersion>1.7.0</ApplicationDisplayVersion>
     <AndroidLinkMode>None</AndroidLinkMode>
     <!-- The Mono interpreter does not lower Volatile.ReadBarrier on this path;
          Roslyn and the generated game assembly must run through the Android JIT. -->
     <AndroidUseInterpreter>false</AndroidUseInterpreter>
-    <!-- The debug APK is shared through LocalSend, not deployed by an IDE. -->
+    <!-- Release AOT crashes on LibObjectFile (MonoType 0). The game assembly is
+         compiled on-device anyway, so profiled AOT of the host is not useful. -->
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <!-- The APK is shared through LocalSend / GitHub, not deployed by an IDE. -->
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <AndroidUseAssemblyStore>false</AndroidUseAssemblyStore>
-    <AndroidEnableAssemblyCompression>false</AndroidEnableAssemblyCompression>
+    <!-- Must stay true for Release. Release libmonodroid.so dlopens with a
+         hard dependency on compressed_assembly_count in libxamarin-app.so.
+         Debug libmonodroid does not, so a Debug APK can look fine while the
+         signed Release APK dies in MonoRuntimeProvider before MainActivity. -->
+    <AndroidEnableAssemblyCompression>true</AndroidEnableAssemblyCompression>
   </PropertyGroup>
 
   <ItemGroup>
