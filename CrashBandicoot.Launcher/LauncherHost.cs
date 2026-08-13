@@ -10,7 +10,7 @@ namespace CrashBandicoot.Launcher;
 
 public sealed class LauncherHost : Form
 {
-    public const string AppVersion = "1.7.0";
+    public const string AppVersion = "1.7.1";
 
     readonly ILauncherUi _ui = LauncherUiFactory.Create();
     readonly Panel _gameHost = new()
@@ -493,8 +493,7 @@ public sealed class LauncherHost : Form
             // Embedded OpenGL child often keeps focus off Silk; route cheat hotkey like F11.
             var cheatName = ConfigManager.View.CheatMenuKey;
             if (string.IsNullOrWhiteSpace(cheatName)) cheatName = "F3";
-            if (Enum.TryParse<Keys>(cheatName.Trim(), ignoreCase: true, out var cheatKey)
-                && keyData == cheatKey)
+            if (MatchesCheatHotkey(cheatName, keyData))
             {
                 Runtime.RequestCheatMenuToggle();
                 return true;
@@ -507,6 +506,22 @@ public sealed class LauncherHost : Form
             }
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    static bool MatchesCheatHotkey(string name, Keys keyData)
+    {
+        var pressed = KeyBindingNames.NameFromVirtualKey((int)(keyData & Keys.KeyCode));
+        if (pressed == null) return false;
+        var want = KeyBindingNames.Canonical(name);
+        if (want.Length == 0) return false;
+        if (string.Equals(pressed, want, StringComparison.OrdinalIgnoreCase)) return true;
+        return want.ToLowerInvariant() switch
+        {
+            "shift" => pressed is "ShiftLeft" or "ShiftRight",
+            "control" => pressed is "ControlLeft" or "ControlRight",
+            "alt" => pressed is "AltLeft" or "AltRight",
+            _ => false,
+        };
     }
 
     static string Unwrap(Exception ex)
@@ -523,7 +538,9 @@ public sealed class LauncherHost : Form
         if (!root.TryGetProperty("keys", out var keys)) return;
         var k = ConfigManager.Game.Keys;
         string Get(string name, string fallback) =>
-            keys.TryGetProperty(name, out var el) ? el.GetString() ?? fallback : fallback;
+            keys.TryGetProperty(name, out var el)
+                ? KeyBindingNames.Canonical(el.GetString() ?? fallback)
+                : fallback;
 
         k.Cross = Get("cross", k.Cross);
         k.Circle = Get("circle", k.Circle);
@@ -538,7 +555,7 @@ public sealed class LauncherHost : Form
         if (keys.TryGetProperty("cheatMenu", out var cheatKeyEl) ||
             keys.TryGetProperty("miracomando", out cheatKeyEl))
         {
-            var cheatKey = cheatKeyEl.GetString();
+            var cheatKey = KeyBindingNames.Canonical(cheatKeyEl.GetString());
             if (!string.IsNullOrWhiteSpace(cheatKey))
                 ConfigManager.View.CheatMenuKey = cheatKey;
         }

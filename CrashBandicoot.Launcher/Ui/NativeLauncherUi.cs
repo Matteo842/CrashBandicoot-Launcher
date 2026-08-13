@@ -68,7 +68,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     string _status = "";
     string _statusKind = "";
     string _discPath = "";
-    string _version = "v1.7.0";
+    string _version = "v1.7.1";
     bool _disposed;
     readonly LauncherGamepad _pad = new();
 
@@ -83,7 +83,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     bool _modsStubExpanded;
 
     // Settings / controls / cheats / mods state buffers
-    readonly Dictionary<string, TextBox> _keyBoxes = new(StringComparer.Ordinal);
+    readonly Dictionary<string, KeyCaptureBox> _keyBoxes = new(StringComparer.Ordinal);
     ThemeSlider? _vol;
     ThemeCheck? _muted;
     ThemeCheck? _fullscreen;
@@ -262,7 +262,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                     !box.IsDisposed &&
                     keys.TryGetProperty(id, out var kv) &&
                     kv.GetString() is { } s)
-                    box.Text = s;
+                    box.BoundKey = s;
             }
         }
 
@@ -432,6 +432,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         if (_sheetHost is { Visible: true })
         {
+            if (KeyCaptureBox.AnyListening)
+            {
+                if (action.HasFlag(LauncherPadAction.Cancel))
+                    KeyCaptureBox.CancelActive();
+                return;
+            }
             HandleSheetPad(action);
             return;
         }
@@ -527,6 +533,9 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             switch (c)
             {
+                case KeyCaptureBox keyBox:
+                    keyBox.BeginListen();
+                    return;
                 case Button btn:
                     btn.PerformClick();
                     return;
@@ -630,17 +639,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         if (_disposed || !Visible || _prepOverlay is { Visible: true })
             return base.ProcessCmdKey(ref msg, keyData);
 
-        // Don't steal typing from key-binding text boxes.
-        if (FindForm()?.ActiveControl is TextBox && _sheetHost is { Visible: true })
-        {
-            if (keyData == Keys.Escape)
-            {
-                CloseSheet();
-                _stage.Focus();
-                return true;
-            }
-            return base.ProcessCmdKey(ref msg, keyData);
-        }
+        if (_sheetHost is { Visible: true } && KeyCaptureBox.Active is { } listening)
+            return listening.HandleCmdKey(keyData);
 
         if (_sheetHost is { Visible: true })
         {
@@ -1180,6 +1180,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void CloseSheet()
     {
+        KeyCaptureBox.CancelActive();
         if (_sheetHost == null) return;
         _sheetHost.Controls.Clear();
         _sheetHost.Visible = false;
@@ -1266,10 +1267,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     {
         var card = MakeCard(560, 520);
         card.Controls.Add(MakeTitle("Controls", new Point(36, 12)));
-        card.Controls.Add(BodyLabel("Keyboard bindings (player 1). Saved to settings.json.", new Point(36, 88), 520, 28));
+        card.Controls.Add(BodyLabel(
+            "Click a binding, then press a key. Backspace, Shift, and Enter work. Escape cancels.",
+            new Point(36, 88), 520, 40));
 
         _keyBoxes.Clear();
-        var y = 126;
+        var y = 136;
         foreach (var (label, id) in KeyFields)
         {
             card.Controls.Add(new Label
@@ -1281,14 +1284,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 Size = new Size(160, 28),
                 BackColor = Color.Transparent,
             });
-            var box = new TextBox
+            var box = new KeyCaptureBox
             {
                 Location = new Point(210, y),
                 Size = new Size(340, 30),
-                MaxLength = 32,
-                BackColor = Color.FromArgb(30, 20, 12),
-                ForeColor = NativeTheme.Sand,
-                BorderStyle = BorderStyle.FixedSingle,
                 Font = NativeTheme.MakeNunito(16),
             };
             _keyBoxes[id] = box;
@@ -1302,7 +1301,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             var keys = new Dictionary<string, string>();
             foreach (var (_, id) in KeyFields)
-                keys[id] = _keyBoxes.TryGetValue(id, out var b) ? b.Text : "";
+                keys[id] = _keyBoxes.TryGetValue(id, out var b) ? b.BoundKey : "";
             Emit(new { type = "saveControls", keys });
             CloseSheet();
         };

@@ -10,7 +10,7 @@
 
 This repository contains **tools and a launcher** that work with a copy of *Crash Bandicoot* you already own (PS1, NTSC-U, **SCUS-94900**). It does **not** include the game, disc images, or a ready-made game binary.
 
-Built on [RecompOne](https://github.com/BlackLabelHQ/RecompOne) (static PS1 recompilation + runtime). Current release: **1.7.0** (native WinForms launcher on Windows; CLI on Linux; Android). Still experimental — expect bugs.
+Built on [RecompOne](https://github.com/BlackLabelHQ/RecompOne) (static PS1 recompilation + runtime). Current release: **1.7.1** (native WinForms launcher on Windows; CLI on Linux; Android). Still experimental — expect bugs.
 
 ---
 <img width="1920" height="800" alt="Crash-Launcher1" src="https://github.com/user-attachments/assets/3682fe9c-0deb-466c-adbe-285a1fd7bbcc" />
