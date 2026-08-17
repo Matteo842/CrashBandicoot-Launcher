@@ -10,11 +10,10 @@ namespace RecompOne.Runtime.Host;
 
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
-/// Crash does one original 30 Hz trans+physics step (34 ticks) then we keep
-/// dt/34 of the result so wall speed matches 30 FPS at 50 or 300 Hz. A raw
-/// 3-tick step is smaller than the wall bitmap cell (2048) — StopAtWalls
-/// quantizes it to 0, which is the "slower near the pit at 300 FPS" bug.
-/// Other GOOL trans still sees 34 then BlendObject. HUD uses real ticks.
+/// Crash trans+physics use a 34-tick step so StopAtWalls sees a move larger
+/// than one 2048-unit bitmap cell; FinishCrashScale keeps dt/34 of pos/vel/rot.
+/// Do not scale anim_frame or speed: GOOL waits on draw_stamp/34, and walk→idle
+/// is <c>abs(speed)&gt;&gt;2</c>. HUD uses real ticks. Other objects: 34 + BlendObject.
 /// </summary>
 public static class FramePacing
 {
@@ -55,6 +54,7 @@ public static class FramePacing
     const uint ObjStatusBOff = 0xCCu;
     const uint ObjAnimSeqOff = 0x108u;
     const uint ObjAnimFrameOff = 0x10Cu;
+    const uint ObjAnimCounterOff = 0x104u;
     const uint ObjPathProgOff = 0x114u;
     const uint ObjFloorYOff = 0x11Cu;
     const uint ObjSpeedOff = 0x124u;
@@ -67,6 +67,7 @@ public static class FramePacing
     const uint FlagRotX = 0x2000u;
     const uint FlagRotY2 = 0x80000u;
     const uint FlagPathEnd = 0x10u;
+    const uint FlagStall = 0x10000000u;
 
     const int Teleport = 0x80000;
     const int PathWrap = 0x8000;
@@ -80,6 +81,7 @@ public static class FramePacing
     static uint _frameTicks = 34;
     static double _tickFrac;
     static double _exactTicks = 34;
+    static double _stallFrac;
     static long _simTs;
     static long _irqTs;
     static bool _clockArmed;
@@ -147,6 +149,7 @@ public static class FramePacing
         _frameTicks = 34;
         _tickFrac = 0;
         _exactTicks = 34;
+        _stallFrac = 0;
         _simTs = 0;
         _irqTs = 0;
         _clockArmed = false;
@@ -406,6 +409,8 @@ public static class FramePacing
         else
             WriteAllTicks(m, RefTicks);
         SnapshotObject(m, c.A0);
+        if (_crashObj)
+            HoldCrashStall(m, c.A0);
         if (!_crashObj)
             ClampAnimFrame(m, c.A0);
         return true;
@@ -623,6 +628,29 @@ public static class FramePacing
         }
     }
 
+    /// <summary>
+    /// GoolObjectUpdate decrements anim_counter once per display frame.
+    /// Add one back until 34 wall ticks pass so stall lasts 30 Hz, not 300 Hz.
+    /// </summary>
+    static void HoldCrashStall(IMemory m, uint obj)
+    {
+        try
+        {
+            if ((m.ReadU32(obj + ObjStatusBOff) & FlagStall) == 0) return;
+            uint n = m.ReadU32(obj + ObjAnimCounterOff);
+            if (n == 0) return;
+            _stallFrac += _exactTicks;
+            if (_stallFrac < RefTicks)
+                m.WriteU32(obj + ObjAnimCounterOff, n + 1);
+            else
+                _stallFrac -= RefTicks;
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
     static int ScaleStep(int step)
     {
         if (step == 0) return 0;
@@ -656,7 +684,8 @@ public static class FramePacing
 
     /// <summary>
     /// Guest just ran a full 34-tick Crash step (needed so StopAtWalls sees
-    /// a move larger than one 2048-unit bitmap cell). Keep dt/34 of it.
+    /// a move larger than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
+    /// Leave anim_frame and a stopped speed field alone — those are GOOL state.
     /// </summary>
     static void FinishCrashScale(IMemory m)
     {
@@ -680,18 +709,16 @@ public static class FramePacing
             m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), Teleport));
             m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, (int)m.ReadU32(o + ObjVelYOff), Teleport));
             m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), Teleport));
-            m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, (int)m.ReadU32(o + ObjSpeedOff), Teleport));
+            int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
+            // Walk→idle is abs(speed)>>2. A 34-tick stop scaled by dt/34 never
+            // reaches 0 (Round tails to ~5) so the walk cycle keeps playing.
+            if (speedTo <= 4 && speedTo >= -4)
+                m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
+            else
+                m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, speedTo, Teleport));
             m.WriteU32(o + ObjRotOff, (uint)ScaleAng(_orx, (int)m.ReadU32(o + ObjRotOff)));
             m.WriteU32(o + ObjRotOff + 4, (uint)ScaleAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4)));
             m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
-
-            int animTo = (int)m.ReadU32(o + ObjAnimFrameOff);
-            if (animTo <= AnimFrameCap && _oanim <= AnimFrameCap)
-            {
-                int ad = animTo - _oanim;
-                if (ad <= 0x400 && ad >= -0x400)
-                    m.WriteU32(o + ObjAnimFrameOff, (uint)ScaleExact(_oanim, animTo, 0x400));
-            }
 
             uint statusA = m.ReadU32(o + ObjStatusAOff);
             int floor = (int)m.ReadU32(o + ObjFloorYOff);
@@ -724,7 +751,6 @@ public static class FramePacing
         m.WriteU32(o + ObjRotOff, (uint)_orx);
         m.WriteU32(o + ObjRotOff + 4, (uint)_ory);
         m.WriteU32(o + ObjRotOff + 8, (uint)_orz);
-        m.WriteU32(o + ObjAnimFrameOff, (uint)_oanim);
     }
 
     static void SnapshotObject(IMemory m, uint obj)
