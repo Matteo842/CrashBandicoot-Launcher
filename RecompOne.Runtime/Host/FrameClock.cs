@@ -36,9 +36,10 @@ public static class FrameClock
     public static void Throttle()
     {
         _runSignal.Wait();
-        if (SkipThrottle) return;
+        double period = FramePacing.NeedsOriginalVblank ? (1000.0 / 60.0) : _frameMs;
+        if (SkipThrottle && !FramePacing.NeedsOriginalVblank) return;
 
-        _nextFrameMs += _frameMs;
+        _nextFrameMs += period;
         double now = _clock.Elapsed.TotalMilliseconds;
         double waitMs = _nextFrameMs - now;
 
@@ -46,7 +47,7 @@ public static class FrameClock
         {
             // Late: drop the missed time. Do not burst extra VBlanks — that
             // fast-forwards Crash's sequencer and the music speeds up.
-            if (waitMs < -_frameMs)
+            if (waitMs < -period)
                 _nextFrameMs = now;
             return;
         }

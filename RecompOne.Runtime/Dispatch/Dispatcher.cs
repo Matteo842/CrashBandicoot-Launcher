@@ -192,17 +192,18 @@ public static class Dispatcher
     /// A recompiler <c>return</c> instead of <c>jr</c> into a clip jump-table
     /// leaves GP as an AND mask and SP as a small index (often 0) — the next
     /// prologue then writes RA to SP+0x14 = 0xFFFFFFFC.
+    /// Only heal when SP also looks like a temp. Nested geom keeps a real stack
+    /// and GP as a mask; restoring GP there hangs world clip on level entry.
     /// </summary>
     internal static void HealGeomClobberedRegs(CpuContext c, IMemory m)
     {
-        if (c.GP is 0x00FFFFFFu or 0x0000FFFFu)
-            c.GP = 0x800563FCu;
-
-        // Real SP lives in KUSEG/KSEG0 RAM; temps are tiny or scratchpad pointers.
         bool spLooksTemp = c.SP < 0x8000u
                            || (c.SP >= 0x1F800000u && c.SP < 0x1F800400u)
                            || c.SP is 0x02000000u or 0xFFFFFFDFu;
         if (!spLooksTemp) return;
+
+        if (c.GP is 0x00FFFFFFu or 0x0000FFFFu)
+            c.GP = 0x800563FCu;
 
         uint saved = m.ReadU32(0x1F800034u);
         if (saved >= 0x80000000u && saved < 0x80800000u)

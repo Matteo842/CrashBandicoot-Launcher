@@ -135,7 +135,6 @@ public sealed class PSMemory : IMemory
 
         uint badGp = c.GP;
         int delta = unchecked((int)(address - badGp));
-        // Typical MIPS gp-relative imm16 range.
         if (delta is < -0x8000 or >= 0x8000) return false;
 
         c.GP = CrashBandicootGp;

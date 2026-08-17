@@ -40,6 +40,7 @@ public static class LibEtc
 
     static void UnlockedVSync(CpuContext c, IMemory m)
     {
+        FramePacing.NoteGpuVSync();
         if (FramePacing.IsPadCall())
         {
             c.V0 = 0;
@@ -57,7 +58,6 @@ public static class LibEtc
         while (count < target)
             count = AdvanceUnlocked(c, m);
 
-        FramePacing.MarkPrimaryEnd();
         c.V0 = 0;
     }
 
@@ -69,6 +69,7 @@ public static class LibEtc
             uint ticks = FramePacing.AdvanceWallClock(m);
             m.WriteU32(TicksElapsedAddr, ticks);
             Runtime.PresentFrame();
+            FramePacing.NoteGpuPresent();
             return TickCounters(c, m, addTicks: false);
         }
         finally

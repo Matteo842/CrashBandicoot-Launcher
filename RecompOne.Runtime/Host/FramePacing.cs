@@ -9,13 +9,11 @@ using RecompOne.Runtime.Modding;
 namespace RecompOne.Runtime.Host;
 
 /// <summary>
-/// Wall-clock dt = seconds × 1020. Crash trans still sees 34 so hang-boost
-/// <c>spd(vely, 5454)</c> matches the sogliola-era jump; we then scale only
-/// that small vely delta by realDt/34 (the 10.5m impulse stays intact) and
-/// restore trans before physics (real dt gravity). FLAG_2D keeps GOOL
-/// trans/scale (moveto2d / *0.9) so HUD fruit can finish. Path objects see
-/// 34 then lerp progress — including the PATH_END frame. Physics enemies
-/// see real dt; fling/crate scale deltas are ScaleSoft (never min ±1).
+/// Wall-clock dt is seconds × 1020, written into ticks_per_frame. Jump height
+/// comes from the original GoolObjectPhysics (y += v*ticks/1024, then gravity).
+/// Do not re-integrate Crash Y — that fought collision and ignored FPS jitter.
+/// Takeoff only clears GROUNDLAND when vely &gt; 0 so a small dt step is not
+/// treated as a landing. Anim is capped, not wrapped by GOOL length.
 /// </summary>
 public static class FramePacing
 {
@@ -29,13 +27,18 @@ public static class FramePacing
     const uint GfxC2pAddr = 0x80058408u;
     const uint GfxCurAddr = 0x8005840Cu;
     const uint TicksPerFrameOff = 0x84u;
-    const double PadWindowSeconds = 0.003;
 
     const uint GoolUpdateObjectsAddr = 0x8001D5ECu;
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
+    const uint GoolObjectTransformAddr = 0x8001DE78u;
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
     const uint GoolSeekAddr = 0x80024628u;
     const uint LevelUpdateAddr = 0x80025A60u;
+    const uint GpuUpdateAddr = 0x80016E5Cu;
+    const uint NsInitAddr = 0x80015B58u;
+    const uint DrawSkipAddr = 0x8005C54Cu;
+    const uint GfxTransformSvtxAddr = 0x80018964u;
+    const uint GfxTransformCvtxAddr = 0x80018A40u;
     const uint CrashPtrAddr = 0x800566B4u;
     const uint CamZoneAddr = 0x80057914u;
     const uint CamPathAddr = 0x8005791Cu;
@@ -44,13 +47,19 @@ public static class FramePacing
     const uint ObjTransOff = 0x80u;
     const uint ObjRotOff = 0x8Cu;
     const uint ObjScaleOff = 0x98u;
+    const uint ObjVelXOff = 0xA4u;
     const uint ObjVelYOff = 0xA8u;
+    const uint ObjVelZOff = 0xACu;
     const uint ObjStatusAOff = 0xC8u;
     const uint ObjStatusBOff = 0xCCu;
+    const uint ObjAnimSeqOff = 0x108u;
     const uint ObjAnimFrameOff = 0x10Cu;
     const uint ObjPathProgOff = 0x114u;
+    const uint ObjFloorYOff = 0x11Cu;
 
     const uint FlagTransMotion = 0x40u;
+    const uint FlagGravity = 0x20u;
+    const uint FlagGroundLand = 0x1u;
     const uint FlagRotY = 0x1u;
     const uint Flag2D = 0x200u;
     const uint FlagRotX = 0x2000u;
@@ -61,9 +70,7 @@ public static class FramePacing
     const int PathWrap = 0x8000;
     const int PathTransTeleport = 0x800000;
     const int ScaleSnap = 0x2000;
-    // spd(vely, 5454) at ticks=34 is ~181. Jump CODE sets vely=10.5m (much larger).
-    const int HangBoostAbsMax = 0x400;
-    const int AnimFrameCap = 24 << 8;
+    const int AnimFrameCap = 32 << 8;
 
     static readonly long IrqPeriod = Stopwatch.Frequency / 60;
 
@@ -71,11 +78,18 @@ public static class FramePacing
     static uint _frameTicks = 34;
     static double _tickFrac;
     static long _simTs;
-    static long _lastPrimaryEndTs;
-    static bool _didPrimary;
     static long _irqTs;
     static bool _clockArmed;
     static bool _hooksInstalled;
+    static int _vsyncsInGpu;
+    static bool _inGpuUpdate;
+    static bool _didPresentThisGpu;
+    static bool _loggedUnlockGpu;
+    static bool _inNsInit;
+    /// <summary>Unlocked VSync only after a gameplay GpuUpdate with Crash spawned.</summary>
+    static bool _levelReady;
+    /// <summary>GpuUpdates to keep at 30 FPS after the first real DrawOTag.</summary>
+    static int _holdLocked;
 
     static uint _obj;
     static int _ox, _oy, _oz, _orx, _ory, _orz, _osx, _osy, _osz, _oanim;
@@ -94,13 +108,26 @@ public static class FramePacing
     public static bool WantsUnlock =>
         !ForceOriginal && ConfigManager.View.FrameRate != ViewConfig.FrameRateOriginal;
 
+    /// <summary>
+    /// While a level is still settling (skip frames + hold), cap presents at
+    /// 60 Hz even if the user picked 240. Otherwise locked VSync is instant and
+    /// spawn physics run at 4× (face-plant on the sand).
+    /// </summary>
+    public static bool NeedsOriginalVblank =>
+        WantsUnlock && !_levelReady && !_inNsInit;
+
     public static bool IsActive(IMemory? m)
     {
-        if (!WantsUnlock || m == null) return false;
+        if (!WantsUnlock || m == null || _inNsInit || !_levelReady) return false;
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            return Catalog.Levels.AllowsUnlockedFps(id);
+            if (!Catalog.Levels.AllowsUnlockedFps(id))
+            {
+                _levelReady = false;
+                return false;
+            }
+            return true;
         }
         catch
         {
@@ -114,27 +141,41 @@ public static class FramePacing
         _frameTicks = 34;
         _tickFrac = 0;
         _simTs = 0;
-        _lastPrimaryEndTs = 0;
-        _didPrimary = false;
         _irqTs = 0;
         _clockArmed = false;
         _haveObj = false;
         _physicsBlended = false;
         _crashObj = false;
+        _vsyncsInGpu = 0;
+        _inGpuUpdate = false;
+        _didPresentThisGpu = false;
+        _loggedUnlockGpu = false;
+        _inNsInit = false;
+        _levelReady = false;
+        _holdLocked = 0;
+        try
+        {
+            Directory.CreateDirectory(AppPaths.LogsDir);
+            File.WriteAllText(Path.Combine(AppPaths.LogsDir, "pacing.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} reset{Environment.NewLine}");
+        }
+        catch { /* ignore */ }
     }
 
-    public static bool IsPadCall()
+    /// <summary>
+    /// PsyQ VSync(0) calls the wait helper twice. The second helper is not the
+    /// game's 30 Hz pad — skipping it skipped the only present and froze after
+    /// unlock. Treat extra waits as pad only after this GpuUpdate already presented.
+    /// </summary>
+    public static bool IsPadCall() => _inGpuUpdate && _didPresentThisGpu;
+
+    public static void NoteGpuVSync()
     {
-        if (!_didPrimary || _lastPrimaryEndTs == 0) return false;
-        double dt = (Stopwatch.GetTimestamp() - _lastPrimaryEndTs) / (double)Stopwatch.Frequency;
-        return dt < PadWindowSeconds;
+        if (_inGpuUpdate)
+            _vsyncsInGpu++;
     }
 
-    public static void MarkPrimaryEnd()
-    {
-        _didPrimary = true;
-        _lastPrimaryEndTs = Stopwatch.GetTimestamp();
-    }
+    public static void NoteGpuPresent() => _didPresentThisGpu = true;
 
     /// <summary>
     /// Sim dt from wall time since the last primary present. The FrameRate
@@ -264,7 +305,14 @@ public static class FramePacing
         Dispatcher.CallPost = OnCallPost;
 
         HookPre(GoolUpdateObjectsAddr, PreUpdateObjects);
+        HookPre(GoolObjectTransformAddr, PreTransform);
         HookPre(GoolObjectPhysicsAddr, PrePhysics);
+        HookPre(GfxTransformSvtxAddr, PreTransformSvtx);
+        HookPre(GfxTransformCvtxAddr, PreTransformCvtx);
+        HookPre(GpuUpdateAddr, PreGpuUpdate);
+        HookPost(GpuUpdateAddr, PostGpuUpdate);
+        HookPre(NsInitAddr, PreNsInit);
+        HookPost(NsInitAddr, PostNsInit);
         HookPre(LevelUpdateAddr, PreLevelUpdate);
         HookPre(GoolSeekAddr, PreGoolSeek);
     }
@@ -280,6 +328,17 @@ public static class FramePacing
         HookManager.AddPre(mi, pre);
     }
 
+    static void HookPost(uint addr, Action<CpuContext, IMemory> post)
+    {
+        var mi = SymbolRegistry.Resolve("main", null, addr);
+        if (mi == null)
+        {
+            Console.Error.WriteLine($"[FramePacing] no func 0x{addr:X8}");
+            return;
+        }
+        HookManager.AddPost(mi, post);
+    }
+
     static bool PreUpdateObjects(CpuContext c, IMemory m)
     {
         if (IsActive(m))
@@ -289,45 +348,191 @@ public static class FramePacing
 
     static bool OnCallPre(uint addr, CpuContext c, IMemory m)
     {
+        if (addr == NsInitAddr)
+        {
+            _inNsInit = true;
+            _levelReady = false;
+            _holdLocked = 0;
+            _loggedUnlockGpu = false;
+            PaceLog($"NSInit start lid=0x{c.A1:X}");
+            return true;
+        }
+        if (addr == GoolObjectTransformAddr)
+        {
+            if (IsActive(m))
+                ClampAnimFrame(m, c.A0);
+            return true;
+        }
+        if (addr == GoolObjectPhysicsAddr)
+        {
+            if (IsActive(m))
+                WriteAllTicks(m, _frameTicks);
+            return true;
+        }
         if (addr != GoolObjectUpdateAddr) return true;
         _haveObj = false;
         _physicsBlended = false;
         _crashObj = false;
         if (!IsActive(m)) return true;
-        // Crash hang-boost runs in trans; gravity in physics. Trans stays at
-        // 34 (the jump that worked during sogliola). PrePhysics scales vely
-        // by realDt/34 so holding X is not a rocket. HUD/physics objects use
-        // real dt directly (spd already includes ticks).
         if (WantsRealTicks(m, c.A0))
             WriteAllTicks(m, _frameTicks);
         else
             WriteAllTicks(m, RefTicks);
         SnapshotObject(m, c.A0);
+        if (!_crashObj)
+            ClampAnimFrame(m, c.A0);
         return true;
     }
 
     static void OnCallPost(uint addr, CpuContext c, IMemory m)
     {
-        if (addr != GoolObjectUpdateAddr || _physicsBlended || !_haveObj) return;
-        BlendObject(m);
-        WriteAllTicks(m, _frameTicks);
+        if (addr == NsInitAddr)
+        {
+            _inNsInit = false;
+            _clockArmed = false;
+            PaceLog("NSInit end");
+            return;
+        }
+        if (addr == GpuUpdateAddr)
+        {
+            PatchTicksPerFrame(m);
+            return;
+        }
+        if (addr != GoolObjectUpdateAddr) return;
+        if (!_physicsBlended && _haveObj)
+            BlendObject(m);
+        if (IsActive(m))
+            WriteAllTicks(m, _frameTicks);
+    }
+
+    static bool PreTransform(CpuContext c, IMemory m)
+    {
+        if (IsActive(m))
+            ClampAnimFrame(m, c.A0);
+        return true;
     }
 
     static bool PrePhysics(CpuContext c, IMemory m)
     {
         if (IsActive(m))
         {
-            if (_haveObj && c.A0 == _obj)
-            {
-                if (_crashObj)
-                    FinishCrashTrans(m);
-                else
-                    BlendObject(m);
-            }
+            if (_haveObj && c.A0 == _obj && !_crashObj)
+                BlendObject(m);
             WriteAllTicks(m, _frameTicks);
             _physicsBlended = _haveObj && c.A0 == _obj;
         }
         return true;
+    }
+
+    static bool PreGpuUpdate(CpuContext c, IMemory m)
+    {
+        _inGpuUpdate = true;
+        _vsyncsInGpu = 0;
+        _didPresentThisGpu = false;
+        if (_levelReady && !_loggedUnlockGpu)
+        {
+            _loggedUnlockGpu = true;
+            PaceLog("first unlocked GpuUpdate");
+        }
+        return true;
+    }
+
+    static void PostGpuUpdate(CpuContext c, IMemory m)
+    {
+        _inGpuUpdate = false;
+        _vsyncsInGpu = 0;
+        _didPresentThisGpu = false;
+        TryArmUnlock(m);
+        PatchTicksPerFrame(m);
+    }
+
+    static bool PreNsInit(CpuContext c, IMemory m)
+    {
+        _inNsInit = true;
+        _levelReady = false;
+        _holdLocked = 0;
+        _loggedUnlockGpu = false;
+        PaceLog($"NSInit start lid=0x{c.A1:X}");
+        return true;
+    }
+
+    static void PostNsInit(CpuContext c, IMemory m)
+    {
+        _inNsInit = false;
+        _clockArmed = false;
+        PaceLog("NSInit end");
+    }
+
+    static void TryArmUnlock(IMemory m)
+    {
+        if (_levelReady || !WantsUnlock || _inNsInit) return;
+        try
+        {
+            uint id = m.ReadU32(Catalog.LevelIdAddr);
+            if (!Catalog.Levels.AllowsUnlockedFps(id))
+            {
+                _holdLocked = 0;
+                return;
+            }
+
+            int skip = (int)m.ReadU32(DrawSkipAddr);
+            uint crash = m.ReadU32(CrashPtrAddr);
+            if (skip > 0 || (crash & 0xFF000000u) != 0x80000000u)
+                return;
+
+            uint type = m.ReadU32(crash);
+            if (type is 0 or 2) return;
+
+            if (_holdLocked == 0)
+            {
+                _holdLocked = 30;
+                PaceLog($"first draw lid={id} crash=0x{crash:X8} — 30 FPS × 30");
+            }
+
+            _holdLocked--;
+            PaceLog($"hold {_holdLocked}");
+            if (_holdLocked > 0) return;
+
+            _levelReady = true;
+            _clockArmed = false;
+            PaceLog($"unlock armed lid={id} crash=0x{crash:X8}");
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void PaceLog(string msg)
+    {
+        Console.WriteLine("[FramePacing] " + msg);
+        try
+        {
+            Directory.CreateDirectory(AppPaths.LogsDir);
+            File.AppendAllText(Path.Combine(AppPaths.LogsDir, "pacing.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} {msg}{Environment.NewLine}");
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    /// <summary>
+    /// Guest already integrated with wall dt. Only keep the jump from being
+    /// cancelled: GROUNDLAND + floor snap on a small first step.
+    /// </summary>
+    static bool PreTransformSvtx(CpuContext c, IMemory m) => true;
+
+    static bool PreTransformCvtx(CpuContext c, IMemory m) => true;
+
+    static void WriteAxisDt(IMemory m, uint addr, int from, int vel, int dt)
+    {
+        int game = (int)m.ReadU32(addr);
+        long d = (long)game - from;
+        if (d > Teleport || d < -Teleport)
+            return;
+        m.WriteU32(addr, (uint)(from + (int)((long)vel * dt / 1024)));
     }
 
     /// <summary>
@@ -346,6 +551,7 @@ public static class FramePacing
             int req = (int)c.A2;
             int d = req - cur;
             if (d == 0) return true;
+            if (d > PathWrap || d < -PathWrap) return true;
             c.A2 = (uint)(cur + ScaleStep(d));
         }
         catch
@@ -370,7 +576,7 @@ public static class FramePacing
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
         try
         {
-            if (obj == m.ReadU32(CrashPtrAddr)) return false;
+            if (obj == m.ReadU32(CrashPtrAddr)) return true;
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
             return (statusB & (Flag2D | FlagTransMotion)) != 0;
         }
@@ -425,38 +631,23 @@ public static class FramePacing
         }
     }
 
-    static void FinishCrashTrans(IMemory m)
+    static void ClampAnimFrame(IMemory m, uint obj)
     {
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
         try
         {
-            // Hang-boost is spd(vely, 5454) in trans at ticks=34. Scale that
-            // small delta to realDt. The jump CODE write (vely = 10.5m) is an
-            // impulse — scaling it by dt/34 is the short jump.
-            int vy = (int)m.ReadU32(_obj + ObjVelYOff);
-            long d = (long)vy - _ovy;
-            int ad = d < 0 ? (int)-d : (int)d;
-            if (ad > 0 && ad <= HangBoostAbsMax)
-                m.WriteU32(_obj + ObjVelYOff, (uint)(_ovy + ScaleSoft((int)d)));
-
-            KeepTrans(m, _obj + ObjTransOff, _ox);
-            KeepTrans(m, _obj + ObjTransOff + 4, _oy);
-            KeepTrans(m, _obj + ObjTransOff + 8, _oz);
+            uint type = m.ReadU32(obj);
+            if (type is 0 or 2) return;
+            int anim = (int)m.ReadU32(obj + ObjAnimFrameOff);
+            // GoolObjectTransform: svtx/sprite[anim_frame >> 8]. Do not wrap
+            // by GOOL length — that byte is not valid on every seq during load.
+            if (anim > AnimFrameCap || anim < 0)
+                m.WriteU32(obj + ObjAnimFrameOff, 0);
         }
         catch
         {
             // object freed
         }
-    }
-
-    static void KeepTrans(IMemory m, uint addr, int from)
-    {
-        // Crash GOOL must not accumulate 30 Hz position steps at 180 fps.
-        // Crate floors write a large Y snap — leave those.
-        int to = (int)m.ReadU32(addr);
-        long d = (long)to - from;
-        if (d > Teleport || d < -Teleport)
-            return;
-        m.WriteU32(addr, (uint)from);
     }
 
     static void BlendObject(IMemory m)
