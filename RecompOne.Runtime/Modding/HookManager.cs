@@ -67,7 +67,10 @@ public static class HookManager
         Get(target).Pres.Add(pre);
         return true;
     }
-    
+
+    public static void AddPre(MethodInfo target, Func<CpuContext, IMemory, bool> pre) =>
+        Get(target).Pres.Add(pre);
+
     public static bool AddPost(ModInfo mod, MethodInfo target, MethodInfo impl)
     {
         if (!Matches(impl, typeof(void), SigBasic))
@@ -78,7 +81,10 @@ public static class HookManager
         Get(target).Posts.Add(impl.CreateDelegate<Action<CpuContext, IMemory>>());
         return true;
     }
-    
+
+    public static void AddPost(MethodInfo target, Action<CpuContext, IMemory> post) =>
+        Get(target).Posts.Add(post);
+
     public static void Commit()
     {
         foreach (var (target, hooks) in _hooks)

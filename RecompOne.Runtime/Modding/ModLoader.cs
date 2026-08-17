@@ -90,24 +90,21 @@ public static class ModLoader
         var candidates = Discover(root);
         if (candidates.Count == 0)
         {
-            InitDiscOverlay();
-            AssetHotReload.Start();
+            FinishHostHooks();
             return;
         }
 
         candidates = FilterActive(candidates);
         if (candidates.Count == 0)
         {
-            InitDiscOverlay();
-            AssetHotReload.Start();
+            FinishHostHooks();
             return;
         }
 
         var ordered = Order(candidates);
         if (ordered.Count == 0)
         {
-            InitDiscOverlay();
-            AssetHotReload.Start();
+            FinishHostHooks();
             return;
         }
 
@@ -125,8 +122,7 @@ public static class ModLoader
                 LoadMod(ordered[i], cacheDir);
             }
             ModLoadingPopup.Update(ordered.Count, "");
-            try { HookManager.Commit(); }
-            catch (Exception ex) { Console.Error.WriteLine($"[Mods] hook install failed: {ex.Message}"); }
+            CommitAllHooks();
         });
 
         if (OperatingSystem.IsAndroid())
@@ -146,6 +142,20 @@ public static class ModLoader
         Console.WriteLine($"[Mods] loaded {_loaded.Count}/{ordered.Count} mod(s), {HookManager.HookedFunctionCount} function(s) hooked");
         InitDiscOverlay();
         AssetHotReload.Start();
+    }
+
+    static void FinishHostHooks()
+    {
+        CommitAllHooks();
+        InitDiscOverlay();
+        AssetHotReload.Start();
+    }
+
+    static void CommitAllHooks()
+    {
+        FramePacing.InstallGameHooks();
+        try { HookManager.Commit(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[Mods] hook install failed: {ex.Message}"); }
     }
 
     /// <summary>

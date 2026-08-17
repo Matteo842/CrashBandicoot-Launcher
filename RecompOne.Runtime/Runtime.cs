@@ -137,7 +137,7 @@ public static class Runtime
         FrameClock.Throttle();
         Sdk.LibCd.Tick();
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); }
-        DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
+        Host.FramePacing.PulseVblankIrq();
     }
 
     public static void DispatchIrq(int irq)

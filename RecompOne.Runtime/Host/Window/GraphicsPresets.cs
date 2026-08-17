@@ -63,6 +63,6 @@ internal static class GraphicsPresets
         Hle.GpuHle.Dedither = view.Dedither;
         Hle.GpuHle.Dejitter = view.Dejitter;
         Hle.GpuHle.PresentNearest = view.PresentNearest;
-        HostWindow.ApplyVSync(view.VSync);
+        HostWindow.ApplyFramePacing();
     }
 }

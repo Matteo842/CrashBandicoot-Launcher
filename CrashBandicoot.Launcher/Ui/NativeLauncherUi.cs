@@ -88,6 +88,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _muted;
     ThemeCheck? _fullscreen;
     ThemeCheck? _widescreen;
+    ComboBox? _frameRate;
     ComboBox? _internalRes;
     ComboBox? _texFilter;
     ThemeSlider? _filterStrength;
@@ -270,6 +271,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_muted, state, "muted");
         SetCheck(_fullscreen, state, "fullscreen");
         SetCheck(_widescreen, state, "widescreen");
+        if (state.TryGetProperty("frameRate", out var fr) && fr.TryGetInt32(out var fps))
+            SetCombo(_frameRate, fps);
         if (state.TryGetProperty("internalResolution", out var ir) && ir.TryGetInt32(out var scale))
             SetCombo(_internalRes, scale);
         if (state.TryGetProperty("textureFilter", out var tf) && tf.TryGetInt32(out var filter))
@@ -1366,6 +1369,14 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 32;
         card.Controls.Add(Hint("Widescreen hack (gameplay only) — stretches the 4:3 frame. Off on menus, map, and cutscenes.", ref y));
 
+        AddLabel("Frame rate");
+        _frameRate = MakeCombo(new Point(controlX, y), [
+            (0, "Original (30 FPS)"), (60, "60 FPS"), (120, "120 FPS"), (240, "240 FPS"), (-1, "Uncapped"),
+        ]);
+        card.Controls.Add(_frameRate);
+        y += 42;
+        card.Controls.Add(Hint("Gameplay only. Same speed as 30 FPS, unique frames at the chosen rate. Menus stay 30.", ref y));
+
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [
             (1, "Native (1x)"), (2, "2x"), (4, "4x"), (8, "8x (4K)"),
@@ -1425,6 +1436,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 muted = _muted?.Checked ?? false,
                 fullscreen = _fullscreen?.Checked ?? false,
                 widescreen = _widescreen?.Checked ?? false,
+                frameRate = _frameRate?.SelectedItem is Kv frKv ? frKv.Value : 0,
                 internalResolution = _internalRes?.SelectedItem is Kv irKv ? irKv.Value : 4,
                 textureFilter = _texFilter?.SelectedItem is Kv tfKv ? tfKv.Value : 0,
                 textureFilterStrength = (_filterStrength?.Value ?? 50) / 100.0,

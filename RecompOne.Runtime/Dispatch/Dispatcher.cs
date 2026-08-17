@@ -13,6 +13,14 @@ public static class Dispatcher
     static readonly List<string> _active = [];
     static readonly Dictionary<uint, Action<CpuContext, IMemory>> _funcMap = [];
     private static IOverlay? _pending;
+
+    /// <summary>
+    /// Optional filter around <see cref="Call"/>. Pre returning false skips the target.
+    /// Used for GOOL object updates that the game invokes via function pointer
+    /// (MonoMod on the method does not see those <c>Dispatcher.Call</c> sites).
+    /// </summary>
+    public static Func<uint, CpuContext, IMemory, bool>? CallPre;
+    public static Action<uint, CpuContext, IMemory>? CallPost;
     public static void Register(string name, IOverlay overlay)
     {
         _registry[name] = overlay;
@@ -172,7 +180,10 @@ public static class Dispatcher
         if (BiosKernel.TryDispatch(c, m, addr)) return;
         if (!_funcMap.TryGetValue(addr, out var fn))
             throw new InvalidOperationException($"unmapped call: 0x{addr:X8}");
-        fn(c, m);
+        bool skip = CallPre != null && !CallPre(addr, c, m);
+        if (!skip)
+            fn(c, m);
+        CallPost?.Invoke(addr, c, m);
         HealGeomClobberedRegs(c, m);
     }
 

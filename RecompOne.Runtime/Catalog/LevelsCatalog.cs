@@ -70,6 +70,14 @@ public sealed class LevelsCatalog
     public bool IsGameplay(uint id) =>
         TryGet(id, out var info) ? info.Kind == LevelKind.Gameplay : !IsUiOrCinema(id);
 
+    /// <summary>Gameplay + bonus: skip the 30 FPS pad; physics uses raw ticks_per_frame.</summary>
+    public bool AllowsUnlockedFps(uint id)
+    {
+        if (TryGet(id, out var info))
+            return info.Kind is LevelKind.Gameplay or LevelKind.Bonus;
+        return !IsUiOrCinema(id);
+    }
+
     internal static LevelsCatalog FromJson(JsonDocument? doc, uint defaultAddr)
     {
         if (doc == null) return Empty;

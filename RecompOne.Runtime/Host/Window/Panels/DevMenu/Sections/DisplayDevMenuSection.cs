@@ -38,6 +38,9 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
         }
         ImGuiEx.TextDisabled("Less polygon wobble");
 
+        ImGui.Spacing();
+        FrameRateSetting.DrawCombo("dev-display");
+
         bool showBar = !ConfigManager.View.HideTopBar;
         if (ImGui.Checkbox("Show Menu Bar", ref showBar))
         {

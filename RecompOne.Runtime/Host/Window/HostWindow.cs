@@ -381,9 +381,25 @@ internal static class HostWindow
     /// <summary>Enable/disable host swap-interval VSync and relax software frame throttle.</summary>
     public static void ApplyVSync(bool on)
     {
-        FrameClock.SkipThrottle = on;
+        ConfigManager.View.VSync = on;
+        ApplyFramePacing();
+    }
+
+    /// <summary>Push FrameRate + VSync into FrameClock / the Silk window.</summary>
+    public static void ApplyFramePacing()
+    {
+        var view = ConfigManager.View;
+        int rate = view.FrameRate;
+        FrameClock.SkipThrottle = view.VSync || rate == ViewConfig.FrameRateUncapped;
+        FrameClock.TargetHz = rate switch
+        {
+            120 => 120,
+            240 => 240,
+            _ => 60,
+        };
+        FramePacing.Reset();
         if (_window == null) return;
-        try { _window.VSync = on; }
+        try { _window.VSync = view.VSync; }
         catch { /* some backends reject runtime changes */ }
     }
 

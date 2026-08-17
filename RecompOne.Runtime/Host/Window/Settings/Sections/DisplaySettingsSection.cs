@@ -74,6 +74,9 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
 
         ImGui.Spacing();
+        FrameRateSetting.DrawCombo("display");
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 

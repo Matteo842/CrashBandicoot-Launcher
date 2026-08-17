@@ -89,6 +89,9 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
         ImGuiEx.TextDisabled("Less tearing, slight lag");
 
         ImGui.Spacing();
+        FrameRateSetting.DrawCombo("rendering");
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Events;
+using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Sdk;
@@ -13,36 +14,69 @@ public static class LibEtc
     static long _lastVblankTs;
     static int _catchUpGuard;
 
-    // PsyQ polls this; Crash's VSync(0) waits until count >= target.
     const uint VBlankCountAddr = 0x800549F0u;
-    // Crash drives GOOL / frame delta off ticks_elapsed → draw_stamp → frames_elapsed.
     const uint TicksElapsedAddr = 0x80034520u;
-    // ~1/60s in Crash's tick units. Game loop pads a second VSync(0) when delta < 25,
-    // locking gameplay to ~30fps. 34 was ~two vblanks and skipped that pad → 2x speed.
     const uint TicksPerVBlank = 17u;
 
     /// <summary>
     /// HLE for the PsyQ vblank wait at 0x8003E638 (not the public VSync entry).
-    /// A0 = target vblank count; presents/throttles once per vblank until reached.
+    /// Unlocked gameplay skips the immediate pad wait so the loop can run at 60/120/240.
+    /// ticks_elapsed advances by real dt (1020 ticks/s) per present.
     /// </summary>
     public static void VSync(CpuContext c, IMemory m)
     {
-        uint target = c.A0;
-        uint count = m.ReadU32(VBlankCountAddr);
-
-        while (count < target)
+        if (FramePacing.IsActive(m))
         {
-            count = AdvanceVBlank(c, m);
+            UnlockedVSync(c, m);
+            return;
         }
 
+        uint target = c.A0;
+        uint count = m.ReadU32(VBlankCountAddr);
+        while (count < target)
+            count = AdvanceVBlank(c, m);
         c.V0 = 0;
     }
 
-    /// <summary>
-    /// Keep Crash's VBlank-driven sequencer moving during long CPU work
-    /// (decompress, copies) without presenting or sleeping — loads stay
-    /// instant, the display stays on the last frame, music does not freeze.
-    /// </summary>
+    static void UnlockedVSync(CpuContext c, IMemory m)
+    {
+        if (FramePacing.IsPadCall())
+        {
+            c.V0 = 0;
+            return;
+        }
+
+        uint target = c.A0;
+        uint count = m.ReadU32(VBlankCountAddr);
+        if (count >= target)
+        {
+            c.V0 = 0;
+            return;
+        }
+
+        while (count < target)
+            count = AdvanceUnlocked(c, m);
+
+        FramePacing.MarkPrimaryEnd();
+        c.V0 = 0;
+    }
+
+    static uint AdvanceUnlocked(CpuContext? c, IMemory m)
+    {
+        _catchUpGuard++;
+        try
+        {
+            uint ticks = FramePacing.AdvanceWallClock(m);
+            m.WriteU32(TicksElapsedAddr, ticks);
+            Runtime.PresentFrame();
+            return TickCounters(c, m, addTicks: false);
+        }
+        finally
+        {
+            _catchUpGuard--;
+        }
+    }
+
     public static void MaybeCatchUpVBlank()
     {
         if (_catchUpGuard != 0 || Runtime.Mem == null) return;
@@ -59,8 +93,17 @@ public static class LibEtc
         try
         {
             var m = Runtime.Mem;
-            if (m != null)
-                TickSequencer(Runtime.Cpu, m);
+            if (m == null) return;
+            // Unlocked: keep SPU/sequencer alive during long CPU work, but never
+            // advance ticks_elapsed — that is owned by the present step.
+            if (FramePacing.IsActive(m))
+            {
+                _lastVblankTs = now;
+                Runtime.DispatchIrq(0);
+                FramePacing.NoteVblankIrq();
+                return;
+            }
+            TickSequencer(Runtime.Cpu, m);
         }
         finally
         {
@@ -68,16 +111,13 @@ public static class LibEtc
         }
     }
 
-    /// <summary>
-    /// Full emulated VBlank used by VSync: present, throttle, IRQ, counters.
-    /// </summary>
     public static uint AdvanceVBlank(CpuContext? c, IMemory m)
     {
         _catchUpGuard++;
         try
         {
             Runtime.PresentFrame();
-            return TickCounters(c, m);
+            return TickCounters(c, m, addTicks: true);
         }
         finally
         {
@@ -89,15 +129,17 @@ public static class LibEtc
     {
         _lastVblankTs = Stopwatch.GetTimestamp();
         Runtime.DispatchIrq(0);
-        return TickCounters(c, m);
+        FramePacing.NoteVblankIrq();
+        return TickCounters(c, m, addTicks: true);
     }
 
-    static uint TickCounters(CpuContext? c, IMemory m)
+    static uint TickCounters(CpuContext? c, IMemory m, bool addTicks)
     {
         _lastVblankTs = Stopwatch.GetTimestamp();
         uint count = m.ReadU32(VBlankCountAddr) + 1;
         m.WriteU32(VBlankCountAddr, count);
-        m.WriteU32(TicksElapsedAddr, m.ReadU32(TicksElapsedAddr) + TicksPerVBlank);
+        if (addTicks)
+            m.WriteU32(TicksElapsedAddr, m.ReadU32(TicksElapsedAddr) + TicksPerVBlank);
         _vcount = (int)count;
 
         if (c != null && Event.HasAnyListeners<VSyncEvent>())

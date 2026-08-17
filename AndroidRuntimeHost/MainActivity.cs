@@ -677,7 +677,9 @@ public sealed class MainActivity : Activity
         RecompOne.Runtime.Hle.GpuHle.Dejitter = view.Dejitter;
         RecompOne.Runtime.Hle.GpuHle.PresentNearest = view.PresentNearest;
         RecompOne.Runtime.Hle.GpuHle.IntegerScale = view.IntegerScale;
+        RecompOne.Runtime.Host.FramePacing.ForceOriginal = true;
         RecompOne.Runtime.Host.FrameClock.SkipThrottle = false;
+        RecompOne.Runtime.Host.FrameClock.TargetHz = 60;
         RecompOne.Runtime.Hle.GpuHle.RefreshWideFov();
     }
 

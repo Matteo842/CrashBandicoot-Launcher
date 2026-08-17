@@ -71,6 +71,9 @@ internal sealed class EngineDevMenuSection : IDevMenuSection
         DrawGuest("ticks_elapsed", HostDiagnostics.GuestTicksElapsed);
         DrawGuest("frames_elapsed", HostDiagnostics.GuestFramesElapsed);
         DrawGuest("vblank counter", HostDiagnostics.GuestVblankCounter);
+        ImGui.Text($"ticks_per_frame (host): {FramePacing.LastFrameTicks} / 34  ({FramePacing.LastDtMs:0.0} ms)");
+        uint guestTpf = FramePacing.TryReadGuestTicksPerFrame(Runtime.Mem);
+        ImGui.Text($"ticks_per_frame (guest c1): {guestTpf} / 34");
         DrawGuest("title_state", HostDiagnostics.GuestTitleState);
         DrawGuest("pads[0]", HostDiagnostics.GuestPads0);
 

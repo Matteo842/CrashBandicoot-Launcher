@@ -215,6 +215,7 @@ public sealed class LauncherHost : Form
             muted = ConfigManager.Game.Muted,
             fullscreen = ConfigManager.View.Fullscreen,
             widescreen = ConfigManager.View.Widescreen,
+            frameRate = ConfigManager.View.FrameRate,
             internalResolution = ConfigManager.View.InternalResolution,
             textureFilter = ConfigManager.View.TextureFilter,
             textureFilterStrength = ConfigManager.View.TextureFilterStrength,
@@ -621,6 +622,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.Fullscreen = fs.GetBoolean();
         if (root.TryGetProperty("widescreen", out var ws))
             ConfigManager.View.Widescreen = ws.GetBoolean();
+        if (root.TryGetProperty("frameRate", out var fr) && fr.TryGetInt32(out var fps))
+            ConfigManager.View.FrameRate = fps;
         if (root.TryGetProperty("internalResolution", out var ir) && ir.TryGetInt32(out var scale))
             ConfigManager.View.InternalResolution = scale;
         if (root.TryGetProperty("textureFilter", out var tf) && tf.TryGetInt32(out var filter))

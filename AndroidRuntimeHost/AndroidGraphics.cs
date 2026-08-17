@@ -68,7 +68,9 @@ static class AndroidGraphics
         // EGL swap interval is 0 so SPU music stays in lockstep with the
         // software VBlank. Never skip FrameClock on Android or the game
         // runs uncapped (the VSync checkbox only applies on desktop).
+        FramePacing.ForceOriginal = true;
         FrameClock.SkipThrottle = false;
+        FrameClock.TargetHz = 60;
         ConfigManager.SaveView(Array.Empty<IPanel>());
     }
 }

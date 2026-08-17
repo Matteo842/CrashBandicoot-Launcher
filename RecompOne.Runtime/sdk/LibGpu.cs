@@ -29,6 +29,7 @@ public static class LibGpu
 
         // Next RTP batch belongs to a new frame (or pass) — allow cache regen.
         GteScreenCache.EndFrame();
+        Host.FramePacing.PatchTicksPerFrame(m);
     }
 
     public static void DrawSync(CpuContext c, IMemory m) => c.V0 = 0;
@@ -82,6 +83,7 @@ public static class LibGpu
             Event.Dispatch(e);
         }
 
+        Host.FramePacing.PatchTicksPerFrame(m);
         c.V0 = c.A0;
     }
 

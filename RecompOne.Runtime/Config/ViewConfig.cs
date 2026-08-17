@@ -192,6 +192,50 @@ public class ViewConfig
         set => SetBool("VSync", value);
     }
 
+    public const int FrameRateOriginal = 0;
+    public const int FrameRateUncapped = -1;
+
+    public static readonly int[] FrameRateOptionValues = [0, 60, 120, 240, -1];
+
+    public static readonly string[] FrameRateLabels =
+    [
+        "Original (30 FPS)",
+        "60 FPS",
+        "120 FPS",
+        "240 FPS",
+        "Uncapped",
+    ];
+
+    /// <summary>
+    /// 0 = original 30 FPS pad. 60/120/240 = unlocked present cap; sim dt is
+    /// wall time (1020 ticks/s) so 60 and 120 play at the same speed. -1 = uncapped.
+    /// Menus stay 30.
+    /// </summary>
+    public int FrameRate
+    {
+        get => SnapFrameRate(GetInt("FrameRate", FrameRateOriginal));
+        set => SetInt("FrameRate", SnapFrameRate(value));
+    }
+
+    public static int SnapFrameRate(int value)
+    {
+        for (int i = 0; i < FrameRateOptionValues.Length; i++)
+            if (FrameRateOptionValues[i] == value) return value;
+        if (value < 0) return FrameRateUncapped;
+        if (value < 45) return FrameRateOriginal;
+        if (value < 90) return 60;
+        if (value < 180) return 120;
+        return 240;
+    }
+
+    public static int FrameRateToIndex(int value)
+    {
+        int snapped = SnapFrameRate(value);
+        for (int i = 0; i < FrameRateOptionValues.Length; i++)
+            if (FrameRateOptionValues[i] == snapped) return i;
+        return 0;
+    }
+
     /// <summary>Host hotkey that opens/closes the Developer Menu (Silk Key name, e.g. F3).</summary>
     public string CheatMenuKey
     {
