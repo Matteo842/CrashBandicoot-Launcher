@@ -9,11 +9,12 @@ using RecompOne.Runtime.Modding;
 namespace RecompOne.Runtime.Host;
 
 /// <summary>
-/// Wall-clock dt is seconds × 1020, written into ticks_per_frame. Jump height
-/// comes from the original GoolObjectPhysics (y += v*ticks/1024, then gravity).
-/// Do not re-integrate Crash Y — that fought collision and ignored FPS jitter.
-/// Takeoff only clears GROUNDLAND when vely &gt; 0 so a small dt step is not
-/// treated as a landing. Anim is capped, not wrapped by GOOL length.
+/// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
+/// Crash does one original 30 Hz trans+physics step (34 ticks) then we keep
+/// dt/34 of the result so wall speed matches 30 FPS at 50 or 300 Hz. A raw
+/// 3-tick step is smaller than the wall bitmap cell (2048) — StopAtWalls
+/// quantizes it to 0, which is the "slower near the pit at 300 FPS" bug.
+/// Other GOOL trans still sees 34 then BlendObject. HUD uses real ticks.
 /// </summary>
 public static class FramePacing
 {
@@ -56,6 +57,7 @@ public static class FramePacing
     const uint ObjAnimFrameOff = 0x10Cu;
     const uint ObjPathProgOff = 0x114u;
     const uint ObjFloorYOff = 0x11Cu;
+    const uint ObjSpeedOff = 0x124u;
 
     const uint FlagTransMotion = 0x40u;
     const uint FlagGravity = 0x20u;
@@ -77,6 +79,7 @@ public static class FramePacing
     static uint _guestTicks;
     static uint _frameTicks = 34;
     static double _tickFrac;
+    static double _exactTicks = 34;
     static long _simTs;
     static long _irqTs;
     static bool _clockArmed;
@@ -84,6 +87,7 @@ public static class FramePacing
     static int _vsyncsInGpu;
     static bool _inGpuUpdate;
     static bool _didPresentThisGpu;
+    static bool _ticksTakenThisLoop;
     static bool _loggedUnlockGpu;
     static bool _inNsInit;
     /// <summary>Unlocked VSync only after a gameplay GpuUpdate with Crash spawned.</summary>
@@ -93,17 +97,19 @@ public static class FramePacing
 
     static uint _obj;
     static int _ox, _oy, _oz, _orx, _ory, _orz, _osx, _osy, _osz, _oanim;
-    static int _ovy, _opath;
+    static int _ovy, _ovx, _ovz, _ospeed, _opath;
+    static int _paceLog;
     static bool _haveObj;
     static bool _physicsBlended;
     static bool _crashObj;
+    static bool _crashScaled;
 
     public static bool ForceOriginal { get; set; }
 
     public static uint LastFrameTicks => _frameTicks;
 
     /// <summary>Wall milliseconds used for the last sim step (after hitch clamp).</summary>
-    public static double LastDtMs => _frameTicks * 1000.0 / TicksPerSecond;
+    public static double LastDtMs => _exactTicks * 1000.0 / TicksPerSecond;
 
     public static bool WantsUnlock =>
         !ForceOriginal && ConfigManager.View.FrameRate != ViewConfig.FrameRateOriginal;
@@ -140,15 +146,19 @@ public static class FramePacing
         _guestTicks = 0;
         _frameTicks = 34;
         _tickFrac = 0;
+        _exactTicks = 34;
         _simTs = 0;
         _irqTs = 0;
         _clockArmed = false;
         _haveObj = false;
         _physicsBlended = false;
         _crashObj = false;
+        _crashScaled = false;
+        _paceLog = 0;
         _vsyncsInGpu = 0;
         _inGpuUpdate = false;
         _didPresentThisGpu = false;
+        _ticksTakenThisLoop = false;
         _loggedUnlockGpu = false;
         _inNsInit = false;
         _levelReady = false;
@@ -178,9 +188,9 @@ public static class FramePacing
     public static void NoteGpuPresent() => _didPresentThisGpu = true;
 
     /// <summary>
-    /// Sim dt from wall time since the last primary present. The FrameRate
-    /// combo only caps refresh — 120 Hz with a 60 Hz present still uses 17 ticks.
-    /// A hitch longer than one original 30 Hz frame is dropped, not caught up.
+    /// Sim dt from wall time since the last sim step. The FrameRate combo
+    /// only caps refresh — never a per-Hz lookup. A hitch longer than one
+    /// original 30 Hz frame is dropped, not caught up.
     /// </summary>
     public static uint AdvanceWallClock(IMemory m)
     {
@@ -191,8 +201,17 @@ public static class FramePacing
             catch { _guestTicks = 0; }
             _simTs = now;
             _tickFrac = 0;
+            _exactTicks = 1;
             _clockArmed = true;
-            _frameTicks = 17;
+            _frameTicks = 1;
+            _ticksTakenThisLoop = true;
+            PatchTicksPerFrame(m);
+            return _guestTicks;
+        }
+
+        // One dt per game loop. Extra PsyQ VSync helpers must not split it.
+        if (_ticksTakenThisLoop)
+        {
             PatchTicksPerFrame(m);
             return _guestTicks;
         }
@@ -200,6 +219,7 @@ public static class FramePacing
         double sec = (now - _simTs) / (double)Stopwatch.Frequency;
         if (sec < MinStepSeconds)
         {
+            _exactTicks = 0;
             PatchTicksPerFrame(m);
             return _guestTicks;
         }
@@ -208,7 +228,8 @@ public static class FramePacing
         if (sec > HitchSeconds)
             sec = HitchSeconds;
 
-        _tickFrac += sec * TicksPerSecond;
+        _exactTicks = sec * TicksPerSecond;
+        _tickFrac += _exactTicks;
         uint dt = (uint)Math.Floor(_tickFrac);
         _tickFrac -= dt;
         if (dt < 1) dt = 1;
@@ -216,6 +237,7 @@ public static class FramePacing
 
         _frameTicks = dt;
         _guestTicks += dt;
+        _ticksTakenThisLoop = true;
         PatchTicksPerFrame(m);
         return _guestTicks;
     }
@@ -307,6 +329,7 @@ public static class FramePacing
         HookPre(GoolUpdateObjectsAddr, PreUpdateObjects);
         HookPre(GoolObjectTransformAddr, PreTransform);
         HookPre(GoolObjectPhysicsAddr, PrePhysics);
+        HookPost(GoolObjectPhysicsAddr, PostCrashPhysics);
         HookPre(GfxTransformSvtxAddr, PreTransformSvtx);
         HookPre(GfxTransformCvtxAddr, PreTransformCvtx);
         HookPre(GpuUpdateAddr, PreGpuUpdate);
@@ -341,8 +364,9 @@ public static class FramePacing
 
     static bool PreUpdateObjects(CpuContext c, IMemory m)
     {
+        _ticksTakenThisLoop = false;
         if (IsActive(m))
-            PatchTicksPerFrame(m);
+            AdvanceWallClock(m);
         return true;
     }
 
@@ -366,15 +390,18 @@ public static class FramePacing
         if (addr == GoolObjectPhysicsAddr)
         {
             if (IsActive(m))
-                WriteAllTicks(m, _frameTicks);
+                WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
             return true;
         }
         if (addr != GoolObjectUpdateAddr) return true;
         _haveObj = false;
         _physicsBlended = false;
         _crashObj = false;
+        _crashScaled = false;
         if (!IsActive(m)) return true;
-        if (WantsRealTicks(m, c.A0))
+        // Crash: original 34-tick trans+physics, then FinishCrashScale(dt/34).
+        // HUD: real dt. Everyone else: 34, then BlendObject.
+        if (IsHud(m, c.A0))
             WriteAllTicks(m, _frameTicks);
         else
             WriteAllTicks(m, RefTicks);
@@ -398,6 +425,12 @@ public static class FramePacing
             PatchTicksPerFrame(m);
             return;
         }
+        if (addr == GoolObjectPhysicsAddr)
+        {
+            if (_crashObj && IsActive(m))
+                FinishCrashScale(m);
+            return;
+        }
         if (addr != GoolObjectUpdateAddr) return;
         if (!_physicsBlended && _haveObj)
             BlendObject(m);
@@ -418,10 +451,16 @@ public static class FramePacing
         {
             if (_haveObj && c.A0 == _obj && !_crashObj)
                 BlendObject(m);
-            WriteAllTicks(m, _frameTicks);
+            WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
             _physicsBlended = _haveObj && c.A0 == _obj;
         }
         return true;
+    }
+
+    static void PostCrashPhysics(CpuContext c, IMemory m)
+    {
+        if (_crashObj && IsActive(m))
+            FinishCrashScale(m);
     }
 
     static bool PreGpuUpdate(CpuContext c, IMemory m)
@@ -564,21 +603,19 @@ public static class FramePacing
     static bool PreGoolSeek(CpuContext c, IMemory m)
     {
         if (!IsActive(m) || _frameTicks >= RefTicks) return true;
-        // Object trans is ticks=34 + BlendObject, or real-dt HUD. Scaling seek
-        // again would double-dt fruit and turtles.
+        // Object trans is ticks=34 + BlendObject (HUD is real-dt). Scaling
+        // seek again would double-dt fruit and turtles.
         if (_haveObj) return true;
         c.A2 = (uint)ScaleStep((int)c.A2);
         return true;
     }
 
-    static bool WantsRealTicks(IMemory m, uint obj)
+    static bool IsHud(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
         try
         {
-            if (obj == m.ReadU32(CrashPtrAddr)) return true;
-            uint statusB = m.ReadU32(obj + ObjStatusBOff);
-            return (statusB & (Flag2D | FlagTransMotion)) != 0;
+            return (m.ReadU32(obj + ObjStatusBOff) & Flag2D) != 0;
         }
         catch
         {
@@ -602,6 +639,94 @@ public static class FramePacing
         return (int)((n + (n >= 0 ? RefTicks / 2 : -(RefTicks / 2))) / RefTicks);
     }
 
+    static int ScaleExact(int from, int to, int teleport)
+    {
+        long d = (long)to - from;
+        if (d > teleport || d < -teleport) return to;
+        return from + (int)Math.Round(d * _exactTicks / RefTicks);
+    }
+
+    static int ScaleAng(int from, int to)
+    {
+        int d = to - from;
+        if (d > 0x800) d -= 0x1000;
+        if (d < -0x800) d += 0x1000;
+        return from + (int)Math.Round(d * _exactTicks / RefTicks);
+    }
+
+    /// <summary>
+    /// Guest just ran a full 34-tick Crash step (needed so StopAtWalls sees
+    /// a move larger than one 2048-unit bitmap cell). Keep dt/34 of it.
+    /// </summary>
+    static void FinishCrashScale(IMemory m)
+    {
+        if (!_haveObj || !_crashObj || _crashScaled) return;
+        try
+        {
+            _crashScaled = true;
+            if (_exactTicks <= 0)
+            {
+                RestoreCrash(m);
+                return;
+            }
+            if (_exactTicks >= RefTicks - 0.01) return;
+
+            uint o = _obj;
+            m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
+            m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
+
+            int y = ScaleExact(_oy, (int)m.ReadU32(o + ObjTransOff + 4), Teleport);
+            m.WriteU32(o + ObjTransOff + 4, (uint)y);
+            m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), Teleport));
+            m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, (int)m.ReadU32(o + ObjVelYOff), Teleport));
+            m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), Teleport));
+            m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, (int)m.ReadU32(o + ObjSpeedOff), Teleport));
+            m.WriteU32(o + ObjRotOff, (uint)ScaleAng(_orx, (int)m.ReadU32(o + ObjRotOff)));
+            m.WriteU32(o + ObjRotOff + 4, (uint)ScaleAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4)));
+            m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
+
+            int animTo = (int)m.ReadU32(o + ObjAnimFrameOff);
+            if (animTo <= AnimFrameCap && _oanim <= AnimFrameCap)
+            {
+                int ad = animTo - _oanim;
+                if (ad <= 0x400 && ad >= -0x400)
+                    m.WriteU32(o + ObjAnimFrameOff, (uint)ScaleExact(_oanim, animTo, 0x400));
+            }
+
+            uint statusA = m.ReadU32(o + ObjStatusAOff);
+            int floor = (int)m.ReadU32(o + ObjFloorYOff);
+            int vy = (int)m.ReadU32(o + ObjVelYOff);
+            if ((statusA & FlagGroundLand) != 0 && y > floor + 0x100 && vy > 0)
+                m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+
+            if (++_paceLog >= 90)
+            {
+                _paceLog = 0;
+                PaceLog($"crash dt {_exactTicks:0.00}/{RefTicks} ticks host={_frameTicks}");
+            }
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static void RestoreCrash(IMemory m)
+    {
+        uint o = _obj;
+        m.WriteU32(o + ObjTransOff, (uint)_ox);
+        m.WriteU32(o + ObjTransOff + 4, (uint)_oy);
+        m.WriteU32(o + ObjTransOff + 8, (uint)_oz);
+        m.WriteU32(o + ObjVelXOff, (uint)_ovx);
+        m.WriteU32(o + ObjVelYOff, (uint)_ovy);
+        m.WriteU32(o + ObjVelZOff, (uint)_ovz);
+        m.WriteU32(o + ObjSpeedOff, (uint)_ospeed);
+        m.WriteU32(o + ObjRotOff, (uint)_orx);
+        m.WriteU32(o + ObjRotOff + 4, (uint)_ory);
+        m.WriteU32(o + ObjRotOff + 8, (uint)_orz);
+        m.WriteU32(o + ObjAnimFrameOff, (uint)_oanim);
+    }
+
     static void SnapshotObject(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return;
@@ -621,6 +746,9 @@ public static class FramePacing
             _osy = (int)m.ReadU32(obj + ObjScaleOff + 4);
             _osz = (int)m.ReadU32(obj + ObjScaleOff + 8);
             _ovy = (int)m.ReadU32(obj + ObjVelYOff);
+            _ovx = (int)m.ReadU32(obj + ObjVelXOff);
+            _ovz = (int)m.ReadU32(obj + ObjVelZOff);
+            _ospeed = (int)m.ReadU32(obj + ObjSpeedOff);
             _oanim = (int)m.ReadU32(obj + ObjAnimFrameOff);
             _opath = (int)m.ReadU32(obj + ObjPathProgOff);
             _haveObj = true;
@@ -652,6 +780,7 @@ public static class FramePacing
 
     static void BlendObject(IMemory m)
     {
+        // Crash/HUD already used real dt. Other objects: 34-tick trans scaled here.
         if (!_haveObj || _crashObj || _frameTicks >= RefTicks) return;
         try
         {
