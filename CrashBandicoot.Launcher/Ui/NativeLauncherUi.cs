@@ -1375,7 +1375,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         ]);
         card.Controls.Add(_frameRate);
         y += 42;
-        card.Controls.Add(Hint("Gameplay only. Same speed as 30 FPS, unique frames at the chosen rate. Menus stay 30.", ref y));
+        card.Controls.Add(Hint("Gameplay only. Same speed as 30 FPS, unique frames at the chosen rate. Menus and bonus save stay 30.", ref y));
 
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [

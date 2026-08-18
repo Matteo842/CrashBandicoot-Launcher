@@ -19,6 +19,8 @@ namespace RecompOne.Runtime.Host;
 /// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
 /// object pool. Wumpa sprite frames are <c>+= 1</c> per trans; scaled to dt/34.
 /// HUD uses real ticks. Crash anim_frame is not scaled (GOOL wait).
+/// Bonus rounds and Willy_Warp_Out stay on the original 30 Hz pad so CardC
+/// save/continue cannot skip.
 /// </summary>
 public static class FramePacing
 {
@@ -46,6 +48,9 @@ public static class FramePacing
     const uint GfxTransformSvtxAddr = 0x80018964u;
     const uint GfxTransformCvtxAddr = 0x80018A40u;
     const uint CrashPtrAddr = 0x800566B4u;
+    const uint ObjStateOff = 0x2Cu;
+    /// <summary>WillC <c>Willy_Warp_Out</c> (EventWarp). NTSC-U SCUS-94900.</summary>
+    const uint StateWarpOut = 32;
     const uint CamZoneAddr = 0x80057914u;
     const uint CamPathAddr = 0x8005791Cu;
     const uint CamProgressAddr = 0x80057920u;
@@ -146,13 +151,14 @@ public static class FramePacing
 
     public static bool IsActive(IMemory? m)
     {
-        if (!WantsUnlock || m == null || _inNsInit || !_levelReady) return false;
+        if (!WantsUnlock || m == null || _inNsInit) return false;
+        if (!_levelReady) return false;
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            if (!Catalog.Levels.AllowsUnlockedFps(id))
+            if (!Catalog.Levels.AllowsUnlockedFps(id) || IsWarpOut(m))
             {
-                _levelReady = false;
+                DropToOriginalPad(m, id);
                 return false;
             }
             return true;
@@ -161,6 +167,27 @@ public static class FramePacing
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Crash flies up, then CardC save/continue. That GOOL is per display
+    /// frame — keep the original 30 Hz pad until NSInit.
+    /// </summary>
+    static bool IsWarpOut(IMemory m)
+    {
+        uint crash = m.ReadU32(CrashPtrAddr);
+        if ((crash & 0xFF000000u) != 0x80000000u) return false;
+        return m.ReadU32(crash + ObjStateOff) == StateWarpOut;
+    }
+
+    static void DropToOriginalPad(IMemory m, uint id)
+    {
+        if (!_levelReady) return;
+        _levelReady = false;
+        _frameTicks = RefTicks;
+        _exactTicks = RefTicks;
+        WriteAllTicks(m, RefTicks);
+        PaceLog($"original pad lid={id}");
     }
 
     public static void Reset()

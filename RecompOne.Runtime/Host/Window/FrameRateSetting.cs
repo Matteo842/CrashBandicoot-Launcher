@@ -14,7 +14,7 @@ internal static class FrameRateSetting
             HostWindow.ApplyFramePacing();
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Gameplay only — menus & cutscenes stay 30 FPS.");
+        ImGuiEx.TextDisabled("Gameplay only — menus, bonus save, and cutscenes stay 30 FPS.");
         ImGuiEx.TextDisabled("This is a refresh cap. Speed is delta time (60 and 120 play the same).");
         ImGuiEx.TextDisabled("Turn VSync off if 120/240 stay locked to the monitor.");
     }
