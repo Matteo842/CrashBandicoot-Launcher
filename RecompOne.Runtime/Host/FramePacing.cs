@@ -11,9 +11,10 @@ namespace RecompOne.Runtime.Host;
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
 /// Crash: 34-tick trans+physics then scale(dt/34) so StopAtWalls
-/// sees a real bitmap cell. Enemies (GOOL category 0x300, SkunC, ground
-/// walkers) run one original 34-tick GOOL update per 34 wall ticks and
-/// still draw every display frame — trans is per-call (>>=2, ReactSolid).
+/// sees a real bitmap cell. Enemies (GOOL category 0x300) and boxes (type
+/// 0x22) run one original 34-tick GOOL update per 34 wall ticks and still
+/// draw every display frame. Box stacks share velocity with box_link;
+/// 300 Hz trans/collide eats the pile.
 /// Path rollers stay on real dt every frame.
 /// Unscaled trans <c>x += vel</c> (later turtles) is kept at dt/34 of the extra.
 /// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
@@ -44,6 +45,10 @@ public static class FramePacing
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
     const uint GoolSeekAddr = 0x80024628u;
     const uint GoolObjectCreateAddr = 0x8001C6C8u;
+    const uint ObjectBoundsAddr = 0x80060E08u;
+    const uint ObjectBoundCountAddr = 0x80061888u;
+    const int ObjectBoundMax = 96;
+    const uint ObjBoundOff = 0x8u;
     const uint LevelUpdateAddr = 0x80025A60u;
     const uint GpuUpdateAddr = 0x80016E5Cu;
     const uint NsInitAddr = 0x80015B58u;
@@ -98,8 +103,12 @@ public static class FramePacing
     const uint FlagGravity = 0x20u;
     const uint FlagTransMotion = 0x40u;
     const uint FlagInvisible = 0x100u;
+    const uint FlagSolidSides = 0x10000u;
+    const uint FlagSolidTop = 0x20000u;
     const uint FlagStall = 0x10000000u;
     const uint GoolCategoryEnemy = 0x300u;
+    /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
+    const uint GoolTypeBox = 0x22u;
     const uint ErrorObjectPoolFull = 0xFFFFFFEAu;
     const uint GoolSuccess = 0xFFFFFF01u; // SUCCESS -255
     const uint EntryMagic = 0x100FFFFu;
@@ -540,19 +549,28 @@ public static class FramePacing
             // Trans runs every display frame. >>=2, ReactSolid, setvel, spawn
             // in trans are per-call not per-tick — 34+scale cannot fix that.
             // Run one original 34-tick update per 34 wall ticks; still draw.
+            // First frame always runs so box_link / stall init is not delayed.
             if (_simAcc.Count > 128)
                 _simAcc.Clear();
-            _simAcc.TryGetValue(_obj, out double acc);
-            acc += _exactTicks;
-            if (acc < RefTicks)
+            if (IsFirstFrame(m, _obj))
             {
-                _simAcc[_obj] = acc;
-                DrawGatedObject(c, m, _obj);
-                c.V0 = GoolSuccess;
-                return false;
+                _simAcc[_obj] = 0;
+                WriteAllTicks(m, RefTicks);
             }
-            _simAcc[_obj] = acc - RefTicks;
-            WriteAllTicks(m, RefTicks);
+            else
+            {
+                _simAcc.TryGetValue(_obj, out double acc);
+                acc += _exactTicks;
+                if (acc < RefTicks)
+                {
+                    _simAcc[_obj] = acc;
+                    DrawGatedObject(c, m, _obj);
+                    c.V0 = GoolSuccess;
+                    return false;
+                }
+                _simAcc[_obj] = acc - RefTicks;
+                WriteAllTicks(m, RefTicks);
+            }
         }
         else
             WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
@@ -940,6 +958,9 @@ public static class FramePacing
         {
             TryReadGoolClass(m, obj, out uint type, out uint cat);
             if (type == 2) return true;
+            // Crates: stack link lives in the velocity union. 300 Hz trans
+            // collides them and GOOL_EVENT_BOX_STACK_BREAK eats the pile.
+            if (type == GoolTypeBox) return true;
             // Enemies (0x300): one original 30 Hz GOOL update per 34 wall ticks.
             if (cat == GoolCategoryEnemy) return true;
             uint b = m.ReadU32(obj + ObjStatusBOff);
@@ -986,7 +1007,9 @@ public static class FramePacing
         {
             uint seq = m.ReadU32(obj + ObjAnimSeqOff);
             if ((seq & 0xFF000000u) != 0x80000000u) return;
-            if ((m.ReadU32(obj + ObjStatusBOff) & FlagInvisible) != 0) return;
+            uint statusB = m.ReadU32(obj + ObjStatusBOff);
+            if ((statusB & FlagInvisible) != 0) return;
+            RegisterGatedBound(m, obj, statusB);
             uint a0 = c.A0;
             c.A0 = obj;
             Dispatcher.Call(c, m, GoolObjectTransformAddr);
@@ -996,6 +1019,32 @@ public static class FramePacing
         {
             // object freed / no mesh this frame
         }
+    }
+
+    /// <summary>
+    /// Iron crates are walls via <c>PlotObjWalls</c> + SOLID_SIDES. Skipping
+    /// GoolObjectUpdate also skips GoolObjectBound, so they vanish from
+    /// <c>object_bounds</c> and Crash walks through. Write the AABB only —
+    /// do not call Bound (same-stamp GoolCollide kills siblings mid-walk).
+    /// </summary>
+    static void RegisterGatedBound(IMemory m, uint obj, uint statusB)
+    {
+        if ((statusB & FlagCollidable) == 0) return;
+        if ((statusB & (FlagSolidSides | FlagSolidTop)) == 0) return;
+        int n = (int)m.ReadU32(ObjectBoundCountAddr);
+        if ((uint)n >= (uint)ObjectBoundMax) return;
+        uint slot = ObjectBoundsAddr + (uint)n * 28u;
+        int tx = (int)m.ReadU32(obj + ObjTransOff);
+        int ty = (int)m.ReadU32(obj + ObjTransOff + 4);
+        int tz = (int)m.ReadU32(obj + ObjTransOff + 8);
+        m.WriteU32(slot, (uint)(tx + (int)m.ReadU32(obj + ObjBoundOff)));
+        m.WriteU32(slot + 4, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 4)));
+        m.WriteU32(slot + 8, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 8)));
+        m.WriteU32(slot + 12, (uint)(tx + (int)m.ReadU32(obj + ObjBoundOff + 12)));
+        m.WriteU32(slot + 16, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 16)));
+        m.WriteU32(slot + 20, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 20)));
+        m.WriteU32(slot + 24, obj);
+        m.WriteU32(ObjectBoundCountAddr, (uint)(n + 1));
     }
 
     static void LogObjectClass(IMemory m, uint obj)
@@ -1062,6 +1111,11 @@ public static class FramePacing
         if (!IsActive(m) || !_haveObj || _crashObj) return true;
         if (c.A1 == 0 && c.A2 == 0) return true;
         if (IsFirstFrame(m, _obj))
+        {
+            _didSpawn = true;
+            return true;
+        }
+        if (TryReadGoolClass(m, _obj, out uint ptype, out _) && ptype == GoolTypeBox)
         {
             _didSpawn = true;
             return true;
