@@ -10,10 +10,11 @@ namespace RecompOne.Runtime.Host;
 
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
-/// Crash trans+physics use a 34-tick step so StopAtWalls sees a move larger
-/// than one 2048-unit bitmap cell; FinishCrashScale keeps dt/34 of pos/vel/rot.
-/// Do not scale anim_frame or speed: GOOL waits on draw_stamp/34, and walk→idle
-/// is <c>abs(speed)&gt;&gt;2</c>. HUD uses real ticks. Other objects: 34 + BlendObject.
+/// Crash: 34-tick trans+physics then FinishCrashScale(dt/34) so StopAtWalls
+/// sees a real bitmap cell. Other objects use real ticks — a 34-tick path
+/// step on a short groove hits the end every display frame (spin in place).
+/// Wumpa sprite frames are <c>+= 1</c> per trans; those are scaled to dt/34.
+/// HUD uses real ticks. Crash anim_frame is not scaled (GOOL wait).
 /// </summary>
 public static class FramePacing
 {
@@ -59,21 +60,14 @@ public static class FramePacing
     const uint ObjFloorYOff = 0x11Cu;
     const uint ObjSpeedOff = 0x124u;
 
-    const uint FlagTransMotion = 0x40u;
-    const uint FlagGravity = 0x20u;
     const uint FlagGroundLand = 0x1u;
-    const uint FlagRotY = 0x1u;
     const uint Flag2D = 0x200u;
-    const uint FlagRotX = 0x2000u;
-    const uint FlagRotY2 = 0x80000u;
-    const uint FlagPathEnd = 0x10u;
     const uint FlagStall = 0x10000000u;
 
     const int Teleport = 0x80000;
     const int PathWrap = 0x8000;
-    const int PathTransTeleport = 0x800000;
-    const int ScaleSnap = 0x2000;
     const int AnimFrameCap = 32 << 8;
+    const byte AnimTypeSprite = 2;
 
     static readonly long IrqPeriod = Stopwatch.Frequency / 60;
 
@@ -98,13 +92,12 @@ public static class FramePacing
     static int _holdLocked;
 
     static uint _obj;
-    static int _ox, _oy, _oz, _orx, _ory, _orz, _osx, _osy, _osz, _oanim;
-    static int _ovy, _ovx, _ovz, _ospeed, _opath;
+    static int _ox, _oy, _oz, _orx, _ory, _orz, _oanim;
+    static int _ovy, _ovx, _ovz, _ospeed;
     static int _paceLog;
     static bool _haveObj;
-    static bool _physicsBlended;
     static bool _crashObj;
-    static bool _crashScaled;
+    static bool _objScaled;
 
     public static bool ForceOriginal { get; set; }
 
@@ -154,9 +147,8 @@ public static class FramePacing
         _irqTs = 0;
         _clockArmed = false;
         _haveObj = false;
-        _physicsBlended = false;
         _crashObj = false;
-        _crashScaled = false;
+        _objScaled = false;
         _paceLog = 0;
         _vsyncsInGpu = 0;
         _inGpuUpdate = false;
@@ -332,7 +324,7 @@ public static class FramePacing
         HookPre(GoolUpdateObjectsAddr, PreUpdateObjects);
         HookPre(GoolObjectTransformAddr, PreTransform);
         HookPre(GoolObjectPhysicsAddr, PrePhysics);
-        HookPost(GoolObjectPhysicsAddr, PostCrashPhysics);
+        HookPost(GoolObjectPhysicsAddr, PostObjectPhysics);
         HookPre(GfxTransformSvtxAddr, PreTransformSvtx);
         HookPre(GfxTransformCvtxAddr, PreTransformCvtx);
         HookPre(GpuUpdateAddr, PreGpuUpdate);
@@ -398,13 +390,11 @@ public static class FramePacing
         }
         if (addr != GoolObjectUpdateAddr) return true;
         _haveObj = false;
-        _physicsBlended = false;
         _crashObj = false;
-        _crashScaled = false;
+        _objScaled = false;
         if (!IsActive(m)) return true;
-        // Crash: original 34-tick trans+physics, then FinishCrashScale(dt/34).
-        // HUD: real dt. Everyone else: 34, then BlendObject.
-        if (IsHud(m, c.A0))
+        // Crash: 34-tick trans+physics, then FinishCrashScale. Others: real dt.
+        if (IsHud(m, c.A0) || !IsCrashPtr(m, c.A0))
             WriteAllTicks(m, _frameTicks);
         else
             WriteAllTicks(m, RefTicks);
@@ -437,8 +427,10 @@ public static class FramePacing
             return;
         }
         if (addr != GoolObjectUpdateAddr) return;
-        if (!_physicsBlended && _haveObj)
-            BlendObject(m);
+        if (_crashObj && !_objScaled && _haveObj)
+            FinishCrashScale(m);
+        else if (!_crashObj && _haveObj)
+            PaceSpriteAnim(m);
         if (IsActive(m))
             WriteAllTicks(m, _frameTicks);
     }
@@ -453,16 +445,11 @@ public static class FramePacing
     static bool PrePhysics(CpuContext c, IMemory m)
     {
         if (IsActive(m))
-        {
-            if (_haveObj && c.A0 == _obj && !_crashObj)
-                BlendObject(m);
             WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
-            _physicsBlended = _haveObj && c.A0 == _obj;
-        }
         return true;
     }
 
-    static void PostCrashPhysics(CpuContext c, IMemory m)
+    static void PostObjectPhysics(CpuContext c, IMemory m)
     {
         if (_crashObj && IsActive(m))
             FinishCrashScale(m);
@@ -608,11 +595,23 @@ public static class FramePacing
     static bool PreGoolSeek(CpuContext c, IMemory m)
     {
         if (!IsActive(m) || _frameTicks >= RefTicks) return true;
-        // Object trans is ticks=34 + BlendObject (HUD is real-dt). Scaling
-        // seek again would double-dt fruit and turtles.
+        // Crash trans is 34+scale. Others already used real dt.
         if (_haveObj) return true;
         c.A2 = (uint)ScaleStep((int)c.A2);
         return true;
+    }
+
+    static bool IsCrashPtr(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            return obj == m.ReadU32(CrashPtrAddr);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     static bool IsHud(IMemory m, uint obj)
@@ -660,13 +659,6 @@ public static class FramePacing
         return s;
     }
 
-    static int ScaleSoft(int step)
-    {
-        if (step == 0) return 0;
-        long n = (long)step * _frameTicks;
-        return (int)((n + (n >= 0 ? RefTicks / 2 : -(RefTicks / 2))) / RefTicks);
-    }
-
     static int ScaleExact(int from, int to, int teleport)
     {
         long d = (long)to - from;
@@ -683,16 +675,16 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Guest just ran a full 34-tick Crash step (needed so StopAtWalls sees
-    /// a move larger than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
-    /// Leave anim_frame and a stopped speed field alone — those are GOOL state.
+    /// Guest just ran a full 34-tick Crash step (StopAtWalls needs a move
+    /// larger than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
+    /// Leave anim_frame alone — GOOL waits on draw_stamp/34.
     /// </summary>
     static void FinishCrashScale(IMemory m)
     {
-        if (!_haveObj || !_crashObj || _crashScaled) return;
+        if (!_haveObj || !_crashObj || _objScaled) return;
         try
         {
-            _crashScaled = true;
+            _objScaled = true;
             if (_exactTicks <= 0)
             {
                 RestoreCrash(m);
@@ -710,8 +702,6 @@ public static class FramePacing
             m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, (int)m.ReadU32(o + ObjVelYOff), Teleport));
             m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), Teleport));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
-            // Walk→idle is abs(speed)>>2. A 34-tick stop scaled by dt/34 never
-            // reaches 0 (Round tails to ~5) so the walk cycle keeps playing.
             if (speedTo <= 4 && speedTo >= -4)
                 m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
             else
@@ -753,6 +743,42 @@ public static class FramePacing
         m.WriteU32(o + ObjRotOff + 8, (uint)_orz);
     }
 
+    /// <summary>
+    /// Wumpa (and other sprites) do <c>animframe += 1</c> every trans. Vertex
+    /// enemies wait on draw_stamp/34 — do not lerp those or the mesh skips.
+    /// </summary>
+    static void PaceSpriteAnim(IMemory m)
+    {
+        if (!_haveObj || _crashObj || _frameTicks >= RefTicks) return;
+        try
+        {
+            uint seq = m.ReadU32(_obj + ObjAnimSeqOff);
+            if ((seq & 0xFF000000u) != 0x80000000u) return;
+            if (m.ReadU8(seq) != AnimTypeSprite) return;
+
+            int to = (int)m.ReadU32(_obj + ObjAnimFrameOff);
+            int from = _oanim;
+            if (to > AnimFrameCap || from > AnimFrameCap)
+            {
+                m.WriteU32(_obj + ObjAnimFrameOff, 0);
+                return;
+            }
+            int d = to - from;
+            if (d > 0x180 || d < -0x180) return;
+            if (d == 0) return;
+            int s = (int)Math.Round(d * _exactTicks / RefTicks);
+            if (s == 0) return;
+            int n = from + s;
+            if (n > AnimFrameCap) n = AnimFrameCap;
+            if (n < 0) n = 0;
+            m.WriteU32(_obj + ObjAnimFrameOff, (uint)n);
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
     static void SnapshotObject(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return;
@@ -768,15 +794,11 @@ public static class FramePacing
             _orx = (int)m.ReadU32(obj + ObjRotOff);
             _ory = (int)m.ReadU32(obj + ObjRotOff + 4);
             _orz = (int)m.ReadU32(obj + ObjRotOff + 8);
-            _osx = (int)m.ReadU32(obj + ObjScaleOff);
-            _osy = (int)m.ReadU32(obj + ObjScaleOff + 4);
-            _osz = (int)m.ReadU32(obj + ObjScaleOff + 8);
             _ovy = (int)m.ReadU32(obj + ObjVelYOff);
             _ovx = (int)m.ReadU32(obj + ObjVelXOff);
             _ovz = (int)m.ReadU32(obj + ObjVelZOff);
             _ospeed = (int)m.ReadU32(obj + ObjSpeedOff);
             _oanim = (int)m.ReadU32(obj + ObjAnimFrameOff);
-            _opath = (int)m.ReadU32(obj + ObjPathProgOff);
             _haveObj = true;
         }
         catch
@@ -802,117 +824,5 @@ public static class FramePacing
         {
             // object freed
         }
-    }
-
-    static void BlendObject(IMemory m)
-    {
-        // Crash/HUD already used real dt. Other objects: 34-tick trans scaled here.
-        if (!_haveObj || _crashObj || _frameTicks >= RefTicks) return;
-        try
-        {
-            uint statusA = m.ReadU32(_obj + ObjStatusAOff);
-            uint statusB = m.ReadU32(_obj + ObjStatusBOff);
-            bool physicsMoves = (statusB & FlagTransMotion) != 0;
-            bool physicsRots = (statusB & (FlagRotY | FlagRotX | FlagRotY2)) != 0;
-
-            if ((statusB & Flag2D) != 0)
-                return;
-
-            int pathTo = (int)m.ReadU32(_obj + ObjPathProgOff);
-            long pathD = (long)pathTo - _opath;
-            bool pathMoved = pathD != 0;
-            bool pathEnded = (statusA & FlagPathEnd) != 0;
-            if (pathD > PathWrap || pathD < -PathWrap)
-            {
-                // loop/wrap — keep the snap
-            }
-            else if (pathMoved)
-            {
-                // Still lerp the frame that set PATH_END (full 34-tick step
-                // would snap). Do not revert the flag itself.
-                m.WriteU32(_obj + ObjPathProgOff, (uint)(_opath + ScaleSoft((int)pathD)));
-            }
-
-            if (!physicsMoves)
-            {
-                int transTeleport = pathMoved ? PathTransTeleport : Teleport;
-                BlendTrans(m, _obj + ObjTransOff, _ox, transTeleport);
-                BlendTrans(m, _obj + ObjTransOff + 4, _oy, transTeleport);
-                BlendTrans(m, _obj + ObjTransOff + 8, _oz, transTeleport);
-            }
-
-            if (!physicsRots && !pathMoved)
-            {
-                BlendAng(m, _obj + ObjRotOff, _orx);
-                BlendAng(m, _obj + ObjRotOff + 4, _ory);
-                BlendAng(m, _obj + ObjRotOff + 8, _orz);
-            }
-
-            // Fling/crates: scalex -= 1.0S/30 each trans. ScaleSoft, never ±1.
-            BlendScale(m, _obj + ObjScaleOff, _osx);
-            BlendScale(m, _obj + ObjScaleOff + 4, _osy);
-            BlendScale(m, _obj + ObjScaleOff + 8, _osz);
-
-            if (!pathEnded)
-                BlendAnim(m, _obj + ObjAnimFrameOff, _oanim);
-        }
-        catch
-        {
-            // object freed
-        }
-    }
-
-    static void BlendScale(IMemory m, uint addr, int from)
-    {
-        int to = (int)m.ReadU32(addr);
-        long d = (long)to - from;
-        if (d == 0) return;
-        if (d > ScaleSnap || d < -ScaleSnap)
-            return;
-        int s = ScaleSoft((int)d);
-        if (s == 0) return;
-        m.WriteU32(addr, (uint)(from + s));
-    }
-
-    static void BlendTrans(IMemory m, uint addr, int from, int teleport)
-    {
-        int to = (int)m.ReadU32(addr);
-        long d = (long)to - from;
-        if (d > teleport || d < -teleport)
-            return;
-        m.WriteU32(addr, (uint)(from + ScaleStep((int)d)));
-    }
-
-    static void BlendAng(IMemory m, uint addr, int from)
-    {
-        int to = (int)m.ReadU32(addr);
-        int d = to - from;
-        if (d > 0x800) d -= 0x1000;
-        if (d < -0x800) d += 0x1000;
-        if (d > Teleport || d < -Teleport)
-            return;
-        m.WriteU32(addr, (uint)(from + ScaleStep(d)));
-    }
-
-    static void BlendAnim(IMemory m, uint addr, int from)
-    {
-        int to = (int)m.ReadU32(addr);
-        // GoolObjectTransform indexes svtx/sprite frames with anim_frame>>8.
-        // Unscaled +=1 at 180 fps walks off the entry → unmapped 0x63CD0010.
-        if (to > AnimFrameCap || from > AnimFrameCap)
-        {
-            m.WriteU32(addr, 0);
-            return;
-        }
-        int d = to - from;
-        if (d > 0x400 || d < -0x400)
-            return;
-        if (d == 0) return;
-        int s = ScaleSoft(d);
-        if (s == 0) return;
-        int blended = from + s;
-        if (blended > AnimFrameCap) blended = AnimFrameCap;
-        if (blended < 0) blended = 0;
-        m.WriteU32(addr, (uint)blended);
     }
 }
