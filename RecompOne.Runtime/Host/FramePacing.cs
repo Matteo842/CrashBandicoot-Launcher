@@ -19,6 +19,9 @@ namespace RecompOne.Runtime.Host;
 /// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
 /// object pool. Wumpa sprite frames are <c>+= 1</c> per trans; scaled to dt/34.
 /// HUD uses real ticks. Crash anim_frame is not scaled (GOOL wait).
+/// World UV anim (draw_count @ 0x80057960) and water ripple use a dedicated
+/// wall clock. Worlds run before object AdvanceWallClock, so they must not
+/// reuse leftover ticks (that is +1 per display frame).
 /// Bonus rounds and Willy_Warp_Out stay on the original 30 Hz pad so CardC
 /// save/continue cannot skip.
 /// </summary>
@@ -45,8 +48,24 @@ public static class FramePacing
     const uint GpuUpdateAddr = 0x80016E5Cu;
     const uint NsInitAddr = 0x80015B58u;
     const uint DrawSkipAddr = 0x8005C54Cu;
+    const uint GfxUpdateMatricesAddr = 0x80017A14u;
     const uint GfxTransformSvtxAddr = 0x80018964u;
     const uint GfxTransformCvtxAddr = 0x80018A40u;
+    const uint GfxTransformWorldsAddr = 0x80019508u;
+    const uint GfxTransformWorldsFogAddr = 0x80019BCCu;
+    const uint GfxTransformWorldsRippleAddr = 0x80019DE0u;
+    const uint GfxTransformWorldsLightningAddr = 0x80019F90u;
+    const uint GfxTransformWorldsDarkAddr = 0x8001A0CCu;
+    const uint GfxTransformWorldsDark2Addr = 0x8001A2E0u;
+    /// <summary>
+    /// NTSC-U <c>draw_count</c>: GpuUpdate does ++, worlds pass it as A3 for
+    /// wgeo UV. 0x80060E04 is a different GOOL stamp, not this counter.
+    /// </summary>
+    const uint DrawCountAddr = 0x80057960u;
+    const uint RippleSpeedAddr = 0x80056474u;
+    const uint RipplePeriodAddr = 0x80056478u;
+    const uint TriWaveAddr = 0x800567B8u;
+    const uint PausedAddr = 0x80056400u;
     const uint CrashPtrAddr = 0x800566B4u;
     const uint ObjStateOff = 0x2Cu;
     /// <summary>WillC <c>Willy_Warp_Out</c> (EventWarp). NTSC-U SCUS-94900.</summary>
@@ -130,6 +149,15 @@ public static class FramePacing
     static readonly Dictionary<uint, double> _spawnCredit = new();
     static readonly Dictionary<uint, double> _simAcc = new();
     static int _objClassLog;
+    static uint _worldDraw;
+    static double _worldDrawFrac;
+    static double _rippleFrac;
+    static int _savedRippleSpeed;
+    static bool _ripplePatched;
+    static long _waterTs;
+    static bool _waterArmed;
+    static bool _waterDoneThisLoop;
+    static int _waterLog;
 
     public static bool ForceOriginal { get; set; }
 
@@ -187,6 +215,7 @@ public static class FramePacing
         _frameTicks = RefTicks;
         _exactTicks = RefTicks;
         WriteAllTicks(m, RefTicks);
+        ResetWaterClock();
         PaceLog($"original pad lid={id}");
     }
 
@@ -221,6 +250,11 @@ public static class FramePacing
         _inNsInit = false;
         _levelReady = false;
         _holdLocked = 0;
+        _worldDraw = 0;
+        _worldDrawFrac = 0;
+        _rippleFrac = 0;
+        _ripplePatched = false;
+        ResetWaterClock();
         try
         {
             Directory.CreateDirectory(AppPaths.LogsDir);
@@ -390,6 +424,19 @@ public static class FramePacing
         HookPost(GoolObjectPhysicsAddr, PostObjectPhysics);
         HookPre(GfxTransformSvtxAddr, PreTransformSvtx);
         HookPre(GfxTransformCvtxAddr, PreTransformCvtx);
+        HookPre(GfxUpdateMatricesAddr, PreGfxUpdateMatrices);
+        HookPre(GfxTransformWorldsAddr, PreWorlds);
+        HookPost(GfxTransformWorldsAddr, PostWorlds);
+        HookPre(GfxTransformWorldsFogAddr, PreWorlds);
+        HookPost(GfxTransformWorldsFogAddr, PostWorlds);
+        HookPre(GfxTransformWorldsRippleAddr, PreWorldsRipple);
+        HookPost(GfxTransformWorldsRippleAddr, PostWorldsRipple);
+        HookPre(GfxTransformWorldsLightningAddr, PreWorlds);
+        HookPost(GfxTransformWorldsLightningAddr, PostWorlds);
+        HookPre(GfxTransformWorldsDarkAddr, PreWorlds);
+        HookPost(GfxTransformWorldsDarkAddr, PostWorlds);
+        HookPre(GfxTransformWorldsDark2Addr, PreWorlds);
+        HookPost(GfxTransformWorldsDark2Addr, PostWorlds);
         HookPre(GpuUpdateAddr, PreGpuUpdate);
         HookPost(GpuUpdateAddr, PostGpuUpdate);
         HookPre(NsInitAddr, PreNsInit);
@@ -458,6 +505,7 @@ public static class FramePacing
             _levelReady = false;
             _holdLocked = 0;
             _loggedUnlockGpu = false;
+            ResetWaterClock();
             PaceLog($"NSInit start lid=0x{c.A1:X}");
             return true;
         }
@@ -590,6 +638,9 @@ public static class FramePacing
         _didPresentThisGpu = false;
         TryArmUnlock(m);
         PatchTicksPerFrame(m);
+        CommitWaterDrawCount(m);
+        RestoreRippleSpeed(m);
+        _waterDoneThisLoop = false;
     }
 
     static bool PreNsInit(CpuContext c, IMemory m)
@@ -598,6 +649,7 @@ public static class FramePacing
         _levelReady = false;
         _holdLocked = 0;
         _loggedUnlockGpu = false;
+        ResetWaterClock();
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -641,6 +693,7 @@ public static class FramePacing
 
             _levelReady = true;
             _clockArmed = false;
+            ResetWaterClock();
             PaceLog($"unlock armed lid={id} crash=0x{crash:X8}");
         }
         catch
@@ -671,6 +724,170 @@ public static class FramePacing
     static bool PreTransformSvtx(CpuContext c, IMemory m) => true;
 
     static bool PreTransformCvtx(CpuContext c, IMemory m) => true;
+
+    /// <summary>
+    /// CoreLoop: ShaderParams (writes ripple_speed) → GfxUpdateMatrices →
+    /// TransformWorlds* → objects → GpuUpdate (++ draw_count). Advance water
+    /// here so worlds see wall time, not leftover object ticks.
+    /// </summary>
+    static bool PreGfxUpdateMatrices(CpuContext c, IMemory m)
+    {
+        AdvanceWater(m);
+        return true;
+    }
+
+    static void ResetWaterClock()
+    {
+        _waterArmed = false;
+        _waterDoneThisLoop = false;
+        _worldDrawFrac = 0;
+        _rippleFrac = 0;
+        _ripplePatched = false;
+        _waterLog = 0;
+    }
+
+    static void CommitWaterDrawCount(IMemory m)
+    {
+        if (!_waterArmed || !IsActive(m)) return;
+        try { m.WriteU32(DrawCountAddr, _worldDraw); }
+        catch { /* overlay swap */ }
+    }
+
+    /// <summary>
+    /// One wall sample per game loop. 30 original frames per wall second, with
+    /// a remainder — 60/120/280/350 must match. Never uses <c>_exactTicks</c>.
+    /// </summary>
+    static void AdvanceWater(IMemory m)
+    {
+        if (!IsActive(m))
+        {
+            _waterArmed = false;
+            return;
+        }
+
+        if (_waterDoneThisLoop)
+        {
+            CommitWaterDrawCount(m);
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (!_waterArmed)
+        {
+            try { _worldDraw = m.ReadU32(DrawCountAddr); }
+            catch { return; }
+            _worldDrawFrac = 0;
+            _rippleFrac = 0;
+            _waterTs = now;
+            _waterArmed = true;
+            _waterDoneThisLoop = true;
+            CommitWaterDrawCount(m);
+            ZeroRippleSpeed(m);
+            return;
+        }
+
+        double sec = (now - _waterTs) / (double)Stopwatch.Frequency;
+        _waterTs = now;
+        if (sec < 0) sec = 0;
+        if (sec > HitchSeconds) sec = HitchSeconds;
+
+        double frames = sec * (TicksPerSecond / RefTicks);
+        _worldDrawFrac += frames;
+        int n = (int)Math.Floor(_worldDrawFrac);
+        _worldDrawFrac -= n;
+        if (n > 0)
+            _worldDraw += (uint)n;
+
+        _waterDoneThisLoop = true;
+        CommitWaterDrawCount(m);
+        PaceRippleByFrames(m, frames);
+
+        if (_waterLog < 8)
+        {
+            _waterLog++;
+            PaceLog($"water wall {sec * 1000:0.00}ms origFrames={frames:0.000} draw={_worldDraw}");
+        }
+    }
+
+    static bool PreWorlds(CpuContext c, IMemory m)
+    {
+        CommitWaterDrawCount(m);
+        return true;
+    }
+
+    static void PostWorlds(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
+
+    static bool PreWorldsRipple(CpuContext c, IMemory m)
+    {
+        // A0 == 0 is init: fill tri_wave from period, no present.
+        if (c.A0 == 0) return true;
+        CommitWaterDrawCount(m);
+        ZeroRippleSpeed(m);
+        return true;
+    }
+
+    static void PostWorldsRipple(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
+
+    static void ZeroRippleSpeed(IMemory m)
+    {
+        if (_ripplePatched || !IsActive(m)) return;
+        try
+        {
+            int speed = (int)m.ReadU32(RippleSpeedAddr);
+            if (speed == 0) return;
+            _savedRippleSpeed = speed;
+            m.WriteU32(RippleSpeedAddr, 0);
+            _ripplePatched = true;
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    /// <summary>
+    /// <c>tri_wave[i] += ripple_speed</c> is one original 30 Hz step. Scale by
+    /// wall original-frames (not display frames) and leave the guest add at 0.
+    /// </summary>
+    static void PaceRippleByFrames(IMemory m, double frames)
+    {
+        try
+        {
+            if (m.ReadU32(PausedAddr) != 0) return;
+            int speed = (int)m.ReadU32(RippleSpeedAddr);
+            if (speed == 0) return;
+            _savedRippleSpeed = speed;
+            _rippleFrac += speed * frames;
+            int inc = (int)Math.Floor(_rippleFrac);
+            _rippleFrac -= inc;
+            if (inc != 0)
+            {
+                int period = (int)m.ReadU32(RipplePeriodAddr);
+                for (uint i = 0; i < 16; i++)
+                {
+                    uint addr = TriWaveAddr + i * 4;
+                    int w = (int)m.ReadU32(addr) + inc;
+                    if (w > period)
+                        w = -(period - 1);
+                    m.WriteU32(addr, (uint)w);
+                }
+            }
+            m.WriteU32(RippleSpeedAddr, 0);
+            _ripplePatched = true;
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void RestoreRippleSpeed(IMemory m)
+    {
+        if (!_ripplePatched) return;
+        _ripplePatched = false;
+        try { m.WriteU32(RippleSpeedAddr, (uint)_savedRippleSpeed); }
+        catch { /* overlay swap */ }
+    }
 
     static void WriteAxisDt(IMemory m, uint addr, int from, int vel, int dt)
     {
