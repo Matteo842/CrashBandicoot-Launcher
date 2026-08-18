@@ -10,10 +10,18 @@ namespace RecompOne.Runtime.Host;
 
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
-/// Crash: 34-tick trans+physics then scale(dt/34) so StopAtWalls
-/// sees a real bitmap cell. Enemies (GOOL category 0x300) and boxes (type
-/// 0x22) run one original 34-tick GOOL update per 34 wall ticks and still
-/// draw every display frame. Box stacks share velocity with box_link;
+/// Crash: grounded 34-tick trans+physics then scale(dt/34) so StopAtWalls
+/// sees a real bitmap cell. Jump trans hang uses wall ticks; physics XZ
+/// stays 34+scale; Y is hang + wall-dt gravity.
+/// After pit death, Warp_In / Force_Fall physics runs once per 34 wall
+/// ticks (original step, not 34+scale every refresh). Wall ticks clip
+/// through the spawn floor; 34+scale every display frame is hang/gravity
+/// at 30 Hz × fps (infinite jump + faster FALL_KILL loop).
+/// Trans/ani stay in GoolObjectUpdate every display frame.
+/// Enemies (GOOL category 0x300) and boxes (type 0x22) run one original
+/// 34-tick GOOL update per 34 wall ticks and still draw every display
+/// frame. Gated crate AABB is the last real GoolObjectBound, not a
+/// reconstructed col/yaw. Box stacks share velocity with box_link;
 /// 300 Hz trans/collide eats the pile.
 /// Path rollers stay on real dt every frame.
 /// Unscaled trans <c>x += vel</c> (later turtles) is kept at dt/34 of the extra.
@@ -75,6 +83,13 @@ public static class FramePacing
     const uint ObjStateOff = 0x2Cu;
     /// <summary>WillC <c>Willy_Warp_Out</c> (EventWarp). NTSC-U SCUS-94900.</summary>
     const uint StateWarpOut = 32;
+    /// <summary>WillC spawn/respawn fall. <c>statusc 0</c> so FALL_KILL re-enters.</summary>
+    const uint StateForceFall = 12;
+    const uint StateDeathFall = 22;
+    const uint StateDeathFast = 29;
+    const uint StateDeathFlat = 31;
+    const uint StateDeathWarthog = 40;
+    const uint StateWarpIn = 41;
     const uint CamZoneAddr = 0x80057914u;
     const uint CamPathAddr = 0x8005791Cu;
     const uint CamProgressAddr = 0x80057920u;
@@ -91,7 +106,6 @@ public static class FramePacing
     const uint ObjAnimFrameOff = 0x10Cu;
     const uint ObjAnimCounterOff = 0x104u;
     const uint ObjPathProgOff = 0x114u;
-    const uint ObjFloorYOff = 0x11Cu;
     const uint ObjSpeedOff = 0x124u;
     const uint ObjGlobalOff = 0x20u;
 
@@ -116,9 +130,16 @@ public static class FramePacing
     const int SpawnBurstMax = 16;
 
     const int Teleport = 0x80000;
+    /// <summary>Jump takeoff vely is larger than <see cref="Teleport"/>; still scale it.</summary>
+    const int VelTeleport = 0x800000;
     const int PathWrap = 0x8000;
     const int AnimFrameCap = 32 << 8;
     const byte AnimTypeSprite = 2;
+
+    struct BoundSnap
+    {
+        public int X1, Y1, Z1, X2, Y2, Z2;
+    }
 
     static readonly long IrqPeriod = Stopwatch.Frequency / 60;
 
@@ -149,7 +170,12 @@ public static class FramePacing
     static bool _haveObj;
     static bool _crashObj;
     static bool _solidObj;
+    static bool _gatedSolid;
     static bool _objScaled;
+    static bool _crashAir;
+    static int _yTrans, _vyTrans;
+    static bool _haveTransY;
+    static readonly Dictionary<uint, BoundSnap> _lastBound = new();
     static bool _spawnBurst;
     static bool _didSpawn;
     static bool _spawnFirstFrame;
@@ -167,6 +193,8 @@ public static class FramePacing
     static bool _waterArmed;
     static bool _waterDoneThisLoop;
     static int _waterLog;
+    static double _landPhysAcc;
+    static bool _landPhysRan;
 
     public static bool ForceOriginal { get; set; }
 
@@ -241,7 +269,12 @@ public static class FramePacing
         _haveObj = false;
         _crashObj = false;
         _solidObj = false;
+        _gatedSolid = false;
         _objScaled = false;
+        _crashAir = false;
+        _landPhysAcc = 0;
+        _landPhysRan = false;
+        _lastBound.Clear();
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
@@ -302,9 +335,11 @@ public static class FramePacing
             catch { _guestTicks = 0; }
             _simTs = now;
             _tickFrac = 0;
-            _exactTicks = 1;
+            // Full original step so the first unlocked frame does not keep
+            // 1/34 of a StopAtWalls correction (falls off crate lips).
+            _exactTicks = RefTicks;
             _clockArmed = true;
-            _frameTicks = 1;
+            _frameTicks = RefTicks;
             _ticksTakenThisLoop = true;
             PatchTicksPerFrame(m);
             return _guestTicks;
@@ -354,6 +389,86 @@ public static class FramePacing
         WriteTicks(m, GfxC1pAddr, ticks);
         WriteTicks(m, GfxC2pAddr, ticks);
         WriteTicks(m, GfxCurAddr, ticks);
+    }
+
+    /// <summary>
+    /// Jump trans does <c>vely = spd(vely, 5454)</c> while X is held. That
+    /// must share the wall clock with gravity. If these states use 34 ticks
+    /// per display frame, hang is 30 Hz × fps (fly until X is released).
+    /// Walk/stance stay 34+scale even if leftover fall vy is large.
+    /// </summary>
+    static bool CrashAirborne(IMemory m, uint obj)
+    {
+        try
+        {
+            uint state = m.ReadU32(obj + ObjStateOff);
+            // Jump / fall-jump / bounce / air spin. Walk is 2. Hang is in 3, 4, 10.
+            return state is 3 or 4 or 5 or 6 or 10 or 11 or 14 or 16 or 18 or 20;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsLandLockedState(IMemory m, uint obj)
+    {
+        try
+        {
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state == StateForceFall || state == StateWarpIn || state == StateDeathFlat
+                || state == StateDeathWarthog
+                || (state >= StateDeathFall && state <= StateDeathFast);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Respawn/death: one original 34-tick physics per 34 wall ticks. Extra
+    /// display frames skip physics (interpret still runs). 34+scale every
+    /// refresh reapplies hang/gravity at 30 Hz × fps.
+    /// </summary>
+    static bool SkipLandLockedPhysics(IMemory m)
+    {
+        if (!_crashObj || !IsLandLockedState(m, _obj))
+        {
+            _landPhysAcc = 0;
+            _landPhysRan = false;
+            return false;
+        }
+        if (!_landPhysRan)
+        {
+            _landPhysRan = true;
+            WriteAllTicks(m, RefTicks);
+            _crashAir = false;
+            _objScaled = true;
+            return false;
+        }
+        _landPhysAcc += _exactTicks;
+        if (_landPhysAcc < RefTicks)
+        {
+            _objScaled = true;
+            return true;
+        }
+        _landPhysAcc -= RefTicks;
+        WriteAllTicks(m, RefTicks);
+        _crashAir = false;
+        _objScaled = true;
+        return false;
+    }
+
+    static void WriteCrashOrObjectTicks(IMemory m)
+    {
+        if (_crashObj)
+        {
+            _crashAir = CrashAirborne(m, _obj);
+            WriteAllTicks(m, _crashAir ? _frameTicks : RefTicks);
+            return;
+        }
+        WriteAllTicks(m, _solidObj ? RefTicks : _frameTicks);
     }
 
     static void WriteTicks(IMemory m, uint ptrAddr, uint ticks)
@@ -515,6 +630,7 @@ public static class FramePacing
             _holdLocked = 0;
             _loggedUnlockGpu = false;
             ResetWaterClock();
+            _lastBound.Clear();
             PaceLog($"NSInit start lid=0x{c.A1:X}");
             return true;
         }
@@ -527,7 +643,7 @@ public static class FramePacing
         if (addr == GoolObjectPhysicsAddr)
         {
             if (IsActive(m))
-                WriteAllTicks(m, _crashObj || _solidObj ? RefTicks : _frameTicks);
+                WriteCrashOrObjectTicks(m);
             return true;
         }
         if (addr == GoolObjectCreateAddr)
@@ -536,7 +652,10 @@ public static class FramePacing
         _haveObj = false;
         _crashObj = false;
         _solidObj = false;
+        _gatedSolid = false;
         _objScaled = false;
+        _crashAir = false;
+        _haveTransY = false;
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
@@ -564,6 +683,7 @@ public static class FramePacing
                 if (acc < RefTicks)
                 {
                     _simAcc[_obj] = acc;
+                    _gatedSolid = true;
                     DrawGatedObject(c, m, _obj);
                     c.V0 = GoolSuccess;
                     return false;
@@ -573,7 +693,7 @@ public static class FramePacing
             }
         }
         else
-            WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
+            WriteCrashOrObjectTicks(m);
         if (_crashObj)
             HoldCrashStall(m, c.A0);
         if (!_crashObj)
@@ -605,6 +725,8 @@ public static class FramePacing
         }
         if (addr != GoolObjectUpdateAddr) return;
         NoteSpawnUsed();
+        if (_solidObj && !_gatedSolid && _haveObj)
+            CaptureBound(m, _obj);
         if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
         else if (!_crashObj && !_solidObj && _haveObj)
@@ -625,8 +747,20 @@ public static class FramePacing
 
     static bool PrePhysics(CpuContext c, IMemory m)
     {
-        if (IsActive(m))
-            WriteAllTicks(m, _crashObj || _solidObj ? RefTicks : _frameTicks);
+        if (!IsActive(m)) return true;
+        if (SkipLandLockedPhysics(m)) return false;
+        if (_crashObj && IsLandLockedState(m, _obj))
+            return true;
+        WriteCrashOrObjectTicks(m);
+        // Trans already used wall ticks (hang). Physics needs a 34-tick
+        // StopAtWalls step on XZ; Y is reintegrated in FinishPacedScale.
+        if (_crashObj && _crashAir)
+        {
+            _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
+            _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
+            _haveTransY = true;
+            WriteAllTicks(m, RefTicks);
+        }
         return true;
     }
 
@@ -668,6 +802,7 @@ public static class FramePacing
         _holdLocked = 0;
         _loggedUnlockGpu = false;
         ResetWaterClock();
+        _lastBound.Clear();
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -1034,17 +1169,66 @@ public static class FramePacing
         int n = (int)m.ReadU32(ObjectBoundCountAddr);
         if ((uint)n >= (uint)ObjectBoundMax) return;
         uint slot = ObjectBoundsAddr + (uint)n * 28u;
-        int tx = (int)m.ReadU32(obj + ObjTransOff);
-        int ty = (int)m.ReadU32(obj + ObjTransOff + 4);
-        int tz = (int)m.ReadU32(obj + ObjTransOff + 8);
-        m.WriteU32(slot, (uint)(tx + (int)m.ReadU32(obj + ObjBoundOff)));
-        m.WriteU32(slot + 4, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 4)));
-        m.WriteU32(slot + 8, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 8)));
-        m.WriteU32(slot + 12, (uint)(tx + (int)m.ReadU32(obj + ObjBoundOff + 12)));
-        m.WriteU32(slot + 16, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 16)));
-        m.WriteU32(slot + 20, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 20)));
+        if (_lastBound.TryGetValue(obj, out BoundSnap snap))
+        {
+            m.WriteU32(slot, (uint)snap.X1);
+            m.WriteU32(slot + 4, (uint)snap.Y1);
+            m.WriteU32(slot + 8, (uint)snap.Z1);
+            m.WriteU32(slot + 12, (uint)snap.X2);
+            m.WriteU32(slot + 16, (uint)snap.Y2);
+            m.WriteU32(slot + 20, (uint)snap.Z2);
+        }
+        else
+        {
+            int tx = (int)m.ReadU32(obj + ObjTransOff);
+            int ty = (int)m.ReadU32(obj + ObjTransOff + 4);
+            int tz = (int)m.ReadU32(obj + ObjTransOff + 8);
+            m.WriteU32(slot, (uint)(tx + (int)m.ReadU32(obj + ObjBoundOff)));
+            m.WriteU32(slot + 4, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 4)));
+            m.WriteU32(slot + 8, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 8)));
+            m.WriteU32(slot + 12, (uint)(tx + (int)m.ReadU32(obj + ObjBoundOff + 12)));
+            m.WriteU32(slot + 16, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 16)));
+            m.WriteU32(slot + 20, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 20)));
+        }
         m.WriteU32(slot + 24, obj);
         m.WriteU32(ObjectBoundCountAddr, (uint)(n + 1));
+    }
+
+    /// <summary>
+    /// Copy the AABB GoolObjectBound just wrote. Extra gated frames reuse it
+    /// instead of reconstructing col/yaw (that shifted the box and Crash
+    /// walked through).
+    /// </summary>
+    static void CaptureBound(IMemory m, uint obj)
+    {
+        try
+        {
+            int n = (int)m.ReadU32(ObjectBoundCountAddr);
+            if (n < 0) return;
+            if (n > ObjectBoundMax) n = ObjectBoundMax;
+            for (int i = n - 1; i >= 0; i--)
+            {
+                uint slot = ObjectBoundsAddr + (uint)i * 28u;
+                if (m.ReadU32(slot + 24) != obj) continue;
+                if (_lastBound.Count > 128)
+                    _lastBound.Clear();
+                _lastBound[obj] = new BoundSnap
+                {
+                    X1 = (int)m.ReadU32(slot),
+                    Y1 = (int)m.ReadU32(slot + 4),
+                    Z1 = (int)m.ReadU32(slot + 8),
+                    X2 = (int)m.ReadU32(slot + 12),
+                    Y2 = (int)m.ReadU32(slot + 16),
+                    Z2 = (int)m.ReadU32(slot + 20)
+                };
+                return;
+            }
+            _lastBound.Remove(obj);
+        }
+        catch
+        {
+            // object freed / overlay swap
+        }
     }
 
     static void LogObjectClass(IMemory m, uint obj)
@@ -1191,6 +1375,69 @@ public static class FramePacing
     }
 
     /// <summary>
+    /// Physics ran a 34-tick StopAtWalls step. Keep dt/34 of XZ. Rebuild Y
+    /// from post-trans vy (hang already at wall ticks) + 4000*dt gravity.
+    /// Guest order: displace then gravity.
+    /// </summary>
+    static void FinishJumpScale(IMemory m)
+    {
+        uint o = _obj;
+        if (_exactTicks <= 0)
+        {
+            m.WriteU32(o + ObjTransOff, (uint)_ox);
+            m.WriteU32(o + ObjTransOff + 8, (uint)_oz);
+            m.WriteU32(o + ObjVelXOff, (uint)_ovx);
+            m.WriteU32(o + ObjVelZOff, (uint)_ovz);
+            if (_haveTransY)
+            {
+                m.WriteU32(o + ObjTransOff + 4, (uint)_yTrans);
+                m.WriteU32(o + ObjVelYOff, (uint)_vyTrans);
+            }
+            return;
+        }
+
+        if (_exactTicks < RefTicks - 0.01)
+        {
+            m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
+            m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
+            m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport));
+            m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport));
+            int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
+            if (speedTo > 4 || speedTo < -4)
+                m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, speedTo, Teleport));
+            m.WriteU32(o + ObjRotOff, (uint)ScaleAng(_orx, (int)m.ReadU32(o + ObjRotOff)));
+            m.WriteU32(o + ObjRotOff + 4, (uint)ScaleAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4)));
+            m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
+        }
+
+        if (!_haveTransY) return;
+
+        int yPhys = (int)m.ReadU32(o + ObjTransOff + 4);
+        uint statusA = m.ReadU32(o + ObjStatusAOff);
+        int y = _yTrans + (int)Math.Round(_vyTrans * _exactTicks / 1024.0);
+        int vy = _vyTrans - (int)Math.Round(4000.0 * _exactTicks);
+        if (vy < -0x2EE000) vy = -0x2EE000;
+
+        bool landed = (statusA & FlagGroundLand) != 0;
+        if (landed && y > yPhys + 0x400)
+            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+        else if (landed)
+        {
+            m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
+            m.WriteU32(o + ObjVelYOff, 0);
+            return;
+        }
+
+        m.WriteU32(o + ObjTransOff + 4, (uint)y);
+        m.WriteU32(o + ObjVelYOff, (uint)vy);
+        if (vy > 0)
+        {
+            statusA = m.ReadU32(o + ObjStatusAOff);
+            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+        }
+    }
+
+    /// <summary>
     /// Guest just ran a full 34-tick step (StopAtWalls needs a move larger
     /// than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
     /// Leave anim_frame alone — GOOL waits on draw_stamp/34.
@@ -1201,6 +1448,11 @@ public static class FramePacing
         try
         {
             _objScaled = true;
+            if (_crashAir)
+            {
+                FinishJumpScale(m);
+                return;
+            }
             if (_exactTicks <= 0)
             {
                 RestorePaced(m);
@@ -1212,11 +1464,13 @@ public static class FramePacing
             m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
             m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
 
-            int y = ScaleExact(_oy, (int)m.ReadU32(o + ObjTransOff + 4), Teleport);
+            int yTo = (int)m.ReadU32(o + ObjTransOff + 4);
+            int y = ScaleExact(_oy, yTo, VelTeleport);
             m.WriteU32(o + ObjTransOff + 4, (uint)y);
-            m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), Teleport));
-            m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, (int)m.ReadU32(o + ObjVelYOff), Teleport));
-            m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), Teleport));
+            m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport));
+            int vyTo = (int)m.ReadU32(o + ObjVelYOff);
+            m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, vyTo, VelTeleport));
+            m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
             if (_crashObj && speedTo <= 4 && speedTo >= -4)
                 m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
@@ -1229,9 +1483,7 @@ public static class FramePacing
             if (_crashObj)
             {
                 uint statusA = m.ReadU32(o + ObjStatusAOff);
-                int floor = (int)m.ReadU32(o + ObjFloorYOff);
-                int vy = (int)m.ReadU32(o + ObjVelYOff);
-                if ((statusA & FlagGroundLand) != 0 && y > floor + 0x100 && vy > 0)
+                if ((statusA & FlagGroundLand) != 0 && vyTo > 0 && yTo > _oy + 0x100)
                     m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
             }
 
