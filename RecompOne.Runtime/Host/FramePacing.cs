@@ -128,6 +128,10 @@ public static class FramePacing
     const uint EntryMagic = 0x100FFFFu;
     const int ExtraTransMin = 0x2000;
     const int SpawnBurstMax = 16;
+    /// <summary>
+    /// Ignore hairline XZ overlap so slope AABB grazing does not freeze walk.
+    /// </summary>
+    const int EmbedSlop = 0x400;
 
     const int Teleport = 0x80000;
     /// <summary>Jump takeoff vely is larger than <see cref="Teleport"/>; still scale it.</summary>
@@ -404,6 +408,24 @@ public static class FramePacing
             uint state = m.ReadU32(obj + ObjStateOff);
             // Jump / fall-jump / bounce / air spin. Walk is 2. Hang is in 3, 4, 10.
             return state is 3 or 4 or 5 or 6 or 10 or 11 or 14 or 16 or 18 or 20;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// WillC spin: Adjust_Time 15, Air_Adjust 16, Spin 17, Spin_Air 18,
+    /// Spin_End 19, Spin_Air_End 20. Trans sends EventSpinHit to collider;
+    /// crate Bound/PlotObjWalls need Crash inside the AABB.
+    /// </summary>
+    static bool CrashSpinning(IMemory m, uint obj)
+    {
+        try
+        {
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state is 15 or 16 or 17 or 18 or 19 or 20;
         }
         catch
         {
@@ -1425,6 +1447,7 @@ public static class FramePacing
         {
             m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
             m.WriteU32(o + ObjVelYOff, 0);
+            RejectCrateEmbed(m);
             return;
         }
 
@@ -1435,6 +1458,7 @@ public static class FramePacing
             statusA = m.ReadU32(o + ObjStatusAOff);
             m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
         }
+        RejectCrateEmbed(m);
     }
 
     /// <summary>
@@ -1486,6 +1510,7 @@ public static class FramePacing
                 if ((statusA & FlagGroundLand) != 0 && vyTo > 0 && yTo > _oy + 0x100)
                     m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
             }
+            RejectCrateEmbed(m);
 
             if (++_paceLog >= 90)
             {
@@ -1496,6 +1521,128 @@ public static class FramePacing
         catch
         {
             // object freed
+        }
+    }
+
+    static bool AabbOverlap(int ax1, int ay1, int az1, int ax2, int ay2, int az2,
+        int bx1, int by1, int bz1, int bx2, int by2, int bz2)
+    {
+        return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1 && az1 < bz2 && az2 > bz1;
+    }
+
+    static bool IsBoxWall(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeBox)
+                return false;
+            return (m.ReadU32(obj + ObjStatusBOff) & FlagSolidSides) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Side-stuck in a BoxC wall. Standing on the lid is not a hit: Y is the
+    /// shallow axis. Scenery / slope AABBs are ignored (not type 0x22).
+    /// </summary>
+    static bool CrateWallHit(int x1, int y1, int z1, int x2, int y2, int z2,
+        int bx1, int by1, int bz1, int bx2, int by2, int bz2)
+    {
+        if (!AabbOverlap(x1, y1, z1, x2, y2, z2, bx1, by1, bz1, bx2, by2, bz2))
+            return false;
+        int penX = Math.Min(x2 - bx1, bx2 - x1);
+        int penY = Math.Min(y2 - by1, by2 - y1);
+        int penZ = Math.Min(z2 - bz1, bz2 - z1);
+        if (penX <= EmbedSlop || penY <= 0 || penZ <= EmbedSlop)
+            return false;
+        int penU = by2 - y1;
+        int penD = y2 - by1;
+        if (penY <= penX && penY <= penZ && penU <= penD)
+            return false;
+        return true;
+    }
+
+    static bool CrashInCrateWall(IMemory m, int x, int y, int z)
+    {
+        int x1 = x + (int)m.ReadU32(_obj + ObjBoundOff);
+        int y1 = y + (int)m.ReadU32(_obj + ObjBoundOff + 4);
+        int z1 = z + (int)m.ReadU32(_obj + ObjBoundOff + 8);
+        int x2 = x + (int)m.ReadU32(_obj + ObjBoundOff + 12);
+        int y2 = y + (int)m.ReadU32(_obj + ObjBoundOff + 16);
+        int z2 = z + (int)m.ReadU32(_obj + ObjBoundOff + 20);
+
+        foreach (var kv in _lastBound)
+        {
+            if (kv.Key == _obj || !IsBoxWall(m, kv.Key)) continue;
+            BoundSnap s = kv.Value;
+            if (CrateWallHit(x1, y1, z1, x2, y2, z2, s.X1, s.Y1, s.Z1, s.X2, s.Y2, s.Z2))
+                return true;
+        }
+
+        int n = (int)m.ReadU32(ObjectBoundCountAddr);
+        if (n < 0) return false;
+        if (n > ObjectBoundMax) n = ObjectBoundMax;
+        for (int i = 0; i < n; i++)
+        {
+            uint slot = ObjectBoundsAddr + (uint)i * 28u;
+            uint other = m.ReadU32(slot + 24);
+            if (other == _obj || !IsBoxWall(m, other)) continue;
+            if (CrateWallHit(x1, y1, z1, x2, y2, z2,
+                    (int)m.ReadU32(slot), (int)m.ReadU32(slot + 4), (int)m.ReadU32(slot + 8),
+                    (int)m.ReadU32(slot + 12), (int)m.ReadU32(slot + 16), (int)m.ReadU32(slot + 20)))
+                return true;
+        }
+        return false;
+    }
+
+    static void RejectCrateEmbed(IMemory m)
+    {
+        if (CrashSpinning(m, _obj)) return;
+        int x = (int)m.ReadU32(_obj + ObjTransOff);
+        int y = (int)m.ReadU32(_obj + ObjTransOff + 4);
+        int z = (int)m.ReadU32(_obj + ObjTransOff + 8);
+        if (!CrashInCrateWall(m, x, y, z)) return;
+        if (!CrashInCrateWall(m, _ox, _oy, _oz))
+        {
+            m.WriteU32(_obj + ObjTransOff, (uint)_ox);
+            m.WriteU32(_obj + ObjTransOff + 8, (uint)_oz);
+            return;
+        }
+        EjectFromCrateSides(m, x, y, z);
+    }
+
+    static void EjectFromCrateSides(IMemory m, int x, int y, int z)
+    {
+        int x1 = x + (int)m.ReadU32(_obj + ObjBoundOff);
+        int y1 = y + (int)m.ReadU32(_obj + ObjBoundOff + 4);
+        int z1 = z + (int)m.ReadU32(_obj + ObjBoundOff + 8);
+        int x2 = x + (int)m.ReadU32(_obj + ObjBoundOff + 12);
+        int y2 = y + (int)m.ReadU32(_obj + ObjBoundOff + 16);
+        int z2 = z + (int)m.ReadU32(_obj + ObjBoundOff + 20);
+
+        foreach (var kv in _lastBound)
+        {
+            if (kv.Key == _obj || !IsBoxWall(m, kv.Key)) continue;
+            BoundSnap s = kv.Value;
+            if (!CrateWallHit(x1, y1, z1, x2, y2, z2, s.X1, s.Y1, s.Z1, s.X2, s.Y2, s.Z2))
+                continue;
+            int penL = x2 - s.X1;
+            int penR = s.X2 - x1;
+            int penN = z2 - s.Z1;
+            int penF = s.Z2 - z1;
+            int ax = Math.Min(penL, penR);
+            int az = Math.Min(penN, penF);
+            if (ax <= az)
+                x += penL < penR ? -penL : penR;
+            else
+                z += penN < penF ? -penN : penF;
+            m.WriteU32(_obj + ObjTransOff, (uint)x);
+            m.WriteU32(_obj + ObjTransOff + 8, (uint)z);
+            return;
         }
     }
 
