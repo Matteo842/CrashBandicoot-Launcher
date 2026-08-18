@@ -11,9 +11,10 @@ namespace RecompOne.Runtime.Host;
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
 /// Crash: 34-tick trans+physics then scale(dt/34) so StopAtWalls
-/// sees a real bitmap cell. Ground walkers with STOPPED_BY_SOLID get the same
-/// (tiny dt cannot cross a 2048-unit bitmap cell). Path objects use real ticks
-/// — a 34-tick step on a short groove hits the end every display frame.
+/// sees a real bitmap cell. Enemies (GOOL category 0x300, SkunC, ground
+/// walkers) run one original 34-tick GOOL update per 34 wall ticks and
+/// still draw every display frame — trans is per-call (>>=2, ReactSolid).
+/// Path rollers stay on real dt every frame.
 /// Unscaled trans <c>x += vel</c> (later turtles) is kept at dt/34 of the extra.
 /// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
 /// object pool. Wumpa sprite frames are <c>+= 1</c> per trans; scaled to dt/34.
@@ -63,15 +64,21 @@ public static class FramePacing
     const uint ObjPathProgOff = 0x114u;
     const uint ObjFloorYOff = 0x11Cu;
     const uint ObjSpeedOff = 0x124u;
+    const uint ObjGlobalOff = 0x20u;
 
     const uint FlagGroundLand = 0x1u;
     const uint FlagFirstFrame = 0x20u;
     const uint Flag2D = 0x200u;
     const uint FlagStoppedBySolid = 0x8u;
+    const uint FlagCollidable = 0x10u;
+    const uint FlagGravity = 0x20u;
     const uint FlagTransMotion = 0x40u;
-    const uint FlagOrientOnPath = 0x8000u;
+    const uint FlagInvisible = 0x100u;
     const uint FlagStall = 0x10000000u;
+    const uint GoolCategoryEnemy = 0x300u;
     const uint ErrorObjectPoolFull = 0xFFFFFFEAu;
+    const uint GoolSuccess = 0xFFFFFF01u; // SUCCESS -255
+    const uint EntryMagic = 0x100FFFFu;
     const int ExtraTransMin = 0x2000;
     const int SpawnBurstMax = 16;
 
@@ -116,6 +123,8 @@ public static class FramePacing
     static int _spawnBudget;
     static double _spawnAcc;
     static readonly Dictionary<uint, double> _spawnCredit = new();
+    static readonly Dictionary<uint, double> _simAcc = new();
+    static int _objClassLog;
 
     public static bool ForceOriginal { get; set; }
 
@@ -174,6 +183,8 @@ public static class FramePacing
         _spawnBudget = 0;
         _spawnAcc = 0;
         _spawnCredit.Clear();
+        _simAcc.Clear();
+        _objClassLog = 0;
         _paceLog = 0;
         _vsyncsInGpu = 0;
         _inGpuUpdate = false;
@@ -432,7 +443,7 @@ public static class FramePacing
         if (addr == GoolObjectPhysicsAddr)
         {
             if (IsActive(m))
-                WriteAllTicks(m, NeedsRefTicks() ? RefTicks : _frameTicks);
+                WriteAllTicks(m, _crashObj || _solidObj ? RefTicks : _frameTicks);
             return true;
         }
         if (addr == GoolObjectCreateAddr)
@@ -448,8 +459,28 @@ public static class FramePacing
         if (!IsActive(m)) return true;
         SnapshotObject(m, c.A0);
         _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0) && HasSolidPhysics(m, c.A0);
-        // Crash + ground walkers: 34-tick trans+physics, then scale. Path objects: real dt.
-        WriteAllTicks(m, NeedsRefTicks() ? RefTicks : _frameTicks);
+        LogObjectClass(m, c.A0);
+        if (_solidObj)
+        {
+            // Trans runs every display frame. >>=2, ReactSolid, setvel, spawn
+            // in trans are per-call not per-tick — 34+scale cannot fix that.
+            // Run one original 34-tick update per 34 wall ticks; still draw.
+            if (_simAcc.Count > 128)
+                _simAcc.Clear();
+            _simAcc.TryGetValue(_obj, out double acc);
+            acc += _exactTicks;
+            if (acc < RefTicks)
+            {
+                _simAcc[_obj] = acc;
+                DrawGatedObject(c, m, _obj);
+                c.V0 = GoolSuccess;
+                return false;
+            }
+            _simAcc[_obj] = acc - RefTicks;
+            WriteAllTicks(m, RefTicks);
+        }
+        else
+            WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
         if (_crashObj)
             HoldCrashStall(m, c.A0);
         if (!_crashObj)
@@ -475,15 +506,15 @@ public static class FramePacing
         }
         if (addr == GoolObjectPhysicsAddr)
         {
-            if (NeedsRefTicks() && IsActive(m))
+            if (_crashObj && IsActive(m))
                 FinishPacedScale(m);
             return;
         }
         if (addr != GoolObjectUpdateAddr) return;
         NoteSpawnUsed();
-        if (NeedsRefTicks() && !_objScaled && _haveObj)
+        if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
-        else if (!_crashObj && _haveObj)
+        else if (!_crashObj && !_solidObj && _haveObj)
         {
             PaceSpriteAnim(m);
             PaceExtraTrans(m);
@@ -502,13 +533,13 @@ public static class FramePacing
     static bool PrePhysics(CpuContext c, IMemory m)
     {
         if (IsActive(m))
-            WriteAllTicks(m, NeedsRefTicks() ? RefTicks : _frameTicks);
+            WriteAllTicks(m, _crashObj || _solidObj ? RefTicks : _frameTicks);
         return true;
     }
 
     static void PostObjectPhysics(CpuContext c, IMemory m)
     {
-        if (NeedsRefTicks() && IsActive(m))
+        if (_crashObj && IsActive(m))
             FinishPacedScale(m);
     }
 
@@ -658,22 +689,84 @@ public static class FramePacing
         return true;
     }
 
-    static bool NeedsRefTicks() => _crashObj || _solidObj;
-
     static bool HasSolidPhysics(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
         try
         {
+            TryReadGoolClass(m, obj, out uint type, out uint cat);
+            if (type == 2) return true;
+            // Enemies (0x300): one original 30 Hz GOOL update per 34 wall ticks.
+            if (cat == GoolCategoryEnemy) return true;
             uint b = m.ReadU32(obj + ObjStatusBOff);
-            if ((b & FlagStoppedBySolid) == 0 || (b & FlagTransMotion) == 0)
-                return false;
-            // Short-path rollers use ORIENT_ON_PATH; a 34-tick step hits the end.
-            return (b & FlagOrientOnPath) == 0;
+            if ((b & FlagTransMotion) == 0) return false;
+            if ((b & FlagStoppedBySolid) != 0) return true;
+            return (b & FlagGravity) != 0 && (b & FlagCollidable) != 0;
         }
         catch
         {
             return false;
+        }
+    }
+
+    static bool TryReadGoolClass(IMemory m, uint obj, out uint type, out uint cat)
+    {
+        type = 0;
+        cat = 0;
+        uint en = m.ReadU32(obj + ObjGlobalOff);
+        if ((en & 0xFF000000u) != 0x80000000u) return false;
+        uint magic = m.ReadU32(en);
+        uint item0 = m.ReadU32(en + 16);
+        uint header;
+        if ((item0 & 0xFF000000u) == 0x80000000u)
+            header = item0;
+        else if (magic == EntryMagic)
+            header = en + item0;
+        else
+            return false;
+        if ((header & 0xFF000000u) != 0x80000000u) return false;
+        type = m.ReadU32(header);
+        cat = m.ReadU32(header + 4);
+        if (type > 63)
+        {
+            type = 0;
+            cat = 0;
+            return false;
+        }
+        return true;
+    }
+
+    static void DrawGatedObject(CpuContext c, IMemory m, uint obj)
+    {
+        try
+        {
+            uint seq = m.ReadU32(obj + ObjAnimSeqOff);
+            if ((seq & 0xFF000000u) != 0x80000000u) return;
+            if ((m.ReadU32(obj + ObjStatusBOff) & FlagInvisible) != 0) return;
+            uint a0 = c.A0;
+            c.A0 = obj;
+            Dispatcher.Call(c, m, GoolObjectTransformAddr);
+            c.A0 = a0;
+        }
+        catch
+        {
+            // object freed / no mesh this frame
+        }
+    }
+
+    static void LogObjectClass(IMemory m, uint obj)
+    {
+        if (_objClassLog >= 8 || !_haveObj || _crashObj) return;
+        try
+        {
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            TryReadGoolClass(m, obj, out uint type, out uint cat);
+            _objClassLog++;
+            PaceLog($"obj 0x{obj:X8} b=0x{b:X} type={type} cat=0x{cat:X} solid={_solidObj}");
+        }
+        catch
+        {
+            // object freed
         }
     }
 
@@ -806,7 +899,7 @@ public static class FramePacing
     /// </summary>
     static void FinishPacedScale(IMemory m)
     {
-        if (!_haveObj || !NeedsRefTicks() || _objScaled) return;
+        if (!_haveObj || !_crashObj || _objScaled) return;
         try
         {
             _objScaled = true;
