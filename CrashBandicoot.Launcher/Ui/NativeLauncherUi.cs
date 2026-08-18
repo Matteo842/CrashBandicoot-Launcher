@@ -1321,23 +1321,51 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     void ShowSettings()
     {
         var card = MakeCard(560, 560);
-        card.AutoScroll = true;
-        card.Controls.Add(MakeTitle("Settings"));
-        var y = 110;
+        card.AutoScroll = false;
+
+        var title = MakeTitle("Settings");
+        card.Controls.Add(title);
+
+        var list = new DoubleBufferedPanel
+        {
+            AutoScroll = true,
+            BackColor = Color.Transparent,
+        };
+        list.HorizontalScroll.Maximum = 0;
+        card.Controls.Add(list);
+
+        var y = 12;
         const int labelW = 200;
-        const int controlX = 250;
+        const int controlX = 214;
+        const int checkGap = 58;
+        const int rowGap = 62;
+        const int hintGap = 66;
 
         void AddLabel(string t)
         {
-            card.Controls.Add(new Label
+            list.Controls.Add(new Label
             {
                 Text = t,
                 ForeColor = NativeTheme.Sand,
                 Font = NativeTheme.MakeNunito(17),
-                Location = new Point(36, y + 2),
+                Location = new Point(12, y + 2),
                 Size = new Size(labelW, 28),
                 BackColor = Color.Transparent,
             });
+        }
+
+        void AddHint(string t)
+        {
+            list.Controls.Add(new Label
+            {
+                Text = t,
+                ForeColor = Color.FromArgb(160, NativeTheme.Sand),
+                Font = NativeTheme.MakeNunito(14),
+                Location = new Point(12, y),
+                Size = new Size(520, 44),
+                BackColor = Color.Transparent,
+            });
+            y += hintGap;
         }
 
         AddLabel("Master volume");
@@ -1350,59 +1378,59 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             Location = new Point(controlX, y + 2),
             Size = new Size(340, 28),
         };
-        card.Controls.Add(_vol);
-        y += 44;
+        list.Controls.Add(_vol);
+        y += rowGap;
 
         _muted = MakeCheck("Muted");
-        _muted.Location = new Point(36, y);
-        card.Controls.Add(_muted);
-        y += 36;
+        _muted.Location = new Point(12, y);
+        list.Controls.Add(_muted);
+        y += checkGap;
 
         _fullscreen = MakeCheck("Fullscreen");
-        _fullscreen.Location = new Point(36, y);
-        card.Controls.Add(_fullscreen);
-        y += 36;
+        _fullscreen.Location = new Point(12, y);
+        list.Controls.Add(_fullscreen);
+        y += checkGap;
 
         _widescreen = MakeCheck("Widescreen 16:9");
-        _widescreen.Location = new Point(36, y);
-        card.Controls.Add(_widescreen);
-        y += 32;
-        card.Controls.Add(Hint("Widescreen hack (gameplay only) — stretches the 4:3 frame. Off on menus, map, and cutscenes.", ref y));
+        _widescreen.Location = new Point(12, y);
+        list.Controls.Add(_widescreen);
+        y += 52;
+        AddHint("Widescreen hack (gameplay only) — stretches the 4:3 frame. Off on menus, map, and cutscenes.");
 
         AddLabel("Frame rate");
         _frameRate = MakeCombo(new Point(controlX, y), [
             (0, "Original (30 FPS)"), (60, "60 FPS"), (120, "120 FPS"), (240, "240 FPS"), (-1, "Uncapped"),
         ]);
-        card.Controls.Add(_frameRate);
-        y += 42;
-        card.Controls.Add(Hint("Gameplay only. Same speed as 30 FPS, unique frames at the chosen rate. Menus and bonus save stay 30.", ref y));
+        list.Controls.Add(_frameRate);
+        y += rowGap;
+        AddHint("Gameplay only. Same speed as 30 FPS, unique frames at the chosen rate. Menus and bonus save stay 30.");
 
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [
             (1, "Native (1x)"), (2, "2x"), (4, "4x"), (8, "8x (4K)"),
         ]);
-        card.Controls.Add(_internalRes);
-        y += 42;
-        card.Controls.Add(Hint("Applies on next game start. Use 8x on 4K monitors.", ref y));
+        list.Controls.Add(_internalRes);
+        y += rowGap;
+        AddHint("Applies on next game start. Use 8x on 4K monitors.");
 
         AddLabel("Texture filter");
         _texFilter = MakeCombo(new Point(controlX, y), [
             (0, "Off"), (1, "Bilinear"), (2, "Sharp bilinear"), (3, "Soft smooth"),
         ]);
         _texFilter.SelectedIndexChanged += (_, _) => SyncFilterStrengthRow();
-        card.Controls.Add(_texFilter);
-        y += 42;
+        list.Controls.Add(_texFilter);
+        y += rowGap;
 
         _filterStrengthLabel = new Label
         {
             Text = "Filter strength",
             ForeColor = NativeTheme.Sand,
             Font = NativeTheme.MakeNunito(17),
-            Location = new Point(36, y + 2),
+            Location = new Point(12, y + 2),
             Size = new Size(labelW, 28),
             BackColor = Color.Transparent,
         };
-        card.Controls.Add(_filterStrengthLabel);
+        list.Controls.Add(_filterStrengthLabel);
         _filterStrength = new ThemeSlider
         {
             Minimum = 0,
@@ -1412,21 +1440,22 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             Location = new Point(controlX, y + 2),
             Size = new Size(340, 28),
         };
-        card.Controls.Add(_filterStrength);
-        y += 44;
+        list.Controls.Add(_filterStrength);
+        y += rowGap;
 
         _dedither = MakeCheck("Dedither");
-        _dedither.Location = new Point(36, y);
-        card.Controls.Add(_dedither);
-        y += 34;
+        _dedither.Location = new Point(12, y);
+        list.Controls.Add(_dedither);
+        y += checkGap;
         _dejitter = MakeCheck("Dejitter");
-        _dejitter.Location = new Point(36, y);
-        card.Controls.Add(_dejitter);
-        y += 34;
-        card.Controls.Add(Hint("Texture filters auto-off on menus & cutscenes. Dedither and dejitter apply everywhere.", ref y));
+        _dejitter.Location = new Point(12, y);
+        list.Controls.Add(_dejitter);
+        y += 52;
+        AddHint("Texture filters auto-off on menus & cutscenes. Dedither and dejitter apply everywhere.");
+
+        list.AutoScrollMinSize = new Size(0, y + 18);
 
         var save = MakePrimaryBtn("Save");
-        save.Location = new Point(36, y + 10);
         save.Click += (_, _) =>
         {
             Emit(new
@@ -1446,12 +1475,45 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
-        back.Location = new Point(210, y + 10);
         back.Click += (_, _) => CloseSheet();
         card.Controls.Add(save);
         card.Controls.Add(back);
-        card.Height = Math.Min(720, y + 80);
+
+        void LayoutSettingsSheet()
+        {
+            const int popupPad = 16;
+            const int marginX = 36;
+            const int footerH = 66;
+            if (_sheetHost != null)
+            {
+                var hostH = _sheetHost.ClientSize.Height > 100
+                    ? _sheetHost.ClientSize.Height
+                    : ClientSize.Height;
+                var h = Math.Max(480, hostH - popupPad * 2);
+                if (card.Height != h)
+                    card.Height = h;
+                CenterChild(_sheetHost, card);
+            }
+
+            title.Location = new Point(marginX, 22);
+            var listTop = 84;
+            list.Location = new Point(16, listTop);
+            list.Size = new Size(
+                Math.Max(280, card.ClientSize.Width - 32),
+                Math.Max(140, card.ClientSize.Height - listTop - footerH - 4));
+            var by = card.ClientSize.Height - footerH + 10;
+            save.Location = new Point(marginX, by);
+            back.Location = new Point(marginX + 174, by);
+        }
+
+        card.Resize += (_, _) => LayoutSettingsSheet();
         OpenSheet(card);
+        LayoutSettingsSheet();
+        BeginInvoke(() =>
+        {
+            if (_activeSheet == card && !_disposed)
+                LayoutSettingsSheet();
+        });
         SyncFilterStrengthRow();
         Emit(new { type = "getState" });
     }
