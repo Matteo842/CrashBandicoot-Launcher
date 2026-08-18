@@ -10,10 +10,13 @@ namespace RecompOne.Runtime.Host;
 
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
-/// Crash: 34-tick trans+physics then FinishCrashScale(dt/34) so StopAtWalls
-/// sees a real bitmap cell. Other objects use real ticks — a 34-tick path
-/// step on a short groove hits the end every display frame (spin in place).
-/// Wumpa sprite frames are <c>+= 1</c> per trans; those are scaled to dt/34.
+/// Crash: 34-tick trans+physics then scale(dt/34) so StopAtWalls
+/// sees a real bitmap cell. Ground walkers with STOPPED_BY_SOLID get the same
+/// (tiny dt cannot cross a 2048-unit bitmap cell). Path objects use real ticks
+/// — a 34-tick step on a short groove hits the end every display frame.
+/// Unscaled trans <c>x += vel</c> (later turtles) is kept at dt/34 of the extra.
+/// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
+/// object pool. Wumpa sprite frames are <c>+= 1</c> per trans; scaled to dt/34.
 /// HUD uses real ticks. Crash anim_frame is not scaled (GOOL wait).
 /// </summary>
 public static class FramePacing
@@ -34,6 +37,7 @@ public static class FramePacing
     const uint GoolObjectTransformAddr = 0x8001DE78u;
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
     const uint GoolSeekAddr = 0x80024628u;
+    const uint GoolObjectCreateAddr = 0x8001C6C8u;
     const uint LevelUpdateAddr = 0x80025A60u;
     const uint GpuUpdateAddr = 0x80016E5Cu;
     const uint NsInitAddr = 0x80015B58u;
@@ -61,8 +65,15 @@ public static class FramePacing
     const uint ObjSpeedOff = 0x124u;
 
     const uint FlagGroundLand = 0x1u;
+    const uint FlagFirstFrame = 0x20u;
     const uint Flag2D = 0x200u;
+    const uint FlagStoppedBySolid = 0x8u;
+    const uint FlagTransMotion = 0x40u;
+    const uint FlagOrientOnPath = 0x8000u;
     const uint FlagStall = 0x10000000u;
+    const uint ErrorObjectPoolFull = 0xFFFFFFEAu;
+    const int ExtraTransMin = 0x2000;
+    const int SpawnBurstMax = 16;
 
     const int Teleport = 0x80000;
     const int PathWrap = 0x8000;
@@ -97,7 +108,14 @@ public static class FramePacing
     static int _paceLog;
     static bool _haveObj;
     static bool _crashObj;
+    static bool _solidObj;
     static bool _objScaled;
+    static bool _spawnBurst;
+    static bool _didSpawn;
+    static bool _spawnFirstFrame;
+    static int _spawnBudget;
+    static double _spawnAcc;
+    static readonly Dictionary<uint, double> _spawnCredit = new();
 
     public static bool ForceOriginal { get; set; }
 
@@ -148,7 +166,14 @@ public static class FramePacing
         _clockArmed = false;
         _haveObj = false;
         _crashObj = false;
+        _solidObj = false;
         _objScaled = false;
+        _spawnBurst = false;
+        _didSpawn = false;
+        _spawnFirstFrame = false;
+        _spawnBudget = 0;
+        _spawnAcc = 0;
+        _spawnCredit.Clear();
         _paceLog = 0;
         _vsyncsInGpu = 0;
         _inGpuUpdate = false;
@@ -361,8 +386,30 @@ public static class FramePacing
     {
         _ticksTakenThisLoop = false;
         if (IsActive(m))
+        {
             AdvanceWallClock(m);
+            RefillSpawnBudget();
+        }
+        else
+        {
+            _spawnBudget = 0;
+            _spawnAcc = 0;
+            if (_spawnCredit.Count > 0)
+                _spawnCredit.Clear();
+        }
         return true;
+    }
+
+    static void RefillSpawnBudget()
+    {
+        _spawnAcc += _exactTicks;
+        while (_spawnAcc >= RefTicks)
+        {
+            _spawnAcc -= RefTicks;
+            _spawnBudget += SpawnBurstMax;
+        }
+        if (_spawnBudget > SpawnBurstMax + SpawnBurstMax / 2)
+            _spawnBudget = SpawnBurstMax + SpawnBurstMax / 2;
     }
 
     static bool OnCallPre(uint addr, CpuContext c, IMemory m)
@@ -385,24 +432,30 @@ public static class FramePacing
         if (addr == GoolObjectPhysicsAddr)
         {
             if (IsActive(m))
-                WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
+                WriteAllTicks(m, NeedsRefTicks() ? RefTicks : _frameTicks);
             return true;
         }
+        if (addr == GoolObjectCreateAddr)
+            return PreObjectCreate(c, m);
         if (addr != GoolObjectUpdateAddr) return true;
         _haveObj = false;
         _crashObj = false;
+        _solidObj = false;
         _objScaled = false;
+        _spawnBurst = false;
+        _didSpawn = false;
+        _spawnFirstFrame = false;
         if (!IsActive(m)) return true;
-        // Crash: 34-tick trans+physics, then FinishCrashScale. Others: real dt.
-        if (IsHud(m, c.A0) || !IsCrashPtr(m, c.A0))
-            WriteAllTicks(m, _frameTicks);
-        else
-            WriteAllTicks(m, RefTicks);
         SnapshotObject(m, c.A0);
+        _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0) && HasSolidPhysics(m, c.A0);
+        // Crash + ground walkers: 34-tick trans+physics, then scale. Path objects: real dt.
+        WriteAllTicks(m, NeedsRefTicks() ? RefTicks : _frameTicks);
         if (_crashObj)
             HoldCrashStall(m, c.A0);
         if (!_crashObj)
             ClampAnimFrame(m, c.A0);
+        if (_haveObj)
+            ArmSpawnBurst(m, c.A0);
         return true;
     }
 
@@ -422,15 +475,19 @@ public static class FramePacing
         }
         if (addr == GoolObjectPhysicsAddr)
         {
-            if (_crashObj && IsActive(m))
-                FinishCrashScale(m);
+            if (NeedsRefTicks() && IsActive(m))
+                FinishPacedScale(m);
             return;
         }
         if (addr != GoolObjectUpdateAddr) return;
-        if (_crashObj && !_objScaled && _haveObj)
-            FinishCrashScale(m);
+        NoteSpawnUsed();
+        if (NeedsRefTicks() && !_objScaled && _haveObj)
+            FinishPacedScale(m);
         else if (!_crashObj && _haveObj)
+        {
             PaceSpriteAnim(m);
+            PaceExtraTrans(m);
+        }
         if (IsActive(m))
             WriteAllTicks(m, _frameTicks);
     }
@@ -445,14 +502,14 @@ public static class FramePacing
     static bool PrePhysics(CpuContext c, IMemory m)
     {
         if (IsActive(m))
-            WriteAllTicks(m, _crashObj ? RefTicks : _frameTicks);
+            WriteAllTicks(m, NeedsRefTicks() ? RefTicks : _frameTicks);
         return true;
     }
 
     static void PostObjectPhysics(CpuContext c, IMemory m)
     {
-        if (_crashObj && IsActive(m))
-            FinishCrashScale(m);
+        if (NeedsRefTicks() && IsActive(m))
+            FinishPacedScale(m);
     }
 
     static bool PreGpuUpdate(CpuContext c, IMemory m)
@@ -601,17 +658,85 @@ public static class FramePacing
         return true;
     }
 
-    static bool IsCrashPtr(IMemory m, uint obj)
+    static bool NeedsRefTicks() => _crashObj || _solidObj;
+
+    static bool HasSolidPhysics(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
         try
         {
-            return obj == m.ReadU32(CrashPtrAddr);
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            if ((b & FlagStoppedBySolid) == 0 || (b & FlagTransMotion) == 0)
+                return false;
+            // Short-path rollers use ORIENT_ON_PATH; a 34-tick step hits the end.
+            return (b & FlagOrientOnPath) == 0;
         }
         catch
         {
             return false;
         }
+    }
+
+    static bool IsFirstFrame(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            return (m.ReadU32(obj + ObjStatusAOff) & FlagFirstFrame) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void ArmSpawnBurst(IMemory m, uint obj)
+    {
+        _spawnBurst = IsFirstFrame(m, obj);
+        _spawnFirstFrame = _spawnBurst;
+        if (_spawnBurst || (obj & 0xFF000000u) != 0x80000000u) return;
+        _spawnCredit.TryGetValue(obj, out double credit);
+        credit += _exactTicks;
+        if (credit >= RefTicks)
+            _spawnBurst = true;
+        if (_spawnCredit.Count > 128)
+            _spawnCredit.Clear();
+        _spawnCredit[obj] = credit;
+    }
+
+    static void NoteSpawnUsed()
+    {
+        if (!_didSpawn || !_spawnBurst || _crashObj || !_haveObj || _spawnFirstFrame) return;
+        if (_spawnCredit.TryGetValue(_obj, out double credit))
+        {
+            credit -= RefTicks;
+            if (credit < 0) credit = 0;
+            _spawnCredit[_obj] = credit;
+        }
+    }
+
+    /// <summary>
+    /// Trans runs every display frame. spawn() in trans at 270 Hz fills the
+    /// 96-slot pool (GoolObjectAlloc then steals expendables) and overflows
+    /// world-clip scratchpad. Keep GOOL creates at one 30 Hz burst.
+    /// </summary>
+    static bool PreObjectCreate(CpuContext c, IMemory m)
+    {
+        if (!IsActive(m) || !_haveObj || _crashObj) return true;
+        if (c.A1 == 0 && c.A2 == 0) return true;
+        if (IsFirstFrame(m, _obj))
+        {
+            _didSpawn = true;
+            return true;
+        }
+        if (!_spawnBurst || _spawnBudget <= 0)
+        {
+            c.V0 = ErrorObjectPoolFull;
+            return false;
+        }
+        _spawnBudget--;
+        _didSpawn = true;
+        return true;
     }
 
     static bool IsHud(IMemory m, uint obj)
@@ -675,19 +800,19 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Guest just ran a full 34-tick Crash step (StopAtWalls needs a move
-    /// larger than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
+    /// Guest just ran a full 34-tick step (StopAtWalls needs a move larger
+    /// than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
     /// Leave anim_frame alone — GOOL waits on draw_stamp/34.
     /// </summary>
-    static void FinishCrashScale(IMemory m)
+    static void FinishPacedScale(IMemory m)
     {
-        if (!_haveObj || !_crashObj || _objScaled) return;
+        if (!_haveObj || !NeedsRefTicks() || _objScaled) return;
         try
         {
             _objScaled = true;
             if (_exactTicks <= 0)
             {
-                RestoreCrash(m);
+                RestorePaced(m);
                 return;
             }
             if (_exactTicks >= RefTicks - 0.01) return;
@@ -702,7 +827,7 @@ public static class FramePacing
             m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, (int)m.ReadU32(o + ObjVelYOff), Teleport));
             m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), Teleport));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
-            if (speedTo <= 4 && speedTo >= -4)
+            if (_crashObj && speedTo <= 4 && speedTo >= -4)
                 m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
             else
                 m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, speedTo, Teleport));
@@ -710,11 +835,14 @@ public static class FramePacing
             m.WriteU32(o + ObjRotOff + 4, (uint)ScaleAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4)));
             m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
 
-            uint statusA = m.ReadU32(o + ObjStatusAOff);
-            int floor = (int)m.ReadU32(o + ObjFloorYOff);
-            int vy = (int)m.ReadU32(o + ObjVelYOff);
-            if ((statusA & FlagGroundLand) != 0 && y > floor + 0x100 && vy > 0)
-                m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+            if (_crashObj)
+            {
+                uint statusA = m.ReadU32(o + ObjStatusAOff);
+                int floor = (int)m.ReadU32(o + ObjFloorYOff);
+                int vy = (int)m.ReadU32(o + ObjVelYOff);
+                if ((statusA & FlagGroundLand) != 0 && y > floor + 0x100 && vy > 0)
+                    m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+            }
 
             if (++_paceLog >= 90)
             {
@@ -728,7 +856,7 @@ public static class FramePacing
         }
     }
 
-    static void RestoreCrash(IMemory m)
+    static void RestorePaced(IMemory m)
     {
         uint o = _obj;
         m.WriteU32(o + ObjTransOff, (uint)_ox);
@@ -772,6 +900,45 @@ public static class FramePacing
             if (n > AnimFrameCap) n = AnimFrameCap;
             if (n < 0) n = 0;
             m.WriteU32(_obj + ObjAnimFrameOff, (uint)n);
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    /// <summary>
+    /// Path GOOL sometimes does <c>x += vel</c> every trans (no ticks). A
+    /// 30 Hz world step is large; a tick-scaled path step at 270 FPS is not.
+    /// Keep only dt/34 of the leftover after vel*ticks.
+    /// </summary>
+    static void PaceExtraTrans(IMemory m)
+    {
+        if (!_haveObj || _crashObj || _solidObj || _frameTicks >= RefTicks) return;
+        try
+        {
+            int x = (int)m.ReadU32(_obj + ObjTransOff);
+            int z = (int)m.ReadU32(_obj + ObjTransOff + 8);
+            long dx = (long)x - _ox;
+            long dz = (long)z - _oz;
+            if (dx > Teleport || dx < -Teleport || dz > Teleport || dz < -Teleport)
+                return;
+            int expectX = (int)((long)_ovx * _frameTicks / 1024);
+            int expectZ = (int)((long)_ovz * _frameTicks / 1024);
+            int extraX = (int)dx - expectX;
+            int extraZ = (int)dz - expectZ;
+            if (Math.Abs(extraX) < ExtraTransMin && Math.Abs(extraZ) < ExtraTransMin)
+                return;
+            if (Math.Abs(extraX) >= ExtraTransMin)
+            {
+                int kept = (int)Math.Round(extraX * _exactTicks / RefTicks);
+                m.WriteU32(_obj + ObjTransOff, (uint)(_ox + expectX + kept));
+            }
+            if (Math.Abs(extraZ) >= ExtraTransMin)
+            {
+                int kept = (int)Math.Round(extraZ * _exactTicks / RefTicks);
+                m.WriteU32(_obj + ObjTransOff + 8, (uint)(_oz + expectZ + kept));
+            }
         }
         catch
         {

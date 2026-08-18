@@ -197,8 +197,10 @@ public static class Dispatcher
     /// </summary>
     internal static void HealGeomClobberedRegs(CpuContext c, IMemory m)
     {
+        // Scratchpad is 1 KB (0x1F800000–0x3FF). A spawn storm can push SP
+        // past that while GP is still the geom AND-mask (crash dump 0x1F8009E0).
         bool spLooksTemp = c.SP < 0x8000u
-                           || (c.SP >= 0x1F800000u && c.SP < 0x1F800400u)
+                           || (c.SP >= 0x1F800000u && c.SP < 0x1F801000u)
                            || c.SP is 0x02000000u or 0xFFFFFFDFu;
         if (!spLooksTemp) return;
 
