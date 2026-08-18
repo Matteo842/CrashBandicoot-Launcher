@@ -33,6 +33,10 @@ namespace RecompOne.Runtime.Host;
 /// reuse leftover ticks (that is +1 per display frame).
 /// Bonus rounds and Willy_Warp_Out stay on the original 30 Hz pad so CardC
 /// save/continue cannot skip.
+/// CamFollow look-behind is cam_offset_z += 0x3200 per display frame
+/// (12 original frames from -0x12C00 to +0x12C00). Scale that seek — not
+/// CamFollow snaps, not CamAdjustProgress (PreLevelUpdate already paces
+/// same-path progress). Double-scaling those made walk/spin slow-mo.
 /// </summary>
 public static class FramePacing
 {
@@ -93,6 +97,18 @@ public static class FramePacing
     const uint CamZoneAddr = 0x80057914u;
     const uint CamPathAddr = 0x8005791Cu;
     const uint CamProgressAddr = 0x80057920u;
+    /// <summary>CamFollow (NTSC-U). Look-behind / side-look seek lives here.</summary>
+    const uint CamFollowAddr = 0x8002A82Cu;
+    const uint CamUpdateAddr = 0x8002B2BCu;
+    const uint CamOffsetZAddr = 0x800564A4u;
+    const uint CamZoomAddr = 0x800564A8u;
+    const uint CamOffsetYAddr = 0x800564B4u;
+    const uint CamOffsetXAddr = 0x800564B8u;
+    /// <summary>Original per-30 Hz seeks in CamFollow. Larger writes are snaps.</summary>
+    const int CamSeekZ = 0x3200;
+    const int CamSeekX = 0x6400;
+    const int CamSeekY = 0x6400;
+    const int CamSeekZoom = 0x1900;
 
     const uint ObjTransOff = 0x80u;
     const uint ObjRotOff = 0x8Cu;
@@ -199,6 +215,9 @@ public static class FramePacing
     static int _waterLog;
     static double _landPhysAcc;
     static bool _landPhysRan;
+    static bool _inCamFollow;
+    static int _camOffZ, _camOffX, _camOffY, _camZoom;
+    static int _camLog;
 
     public static bool ForceOriginal { get; set; }
 
@@ -300,6 +319,8 @@ public static class FramePacing
         _worldDrawFrac = 0;
         _rippleFrac = 0;
         _ripplePatched = false;
+        _inCamFollow = false;
+        _camLog = 0;
         ResetWaterClock();
         try
         {
@@ -589,6 +610,17 @@ public static class FramePacing
         HookPost(NsInitAddr, PostNsInit);
         HookPre(LevelUpdateAddr, PreLevelUpdate);
         HookPre(GoolSeekAddr, PreGoolSeek);
+        HookCamFollow();
+    }
+
+    static void HookCamFollow()
+    {
+        var follow = SymbolRegistry.Resolve("main", null, CamFollowAddr);
+        uint addr = follow != null ? CamFollowAddr : CamUpdateAddr;
+        if (follow == null)
+            Console.Error.WriteLine("[FramePacing] no CamFollow; pacing offsets on CamUpdate");
+        HookPre(addr, PreCamFollow);
+        HookPost(addr, PostCamFollow);
     }
 
     static void HookPre(uint addr, Func<CpuContext, IMemory, bool> pre)
@@ -1099,11 +1131,68 @@ public static class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// Look-behind / L-R offset and GoolSeek zoom/pan are +N per display
+    /// frame. Keep dt/34 of those seeks. Snaps (new path zoom, force x=0)
+    /// stay instant. Do not touch cam_progress here.
+    /// </summary>
+    static bool PreCamFollow(CpuContext c, IMemory m)
+    {
+        _inCamFollow = false;
+        if (!IsActive(m) || _frameTicks >= RefTicks) return true;
+        try
+        {
+            _camOffZ = (int)m.ReadU32(CamOffsetZAddr);
+            _camOffX = (int)m.ReadU32(CamOffsetXAddr);
+            _camOffY = (int)m.ReadU32(CamOffsetYAddr);
+            _camZoom = (int)m.ReadU32(CamZoomAddr);
+            _inCamFollow = true;
+        }
+        catch
+        {
+            // overlay swap
+        }
+        return true;
+    }
+
+    static void PostCamFollow(CpuContext c, IMemory m)
+    {
+        if (!_inCamFollow) return;
+        _inCamFollow = false;
+        try
+        {
+            BlendCamSeek(m, CamOffsetZAddr, _camOffZ, CamSeekZ);
+            BlendCamSeek(m, CamOffsetXAddr, _camOffX, CamSeekX);
+            BlendCamSeek(m, CamOffsetYAddr, _camOffY, CamSeekY);
+            BlendCamSeek(m, CamZoomAddr, _camZoom, CamSeekZoom);
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void BlendCamSeek(IMemory m, uint addr, int from, int maxStep)
+    {
+        int to = (int)m.ReadU32(addr);
+        int d = to - from;
+        if (d == 0) return;
+        int ad = d < 0 ? -d : d;
+        if (ad > maxStep) return;
+        int kept = ScaleStep(d);
+        m.WriteU32(addr, (uint)(from + kept));
+        if (_camLog < 8)
+        {
+            _camLog++;
+            PaceLog($"cam 0x{addr:X8} {from}->{to} kept={kept} dt={_exactTicks:0.00}");
+        }
+    }
+
     static bool PreGoolSeek(CpuContext c, IMemory m)
     {
         if (!IsActive(m) || _frameTicks >= RefTicks) return true;
-        // Crash trans is 34+scale. Others already used real dt.
-        if (_haveObj) return true;
+        // PostCamFollow scales the zoom/pan result. Crash trans is 34+scale.
+        if (_inCamFollow || _haveObj) return true;
         c.A2 = (uint)ScaleStep((int)c.A2);
         return true;
     }
