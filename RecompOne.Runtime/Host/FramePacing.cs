@@ -50,7 +50,10 @@ namespace RecompOne.Runtime.Host;
 /// keyframe toward the current one over 33 ms wall (not current toward
 /// next: look-at-cam reverse, and look-ahead overshoots).
 /// Hold does not treat reverse as a teleport — stance look is
-/// playanim 14↔19 wait=0. Ripper Roo BIG TNT (RooOC type 39) is not a
+/// playanim 14↔19 wait=0. HoldAnimWait is the 30 Hz step; the mesh
+/// lerps previous→current on the Gfx SVTX pointer. HoldAnimPose is
+/// not applied to Crash (it froze idx so the morph never ran).
+/// Ripper Roo BIG TNT (RooOC type 39) is not a
 /// mesh ping-pong: BIG_TNT is 1 CVTX frame. Stop-state trans does
 /// <c>troty = randi(±10deg)</c> when GOOL <c>time(0.4s)</c> is 0.
 /// time() is <c>(offset + draw_count) % period</c>. Without a 30 Hz gate
@@ -1008,7 +1011,10 @@ public static class FramePacing
             HoldAnimPose(m, c.A0);
         }
         ApplyGatedDisplayPose(m, c.A0);
-        if (IsActive(m) && c.A0 == _obj)
+        // Crash look is patched in PreGfxTransformMesh on the real SVTX
+        // pointer (A0). PreTransform is too early and a second patch here
+        // made PreGfx skip the buffer Gfx actually reads.
+        if (IsActive(m) && c.A0 == _obj && !_crashObj)
             PatchObjectMesh(c, m, c.A0);
         return true;
     }
@@ -1206,7 +1212,8 @@ public static class FramePacing
     /// </summary>
     public static bool PreGfxTransformMesh(CpuContext c, IMemory m)
     {
-        if (!IsActive(m) || _svtxPatched) return true;
+        RestoreSvtx(m);
+        if (!IsActive(m)) return true;
         if (GamePaused(m)) return true;
         // Full original 33 ms step already landed on the GOOL pose.
         if (_exactTicks >= RefTicks - 0.01) return true;
@@ -1899,18 +1906,22 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Fraction of one original 33 ms pose, from wall time since this
-    /// object's SVTX index last changed. fromIdx is the previous keyframe.
-    /// Look-ahead (cur→cur+dir) overshoots when look-at-cam / TNT reverse.
+    /// Fraction of one original 33 ms pose. Sample at the end of the current
+    /// present (elapsed + dt) so a 33 ms key with two displays is t=1/2 then
+    /// t=1 (authored frame). Starting at t=0 never reaches 1 before the next
+    /// playanim — only a 50 % morph, which is the Crash 60 Hz look. 120+ has
+    /// more samples and does reach 1; 30 Hz skips lerp. Wall dt, not an FPS table.
     /// </summary>
     static double WallAnimFrac(uint obj, int idx, out int fromIdx)
     {
         fromIdx = idx;
         long now = Stopwatch.GetTimestamp();
+        double present = _exactTicks / TicksPerSecond;
+        if (present < 0) present = 0;
         if (_poseClock.TryGetValue(obj, out PoseClock p) && p.Idx == idx)
         {
             fromIdx = p.From;
-            double sec = (now - p.Ts) / (double)Stopwatch.Frequency;
+            double sec = (now - p.Ts) / (double)Stopwatch.Frequency + present;
             if (sec < 0) sec = 0;
             if (sec > HitchSeconds) sec = HitchSeconds;
             return sec / HitchSeconds;
@@ -1920,7 +1931,9 @@ public static class FramePacing
             from = p.Idx;
         fromIdx = from;
         _poseClock[obj] = new PoseClock { Idx = idx, From = from, Ts = now };
-        return 0;
+        double t0 = present / HitchSeconds;
+        if (t0 > 1) t0 = 1;
+        return t0;
     }
 
     static bool TryAnimLerpKeys(uint obj, int drawnIdx, int items,
@@ -2075,14 +2088,15 @@ public static class FramePacing
 
     static int LerpAng(int from, int to, double t)
     {
+        int a = from & 0xFFF;
         int d = AngDelta(from, to);
-        if (Math.Abs(d) > 0x200) return to;
-        return from + (int)Math.Round(d * t);
+        if (Math.Abs(d) > 0x200) return to & 0xFFF;
+        return (a + (int)Math.Round(d * t)) & 0xFFF;
     }
 
     static int AngDelta(int from, int to)
     {
-        int d = to - from;
+        int d = (to & 0xFFF) - (from & 0xFFF);
         if (d > 0x800) d -= 0x1000;
         if (d < -0x800) d += 0x1000;
         return d;
@@ -2299,6 +2313,20 @@ public static class FramePacing
         if (IsHud(m, obj)) return;
         if (GamePaused(m)) return;
         if (obj == _obj && _solidObj) return;
+        // Crash look is CODE playanim wait=0 (stance 14↔19). HoldAnimWait
+        // already steps that like gated TNT: one ChangeAnim per 33 ms wall.
+        // Holding anim_frame again freezes idx so WallAnimFrac sees from==to
+        // for the whole wait — 30 Hz snaps, no morph. Leave the new frame
+        // and lerp previous→current on the Gfx pointer.
+        if (obj == _obj && _crashObj)
+        {
+            if (_animPose.TryGetValue(obj, out AnimPose freeze) && freeze.Holding)
+            {
+                freeze.Holding = false;
+                _animPose[obj] = freeze;
+            }
+            return;
+        }
         try
         {
             uint type = m.ReadU32(obj);
@@ -2481,12 +2509,21 @@ public static class FramePacing
         return from + (int)Math.Round(d * _exactTicks / RefTicks);
     }
 
+    /// <summary>
+    /// Guest yaw/pitch/roll are 12-bit. Interpolating the raw ints unwraps
+    /// past 0x1000 when turning CCW through 0; the next step then sees
+    /// from≡to (mod 4096) and d=0 — Crash sticks on that heading. 0x200 is
+    /// the 45° stick diagonal. Only runs when dt&lt;34, so 30 FPS is original
+    /// and 60 (t=1/2) shows it hardest. Same wrap at any unlocked dt.
+    /// </summary>
     static int ScaleAng(int from, int to)
     {
-        int d = to - from;
+        int a = from & 0xFFF;
+        int b = to & 0xFFF;
+        int d = b - a;
         if (d > 0x800) d -= 0x1000;
         if (d < -0x800) d += 0x1000;
-        return from + (int)Math.Round(d * _exactTicks / RefTicks);
+        return (a + (int)Math.Round(d * _exactTicks / RefTicks)) & 0xFFF;
     }
 
     /// <summary>
