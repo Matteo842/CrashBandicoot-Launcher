@@ -7,6 +7,7 @@ using RecompOne.Runtime;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hle;
+using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Host.Cheats;
 using RecompOne.Runtime.Host.Window;
 using Color = Android.Graphics.Color;
@@ -290,6 +291,16 @@ sealed partial class DevMenuOverlay : FrameLayout
             view.Widescreen = value;
             AndroidGraphics.ApplyLive();
         }, "Hack: stretches 4:3 (gameplay only).");
+        Choice("Frame rate", ViewConfig.FrameRateLabels,
+            ViewConfig.FrameRateToIndex(view.FrameRate),
+            index =>
+            {
+                view.FrameRate = ViewConfig.FrameRateOptionValues[index];
+                AndroidGraphics.ApplyLive();
+                FramePacing.Reset();
+                ShowSection("display");
+            });
+        Hint("Gameplay only. Refresh cap — 60 and 120 play at the same speed. Menus stay 30 game / 60 present.");
         Toggle("Dedither", view.Dedither, value =>
         {
             view.Dedither = value;
@@ -354,7 +365,17 @@ sealed partial class DevMenuOverlay : FrameLayout
         {
             view.VSync = value;
             AndroidGraphics.ApplyLive();
-        }, "Desktop swap-interval. Android always uses the software 60 Hz clock so audio stays in sync.");
+        }, "Desktop swap-interval. Android always keeps the software present clock so SPU audio stays in sync.");
+        Choice("Frame rate", ViewConfig.FrameRateLabels,
+            ViewConfig.FrameRateToIndex(view.FrameRate),
+            index =>
+            {
+                view.FrameRate = ViewConfig.FrameRateOptionValues[index];
+                AndroidGraphics.ApplyLive();
+                FramePacing.Reset();
+                ShowSection("rendering");
+            });
+        Hint("Gameplay only. Refresh cap — delta time keeps 60 and 120 at the same play speed. Menus stay 60 present.");
         Divider();
         Choice("Internal resolution", ViewConfig.InternalResolutionOptions
                 .Select(scale => scale == 1 ? "Native (1x)" : scale == 8 ? "8x (4K)" : $"{scale}x")
@@ -466,6 +487,10 @@ sealed partial class DevMenuOverlay : FrameLayout
     {
         Hint("Host process");
         Body($"FPS: {AndroidPlatformHost.LastFps:0.00}");
+        Body($"Pacing: {AndroidDisplayPacing.Describe()}");
+        Body($"Setting: {ConfigManager.View.FrameRate}   TargetHz: {RecompOne.Runtime.Host.FrameClock.TargetHz:0}");
+        Body($"ForceOriginal: {RecompOne.Runtime.Host.FramePacing.ForceOriginal}   WantsUnlock: {RecompOne.Runtime.Host.FramePacing.WantsUnlock}");
+        Body($"dt active: {RecompOne.Runtime.Host.FramePacing.IsActive(Runtime.Mem)}   ticks {RecompOne.Runtime.Host.FramePacing.LastFrameTicks}/34");
         _process.Refresh();
         Body($"Working set: {FormatBytes(_process.WorkingSet64)}");
         Body($"Private bytes: {FormatBytes(_process.PrivateMemorySize64)}");

@@ -21,8 +21,11 @@ sealed class AndroidEglContext : INativeContext
     readonly EGLConfig _config;
     readonly EGLContext _context;
     readonly Func<Surface> _surfaceSource;
+    Surface? _nativeWindow;
     EGLSurface _surface;
     nint _glesLibrary;
+
+    public static AndroidEglContext? Current { get; private set; }
     bool _disposed;
     int _surfaceRecreateFailures;
     volatile int _expectedWidth;
@@ -87,16 +90,19 @@ sealed class AndroidEglContext : INativeContext
         EGL14.EglSwapInterval(_display, 0);
 
         NativeLibrary.TryLoad("libGLESv3.so", out _glesLibrary);
+        Current = this;
+    }
+
+    public void SetPresentHz(double targetHz)
+    {
+        if (_nativeWindow != null)
+            AndroidDisplayPacing.ApplySurface(_nativeWindow, targetHz);
     }
 
     EGLSurface CreateWindowSurface(Surface nativeWindow)
     {
-        // The emulated vblank is 60 Hz. Request that cadence explicitly on
-        // 90/120 Hz phones so the compositor follows the software 60 Hz
-        // frame pacer instead of presenting the same cadence at a higher mode.
-        if (OperatingSystem.IsAndroidVersionAtLeast(30))
-            nativeWindow.SetFrameRate(
-                60f, (int)SurfaceFrameRateCompatibility.Default);
+        _nativeWindow = nativeWindow;
+        AndroidDisplayPacing.ApplySurface(nativeWindow, RecompOne.Runtime.Host.FrameClock.TargetHz);
 
         var surfaceAttributes = new[] { EGL14.EglNone };
         return EGL14.EglCreateWindowSurface(_display, _config, nativeWindow,
@@ -203,6 +209,8 @@ sealed class AndroidEglContext : INativeContext
     {
         if (_disposed) return;
         _disposed = true;
+        if (Current == this) Current = null;
+        _nativeWindow = null;
         EGL14.EglMakeCurrent(_display, EGL14.EglNoSurface, EGL14.EglNoSurface, EGL14.EglNoContext);
         EGL14.EglDestroyContext(_display, _context);
         EGL14.EglDestroySurface(_display, _surface);

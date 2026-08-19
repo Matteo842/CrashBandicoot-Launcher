@@ -50,6 +50,14 @@ public sealed class MainActivity : Activity
         base.OnCreate(savedInstanceState);
         RequestedOrientation = ScreenOrientation.SensorLandscape;
         InitializeRuntimeConfiguration();
+        AndroidGraphics.PresentHzChanged = hz =>
+        {
+            RunOnUiThread(() =>
+            {
+                if (_gameUiVisible)
+                    AndroidDisplayPacing.ApplyWindow(this, hz);
+            });
+        };
         AndroidGamepad.Attach(this);
         AndroidGamepad.ResolveRoute = () =>
         {
@@ -291,6 +299,7 @@ public sealed class MainActivity : Activity
         if (!_gameUiVisible) return;
         if (ConfigManager.View.Fullscreen) EnterImmersiveGameMode();
         else LeaveImmersiveGameMode();
+        AndroidDisplayPacing.ApplyWindow(this, AndroidGraphics.PresentHz(ConfigManager.View.FrameRate));
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -373,6 +382,7 @@ public sealed class MainActivity : Activity
 
     protected override void OnDestroy()
     {
+        AndroidGraphics.PresentHzChanged = null;
         AndroidGamepad.Detach();
         base.OnDestroy();
     }
@@ -667,21 +677,7 @@ public sealed class MainActivity : Activity
         }
     }
 
-    static void ApplyRuntimeGraphicsSettings()
-    {
-        var view = ConfigManager.View;
-        RecompOne.Runtime.Hle.GpuHle.WideAspect = view.Widescreen ? 16f / 9f : 0f;
-        RecompOne.Runtime.Hle.GpuHle.TextureFilter = view.TextureFilter;
-        RecompOne.Runtime.Hle.GpuHle.TextureFilterStrength = view.TextureFilterStrength;
-        RecompOne.Runtime.Hle.GpuHle.Dedither = view.Dedither;
-        RecompOne.Runtime.Hle.GpuHle.Dejitter = view.Dejitter;
-        RecompOne.Runtime.Hle.GpuHle.PresentNearest = view.PresentNearest;
-        RecompOne.Runtime.Hle.GpuHle.IntegerScale = view.IntegerScale;
-        RecompOne.Runtime.Host.FramePacing.ForceOriginal = true;
-        RecompOne.Runtime.Host.FrameClock.SkipThrottle = false;
-        RecompOne.Runtime.Host.FrameClock.TargetHz = 60;
-        RecompOne.Runtime.Hle.GpuHle.RefreshWideFov();
-    }
+    static void ApplyRuntimeGraphicsSettings() => AndroidGraphics.ApplyLive();
 
     static void RunOnLargeStack(string threadName, Action action)
     {

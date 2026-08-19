@@ -7,6 +7,7 @@ using System.Text.Json;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Events;
 using RecompOne.Runtime.Host;
 
@@ -155,7 +156,13 @@ public static class ModLoader
     {
         FramePacing.InstallGameHooks();
         try { HookManager.Commit(); }
-        catch (Exception ex) { Console.Error.WriteLine($"[Mods] hook install failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Mods] hook install failed: {ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine("[Mods] wrapping Dispatcher.Call; GpuUpdate unlock uses host present");
+            Dispatcher.FunctionWrapper = HookManager.WrapIfHooked;
+            Dispatcher.RefreshFunctionMap();
+        }
     }
 
     /// <summary>

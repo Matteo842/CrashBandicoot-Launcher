@@ -96,6 +96,21 @@ public static class HookManager
         }
     }
 
+    /// <summary>
+    /// Wrap a dispatcher-table delegate so queued pre/post hooks run without MonoMod.
+    /// Direct recompiler calls to the MethodInfo are not intercepted.
+    /// </summary>
+    public static Action<CpuContext, IMemory> WrapIfHooked(Action<CpuContext, IMemory> orig)
+    {
+        if (!_hooks.TryGetValue(orig.Method, out var hooks))
+            return orig;
+        if (hooks.Pres.Count == 0 && hooks.Posts.Count == 0 && hooks.Replace == null)
+            return orig;
+        var captured = orig;
+        var state = hooks;
+        return (c, m) => Invoke(state, captured, c, m);
+    }
+
     static void Invoke(FunctionHooks hooks, Action<CpuContext, IMemory> orig, CpuContext c, IMemory m)
     {
         bool skip = false;

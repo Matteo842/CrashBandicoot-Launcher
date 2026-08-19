@@ -25,6 +25,7 @@ public static class LibEtc
     /// </summary>
     public static void VSync(CpuContext c, IMemory m)
     {
+        FramePacing.NoteSoftwareVblank();
         if (FramePacing.IsActive(m))
         {
             UnlockedVSync(c, m);
@@ -43,6 +44,7 @@ public static class LibEtc
         FramePacing.NoteGpuVSync();
         if (FramePacing.IsPadCall())
         {
+            FramePacing.FinishGpuUpdate(m);
             c.V0 = 0;
             return;
         }

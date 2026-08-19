@@ -137,6 +137,7 @@ public static class Runtime
         FrameClock.Throttle();
         Sdk.LibCd.Tick();
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); }
+        Host.FramePacing.OnHostPresent(Mem);
         Host.FramePacing.PulseVblankIrq();
     }
 

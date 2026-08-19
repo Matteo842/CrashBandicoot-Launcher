@@ -57,6 +57,12 @@ static class SettingsDialog
         card.AddView(Hint(activity,
             "Hack active during gameplay only; menus, map, and cutscenes stay 4:3.", bodyFont));
 
+        var frameRate = AddChoice(activity, card, "Frame rate",
+            ViewConfig.FrameRateLabels, ViewConfig.FrameRateToIndex(view.FrameRate), bodyFont, bodyBold);
+        card.AddView(Hint(activity,
+            "Gameplay levels only — menus stay at 60 present / 30 game. Original and 60 dt both show ~60 fps; 60 dt has unique frames. 120/240 need a high-refresh phone.",
+            bodyFont));
+
         var resolution = AddChoice(activity, card, "Internal resolution",
             ResolutionLabels, IndexOf(ResolutionValues, view.InternalResolution), bodyFont, bodyBold);
         card.AddView(Hint(activity,
@@ -128,6 +134,8 @@ static class SettingsDialog
             game.Muted = muted.Checked;
             view.Fullscreen = fullscreen.Checked;
             view.Widescreen = widescreen.Checked;
+            view.FrameRate = ViewConfig.FrameRateOptionValues[Math.Clamp(
+                frameRate.SelectedItemPosition, 0, ViewConfig.FrameRateOptionValues.Length - 1)];
             view.InternalResolution = ResolutionValues[Math.Clamp(
                 resolution.SelectedItemPosition, 0, ResolutionValues.Length - 1)];
             view.TextureFilter = Math.Clamp(filter.SelectedItemPosition, 0, FilterLabels.Length - 1);

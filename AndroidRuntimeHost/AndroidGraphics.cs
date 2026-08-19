@@ -65,12 +65,40 @@ static class AndroidGraphics
         GpuHle.PresentNearest = view.PresentNearest;
         GpuHle.IntegerScale = view.IntegerScale;
         GpuHle.NativeResolution = view.InternalResolution <= 1;
-        // EGL swap interval is 0 so SPU music stays in lockstep with the
-        // software VBlank. Never skip FrameClock on Android or the game
-        // runs uncapped (the VSync checkbox only applies on desktop).
-        FramePacing.ForceOriginal = true;
-        FrameClock.SkipThrottle = false;
-        FrameClock.TargetHz = 60;
+        ApplyFramePacing(reset: false);
         ConfigManager.SaveView(Array.Empty<IPanel>());
     }
+
+    /// <summary>Window / surface must follow present-Hz changes (UI thread).</summary>
+    public static Action<double>? PresentHzChanged;
+
+    /// <summary>
+    /// FrameRate drives delta-time unlock; the software present clock always
+    /// stays on so SPU music cannot run away (EGL swap interval is 0).
+    /// </summary>
+    public static void ApplyFramePacing(bool reset = true)
+    {
+        int rate = ConfigManager.View.FrameRate;
+        FrameClock.SkipThrottle = false;
+        FramePacing.ForceOriginal = rate == ViewConfig.FrameRateOriginal;
+        double hz = PresentHz(rate);
+        if (Math.Abs(FrameClock.TargetHz - hz) > 0.5)
+            FrameClock.TargetHz = hz;
+        if (reset)
+            FramePacing.Reset();
+        AndroidEglContext.Current?.SetPresentHz(hz);
+        PresentHzChanged?.Invoke(hz);
+        Android.Util.Log.Info("CrashGPU",
+            $"FrameRate={rate} ForceOriginal={FramePacing.ForceOriginal} " +
+            $"TargetHz={FrameClock.TargetHz:0} WantsUnlock={FramePacing.WantsUnlock} " +
+            $"{AndroidDisplayPacing.Describe()}");
+    }
+
+    public static double PresentHz(int rate) => rate switch
+    {
+        120 => 120,
+        240 => 240,
+        ViewConfig.FrameRateUncapped => 240,
+        _ => 60,
+    };
 }

@@ -4,7 +4,6 @@ using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Memory;
-using RecompOne.Runtime.Modding;
 
 namespace RecompOne.Runtime.Host;
 
@@ -182,6 +181,11 @@ public static class FramePacing
     static bool _levelReady;
     /// <summary>GpuUpdates to keep at 30 FPS after the first real DrawOTag.</summary>
     static int _holdLocked;
+    /// <summary>Last PsyQ VSync HLE timestamp. Gap &gt; 0.5 ms starts a new GpuUpdate burst.</summary>
+    static long _lastVsyncHleTs;
+    static bool _armedThisGpu;
+    static bool _gpuFinished;
+    static bool _didPreUpdateObjects;
 
     static uint _obj;
     static int _ox, _oy, _oz, _orx, _ory, _orz, _oanim;
@@ -315,6 +319,10 @@ public static class FramePacing
         _inNsInit = false;
         _levelReady = false;
         _holdLocked = 0;
+        _lastVsyncHleTs = 0;
+        _armedThisGpu = false;
+        _gpuFinished = false;
+        _didPreUpdateObjects = false;
         _worldDraw = 0;
         _worldDrawFrac = 0;
         _rippleFrac = 0;
@@ -345,6 +353,64 @@ public static class FramePacing
     }
 
     public static void NoteGpuPresent() => _didPresentThisGpu = true;
+
+    /// <summary>
+    /// MonoMod does not detour on Android, so PreGpuUpdate never runs. PsyQ
+    /// VSync(0) is two HLE waits a few microseconds apart; a new GpuUpdate is
+    /// anything after a 0.5 ms gap.
+    /// </summary>
+    public static void NoteSoftwareVblank()
+    {
+        if (!WantsUnlock) return;
+        long now = Stopwatch.GetTimestamp();
+        double ms = _lastVsyncHleTs == 0
+            ? 999.0
+            : (now - _lastVsyncHleTs) * 1000.0 / Stopwatch.Frequency;
+        _lastVsyncHleTs = now;
+        if (ms > 0.5)
+            BeginGpuUpdate();
+    }
+
+    /// <summary>
+    /// Called from every host present. Arms delta-time after the 30-frame hold
+    /// even when GpuUpdate was a direct jal (no MonoMod, no Dispatcher.Call).
+    /// </summary>
+    public static void OnHostPresent(IMemory? m)
+    {
+        if (_inGpuUpdate)
+            _didPresentThisGpu = true;
+        if (m != null)
+            TryArmUnlock(m);
+    }
+
+    static void BeginGpuUpdate()
+    {
+        _inGpuUpdate = true;
+        _vsyncsInGpu = 0;
+        _didPresentThisGpu = false;
+        _armedThisGpu = false;
+        _gpuFinished = false;
+        // Android: GoolUpdateObjects is a direct jal, so PreUpdateObjects never
+        // clears this. Reset here so AdvanceUnlocked can take the wall-clock step.
+        // Windows already took dt in PreUpdateObjects — leave the flag alone.
+        if (!_didPreUpdateObjects)
+            _ticksTakenThisLoop = false;
+    }
+
+    public static void FinishGpuUpdate(IMemory m)
+    {
+        if (_gpuFinished) return;
+        _gpuFinished = true;
+        _inGpuUpdate = false;
+        _vsyncsInGpu = 0;
+        _didPresentThisGpu = false;
+        _didPreUpdateObjects = false;
+        TryArmUnlock(m);
+        PatchTicksPerFrame(m);
+        CommitWaterDrawCount(m);
+        RestoreRippleSpeed(m);
+        _waterDoneThisLoop = false;
+    }
 
     /// <summary>
     /// Sim dt from wall time since the last sim step. The FrameRate combo
@@ -577,6 +643,11 @@ public static class FramePacing
 
     public static void NoteVblankIrq() => _irqTs = Stopwatch.GetTimestamp();
 
+    /// <summary>
+    /// GOOL function-pointer updates go through <see cref="Dispatcher.Call"/>.
+    /// Direct jals (physics, cam, worlds, GpuUpdate) are hooked at compile time
+    /// in CrashBandicoot.json — MonoMod detours do not exist on Android.
+    /// </summary>
     public static void InstallGameHooks()
     {
         if (_hooksInstalled) return;
@@ -584,69 +655,12 @@ public static class FramePacing
 
         Dispatcher.CallPre = OnCallPre;
         Dispatcher.CallPost = OnCallPost;
-
-        HookPre(GoolUpdateObjectsAddr, PreUpdateObjects);
-        HookPre(GoolObjectTransformAddr, PreTransform);
-        HookPre(GoolObjectPhysicsAddr, PrePhysics);
-        HookPost(GoolObjectPhysicsAddr, PostObjectPhysics);
-        HookPre(GfxTransformSvtxAddr, PreTransformSvtx);
-        HookPre(GfxTransformCvtxAddr, PreTransformCvtx);
-        HookPre(GfxUpdateMatricesAddr, PreGfxUpdateMatrices);
-        HookPre(GfxTransformWorldsAddr, PreWorlds);
-        HookPost(GfxTransformWorldsAddr, PostWorlds);
-        HookPre(GfxTransformWorldsFogAddr, PreWorlds);
-        HookPost(GfxTransformWorldsFogAddr, PostWorlds);
-        HookPre(GfxTransformWorldsRippleAddr, PreWorldsRipple);
-        HookPost(GfxTransformWorldsRippleAddr, PostWorldsRipple);
-        HookPre(GfxTransformWorldsLightningAddr, PreWorlds);
-        HookPost(GfxTransformWorldsLightningAddr, PostWorlds);
-        HookPre(GfxTransformWorldsDarkAddr, PreWorlds);
-        HookPost(GfxTransformWorldsDarkAddr, PostWorlds);
-        HookPre(GfxTransformWorldsDark2Addr, PreWorlds);
-        HookPost(GfxTransformWorldsDark2Addr, PostWorlds);
-        HookPre(GpuUpdateAddr, PreGpuUpdate);
-        HookPost(GpuUpdateAddr, PostGpuUpdate);
-        HookPre(NsInitAddr, PreNsInit);
-        HookPost(NsInitAddr, PostNsInit);
-        HookPre(LevelUpdateAddr, PreLevelUpdate);
-        HookPre(GoolSeekAddr, PreGoolSeek);
-        HookCamFollow();
     }
 
-    static void HookCamFollow()
+    public static bool PreUpdateObjects(CpuContext c, IMemory m)
     {
-        var follow = SymbolRegistry.Resolve("main", null, CamFollowAddr);
-        uint addr = follow != null ? CamFollowAddr : CamUpdateAddr;
-        if (follow == null)
-            Console.Error.WriteLine("[FramePacing] no CamFollow; pacing offsets on CamUpdate");
-        HookPre(addr, PreCamFollow);
-        HookPost(addr, PostCamFollow);
-    }
-
-    static void HookPre(uint addr, Func<CpuContext, IMemory, bool> pre)
-    {
-        var mi = SymbolRegistry.Resolve("main", null, addr);
-        if (mi == null)
-        {
-            Console.Error.WriteLine($"[FramePacing] no func 0x{addr:X8}");
-            return;
-        }
-        HookManager.AddPre(mi, pre);
-    }
-
-    static void HookPost(uint addr, Action<CpuContext, IMemory> post)
-    {
-        var mi = SymbolRegistry.Resolve("main", null, addr);
-        if (mi == null)
-        {
-            Console.Error.WriteLine($"[FramePacing] no func 0x{addr:X8}");
-            return;
-        }
-        HookManager.AddPost(mi, post);
-    }
-
-    static bool PreUpdateObjects(CpuContext c, IMemory m)
-    {
+        if (_didPreUpdateObjects) return true;
+        _didPreUpdateObjects = true;
         _ticksTakenThisLoop = false;
         if (IsActive(m))
         {
@@ -675,34 +689,30 @@ public static class FramePacing
             _spawnBudget = SpawnBurstMax + SpawnBurstMax / 2;
     }
 
-    static bool OnCallPre(uint addr, CpuContext c, IMemory m)
+    static bool OnCallPre(uint addr, CpuContext c, IMemory m) => addr switch
     {
-        if (addr == NsInitAddr)
-        {
-            _inNsInit = true;
-            _levelReady = false;
-            _holdLocked = 0;
-            _loggedUnlockGpu = false;
-            ResetWaterClock();
-            _lastBound.Clear();
-            PaceLog($"NSInit start lid=0x{c.A1:X}");
-            return true;
-        }
-        if (addr == GoolObjectTransformAddr)
-        {
-            if (IsActive(m))
-                ClampAnimFrame(m, c.A0);
-            return true;
-        }
-        if (addr == GoolObjectPhysicsAddr)
-        {
-            if (IsActive(m))
-                WriteCrashOrObjectTicks(m);
-            return true;
-        }
-        if (addr == GoolObjectCreateAddr)
-            return PreObjectCreate(c, m);
-        if (addr != GoolObjectUpdateAddr) return true;
+        NsInitAddr => PreNsInit(c, m),
+        GoolUpdateObjectsAddr => PreUpdateObjects(c, m),
+        GpuUpdateAddr => PreGpuUpdate(c, m),
+        GoolObjectTransformAddr => PreTransform(c, m),
+        GoolObjectPhysicsAddr => PrePhysics(c, m),
+        GoolObjectCreateAddr => PreObjectCreate(c, m),
+        GfxUpdateMatricesAddr => PreGfxUpdateMatrices(c, m),
+        GfxTransformSvtxAddr or GfxTransformCvtxAddr => true,
+        GfxTransformWorldsAddr or GfxTransformWorldsFogAddr
+            or GfxTransformWorldsLightningAddr
+            or GfxTransformWorldsDarkAddr
+            or GfxTransformWorldsDark2Addr => PreWorlds(c, m),
+        GfxTransformWorldsRippleAddr => PreWorldsRipple(c, m),
+        LevelUpdateAddr => PreLevelUpdate(c, m),
+        GoolSeekAddr => PreGoolSeek(c, m),
+        CamFollowAddr or CamUpdateAddr => PreCamFollow(c, m),
+        GoolObjectUpdateAddr => PreGoolObjectUpdate(c, m),
+        _ => true,
+    };
+
+    static bool PreGoolObjectUpdate(CpuContext c, IMemory m)
+    {
         _haveObj = false;
         _crashObj = false;
         _solidObj = false;
@@ -759,25 +769,36 @@ public static class FramePacing
 
     static void OnCallPost(uint addr, CpuContext c, IMemory m)
     {
-        if (addr == NsInitAddr)
+        switch (addr)
         {
-            _inNsInit = false;
-            _clockArmed = false;
-            PaceLog("NSInit end");
-            return;
+            case NsInitAddr:
+                PostNsInit(c, m);
+                return;
+            case GpuUpdateAddr:
+                PostGpuUpdate(c, m);
+                return;
+            case GoolObjectPhysicsAddr:
+                PostObjectPhysics(c, m);
+                return;
+            case GfxTransformWorldsAddr:
+            case GfxTransformWorldsFogAddr:
+            case GfxTransformWorldsLightningAddr:
+            case GfxTransformWorldsDarkAddr:
+            case GfxTransformWorldsDark2Addr:
+                PostWorlds(c, m);
+                return;
+            case GfxTransformWorldsRippleAddr:
+                PostWorldsRipple(c, m);
+                return;
+            case CamFollowAddr:
+            case CamUpdateAddr:
+                PostCamFollow(c, m);
+                return;
+            case GoolObjectUpdateAddr:
+                break;
+            default:
+                return;
         }
-        if (addr == GpuUpdateAddr)
-        {
-            PatchTicksPerFrame(m);
-            return;
-        }
-        if (addr == GoolObjectPhysicsAddr)
-        {
-            if (_crashObj && IsActive(m))
-                FinishPacedScale(m);
-            return;
-        }
-        if (addr != GoolObjectUpdateAddr) return;
         NoteSpawnUsed();
         if (_solidObj && !_gatedSolid && _haveObj)
             CaptureBound(m, _obj);
@@ -792,14 +813,14 @@ public static class FramePacing
             WriteAllTicks(m, _frameTicks);
     }
 
-    static bool PreTransform(CpuContext c, IMemory m)
+    public static bool PreTransform(CpuContext c, IMemory m)
     {
         if (IsActive(m))
             ClampAnimFrame(m, c.A0);
         return true;
     }
 
-    static bool PrePhysics(CpuContext c, IMemory m)
+    public static bool PrePhysics(CpuContext c, IMemory m)
     {
         if (!IsActive(m)) return true;
         if (SkipLandLockedPhysics(m)) return false;
@@ -818,17 +839,15 @@ public static class FramePacing
         return true;
     }
 
-    static void PostObjectPhysics(CpuContext c, IMemory m)
+    public static void PostObjectPhysics(CpuContext c, IMemory m)
     {
         if (_crashObj && IsActive(m))
             FinishPacedScale(m);
     }
 
-    static bool PreGpuUpdate(CpuContext c, IMemory m)
+    public static bool PreGpuUpdate(CpuContext c, IMemory m)
     {
-        _inGpuUpdate = true;
-        _vsyncsInGpu = 0;
-        _didPresentThisGpu = false;
+        BeginGpuUpdate();
         if (_levelReady && !_loggedUnlockGpu)
         {
             _loggedUnlockGpu = true;
@@ -837,19 +856,9 @@ public static class FramePacing
         return true;
     }
 
-    static void PostGpuUpdate(CpuContext c, IMemory m)
-    {
-        _inGpuUpdate = false;
-        _vsyncsInGpu = 0;
-        _didPresentThisGpu = false;
-        TryArmUnlock(m);
-        PatchTicksPerFrame(m);
-        CommitWaterDrawCount(m);
-        RestoreRippleSpeed(m);
-        _waterDoneThisLoop = false;
-    }
+    public static void PostGpuUpdate(CpuContext c, IMemory m) => FinishGpuUpdate(m);
 
-    static bool PreNsInit(CpuContext c, IMemory m)
+    public static bool PreNsInit(CpuContext c, IMemory m)
     {
         _inNsInit = true;
         _levelReady = false;
@@ -861,7 +870,7 @@ public static class FramePacing
         return true;
     }
 
-    static void PostNsInit(CpuContext c, IMemory m)
+    public static void PostNsInit(CpuContext c, IMemory m)
     {
         _inNsInit = false;
         _clockArmed = false;
@@ -871,6 +880,7 @@ public static class FramePacing
     static void TryArmUnlock(IMemory m)
     {
         if (_levelReady || !WantsUnlock || _inNsInit) return;
+        if (_armedThisGpu) return;
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
@@ -888,6 +898,7 @@ public static class FramePacing
             uint type = m.ReadU32(crash);
             if (type is 0 or 2) return;
 
+            _armedThisGpu = true;
             if (_holdLocked == 0)
             {
                 _holdLocked = 30;
@@ -937,7 +948,7 @@ public static class FramePacing
     /// TransformWorlds* → objects → GpuUpdate (++ draw_count). Advance water
     /// here so worlds see wall time, not leftover object ticks.
     /// </summary>
-    static bool PreGfxUpdateMatrices(CpuContext c, IMemory m)
+    public static bool PreGfxUpdateMatrices(CpuContext c, IMemory m)
     {
         AdvanceWater(m);
         return true;
@@ -1016,15 +1027,15 @@ public static class FramePacing
         }
     }
 
-    static bool PreWorlds(CpuContext c, IMemory m)
+    public static bool PreWorlds(CpuContext c, IMemory m)
     {
         CommitWaterDrawCount(m);
         return true;
     }
 
-    static void PostWorlds(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
+    public static void PostWorlds(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
 
-    static bool PreWorldsRipple(CpuContext c, IMemory m)
+    public static bool PreWorldsRipple(CpuContext c, IMemory m)
     {
         // A0 == 0 is init: fill tri_wave from period, no present.
         if (c.A0 == 0) return true;
@@ -1033,7 +1044,7 @@ public static class FramePacing
         return true;
     }
 
-    static void PostWorldsRipple(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
+    public static void PostWorldsRipple(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
 
     static void ZeroRippleSpeed(IMemory m)
     {
@@ -1110,7 +1121,7 @@ public static class FramePacing
     /// wall speed. ZonePathProgressToLoc then builds a consistent pose — no Euler lerp.
     /// Zone/path changes are teleports; leave those alone.
     /// </summary>
-    static bool PreLevelUpdate(CpuContext c, IMemory m)
+    public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
         if (!IsActive(m) || _frameTicks >= RefTicks) return true;
         try
@@ -1136,7 +1147,7 @@ public static class FramePacing
     /// frame. Keep dt/34 of those seeks. Snaps (new path zoom, force x=0)
     /// stay instant. Do not touch cam_progress here.
     /// </summary>
-    static bool PreCamFollow(CpuContext c, IMemory m)
+    public static bool PreCamFollow(CpuContext c, IMemory m)
     {
         _inCamFollow = false;
         if (!IsActive(m) || _frameTicks >= RefTicks) return true;
@@ -1155,7 +1166,7 @@ public static class FramePacing
         return true;
     }
 
-    static void PostCamFollow(CpuContext c, IMemory m)
+    public static void PostCamFollow(CpuContext c, IMemory m)
     {
         if (!_inCamFollow) return;
         _inCamFollow = false;
@@ -1188,7 +1199,7 @@ public static class FramePacing
         }
     }
 
-    static bool PreGoolSeek(CpuContext c, IMemory m)
+    public static bool PreGoolSeek(CpuContext c, IMemory m)
     {
         if (!IsActive(m) || _frameTicks >= RefTicks) return true;
         // PostCamFollow scales the zoom/pan result. Crash trans is 34+scale.

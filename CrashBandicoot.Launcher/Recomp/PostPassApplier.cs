@@ -157,15 +157,13 @@ public static class PostPassApplier
 
     static string ApplyUnified(string original, string patch)
     {
-        var src = original.Split('\n').Select(l => l + "\n").ToList();
-        // If original ended without newline, last split item is wrong — handle:
-        if (!original.EndsWith('\n') && src.Count > 0)
-            src[^1] = src[^1].TrimEnd('\n');
-
+        // Match hunks by text, not @@ line numbers. Compile-time FramePacing
+        // wrappers insert methods and shift every later line.
+        var src = original;
+        int searchFrom = 0;
         var lines = patch.Split('\n');
-        var output = new List<string>();
-        var i = 0;
-        var idx = 0;
+        int idx = 0;
+        int hunk = 0;
 
         while (idx < lines.Length)
         {
@@ -176,33 +174,22 @@ public static class PostPassApplier
                 continue;
             }
 
-            var m = Regex.Match(line, @"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@");
-            if (!m.Success)
+            if (!Regex.IsMatch(line, @"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@"))
             {
                 idx++;
                 continue;
             }
 
-            var oldStart = int.Parse(m.Groups[1].Value) - 1;
-            while (i < oldStart && i < src.Count)
-            {
-                output.Add(src[i]);
-                i++;
-            }
-
+            hunk++;
             idx++;
+            var oldSb = new StringBuilder();
+            var newSb = new StringBuilder();
             while (idx < lines.Length &&
                    !lines[idx].StartsWith("@@") &&
                    !lines[idx].StartsWith("diff"))
             {
                 var pl = lines[idx];
-                if (pl.StartsWith('\\'))
-                {
-                    idx++;
-                    continue;
-                }
-
-                if (pl.Length == 0)
+                if (pl.StartsWith('\\') || pl.Length == 0)
                 {
                     idx++;
                     continue;
@@ -210,21 +197,17 @@ public static class PostPassApplier
 
                 var tag = pl[0];
                 var content = pl.Length > 1 ? pl[1..] : "";
-                content += "\n";
-
                 switch (tag)
                 {
                     case ' ':
-                        EnsureMatch(src, i, content);
-                        output.Add(src[i]);
-                        i++;
+                        oldSb.Append(content).Append('\n');
+                        newSb.Append(content).Append('\n');
                         break;
                     case '-':
-                        EnsureMatch(src, i, content);
-                        i++;
+                        oldSb.Append(content).Append('\n');
                         break;
                     case '+':
-                        output.Add(content);
+                        newSb.Append(content).Append('\n');
                         break;
                     default:
                         throw new InvalidDataException($"Bad patch tag '{tag}' at patch line {idx + 1}");
@@ -232,32 +215,26 @@ public static class PostPassApplier
 
                 idx++;
             }
+
+            var oldText = oldSb.ToString();
+            var newText = newSb.ToString();
+            if (oldText.Length == 0)
+                continue;
+
+            int at = src.IndexOf(oldText, searchFrom, StringComparison.Ordinal);
+            if (at < 0)
+                at = src.IndexOf(oldText, StringComparison.Ordinal);
+            if (at < 0)
+            {
+                var preview = oldText.Split('\n')[0];
+                throw new InvalidDataException(
+                    $"Post-pass hunk {hunk} not found. Recompiler output may have changed — regenerate the patch.\nExpected: {preview}");
+            }
+
+            src = src[..at] + newText + src[(at + oldText.Length)..];
+            searchFrom = at + newText.Length;
         }
 
-        while (i < src.Count)
-        {
-            output.Add(src[i]);
-            i++;
-        }
-
-        var sb = new StringBuilder(original.Length + 4096);
-        foreach (var l in output) sb.Append(l);
-        var result = sb.ToString();
-        if (original.EndsWith('\n') && !result.EndsWith('\n'))
-            result += "\n";
-        if (!original.EndsWith('\n') && result.EndsWith('\n'))
-            result = result.TrimEnd('\n');
-        return result;
-    }
-
-    static void EnsureMatch(List<string> src, int i, string content)
-    {
-        if (i >= src.Count)
-            throw new InvalidDataException($"Patch ran past end of file at line {i + 1}");
-        var a = src[i].TrimEnd('\n', '\r');
-        var b = content.TrimEnd('\n', '\r');
-        if (!string.Equals(a, b, StringComparison.Ordinal))
-            throw new InvalidDataException(
-                $"Post-pass context mismatch at line {i + 1}. Recompiler output may have changed — regenerate the patch.\nExpected: {b}\nGot: {a}");
+        return src;
     }
 }

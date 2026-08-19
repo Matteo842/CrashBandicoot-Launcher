@@ -21,6 +21,12 @@ public static class Dispatcher
     /// </summary>
     public static Func<uint, CpuContext, IMemory, bool>? CallPre;
     public static Action<uint, CpuContext, IMemory>? CallPost;
+
+    /// <summary>
+    /// When MonoMod detours are unavailable (Android), wrap overlay delegates
+    /// as they are copied into the call table. Direct recompiler jals still bypass this.
+    /// </summary>
+    public static Func<Action<CpuContext, IMemory>, Action<CpuContext, IMemory>>? FunctionWrapper;
     public static void Register(string name, IOverlay overlay)
     {
         _registry[name] = overlay;
@@ -69,7 +75,7 @@ public static class Dispatcher
 
         lock (_active) _active.Add(name);
         foreach (var (addr, fn) in overlay.Functions)
-            _funcMap[addr] = fn;
+            _funcMap[addr] = MapFn(fn);
 
         if (already) return;
         Runtime.OverlayLog.Record(name, OverlayEventKind.Loaded);
@@ -212,6 +218,12 @@ public static class Dispatcher
             c.SP = saved;
     }
 
+    static Action<CpuContext, IMemory> MapFn(Action<CpuContext, IMemory> fn) =>
+        FunctionWrapper != null ? FunctionWrapper(fn) : fn;
+
+    /// <summary>Re-copy active overlay functions through <see cref="FunctionWrapper"/>.</summary>
+    public static void RefreshFunctionMap() => Rebuild();
+
     static void Rebuild()
     {
         _funcMap.Clear();
@@ -219,7 +231,7 @@ public static class Dispatcher
         {
             foreach (var name in _active)
                 foreach (var (addr, fn) in _registry[name].Functions)
-                    _funcMap[addr] = fn;
+                    _funcMap[addr] = MapFn(fn);
         }
     }
 }

@@ -316,7 +316,7 @@ sealed partial class DevMenuOverlay
     {
         if (_liveText == null) return;
         _process.Refresh();
-        _liveText.Text = $"{AndroidPlatformHost.LastFps:0.0} fps   ·   {FormatBytes(_process.WorkingSet64)}";
+        _liveText.Text = $"{AndroidPlatformHost.LastFps:0.0} fps   ·   {AndroidDisplayPacing.Describe()}   ·   {FormatBytes(_process.WorkingSet64)}";
     }
 
     void BuildVram()

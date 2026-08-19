@@ -164,7 +164,7 @@ sealed class AndroidPlatformHost(
         try { workingSet = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64; }
         catch { /* HUD is best-effort */ }
 
-        var text = $"{fps:0.0} fps\n{FormatBytes(workingSet)}";
+        var text = $"{fps:0.0} fps\n{AndroidDisplayPacing.Describe()}\n{FormatBytes(workingSet)}";
         activity.RunOnUiThread(() =>
         {
             if (_hud == null) return;
