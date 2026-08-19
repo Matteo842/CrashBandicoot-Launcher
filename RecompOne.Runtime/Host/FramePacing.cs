@@ -26,6 +26,19 @@ namespace RecompOne.Runtime.Host;
 /// reconstructed col/yaw. Box stacks share velocity with box_link;
 /// 300 Hz trans/collide eats the pile.
 /// Path rollers stay on real dt every frame.
+/// GOOL category 0x600 solid meshes (RuiOC pillars / RWaOC seesaws)
+/// trans is a 30 Hz Euler step: <c>spd()</c> plus <c>rot += accel</c>.
+/// Wall ticks 2–3 make spd 0; Euler every present at 400 Hz slams to
+/// rest. Each display frame runs the original 34-tick trans then keeps
+/// dt/34 (remainder so a 2-tick frame is not lost). Sprites in the same
+/// executable (torch flame) stay on wall ticks — <c>scalex += 0.1S</c>
+/// plus <c>200&lt;&lt;shrink</c> must not see ticks=34 every present.
+/// Children that <c>vectransf2</c> from a paced parent are not scaled
+/// again (that double-step added seesaw momentum).
+/// Seesaw <c>PlatOrbitRot</c> is GOOL 8.8 in 0..360.0. Writing a
+/// negative leftover as uint (or wrapping 0-epsilon to 359.99) flips
+/// the gravity quadrant and the slabs rubber-band, then 360. Unwrap
+/// only a real 0↔360 step; keep sub-zero leftovers at 0 in quadrant 1.
 /// JunOC butterflies (type 22, Fly/Pose) do <c>loopseek(pathprog, …, 0.02)</c>
 /// and <c>x += velx</c> in trans with no spd()/ticks. One display-frame step
 /// per refresh finishes the path and they freeze in Pose. Same 30 Hz gate as
@@ -168,6 +181,33 @@ public static class FramePacing
     const uint FramesElapsedAddr = 0x80060E04u;
     const uint ObjPathProgOff = 0x114u;
     const uint ObjSpeedOff = 0x124u;
+    const uint ObjColliderOff = 0x78u;
+    const uint ObjParentOff = 0x64u;
+    const uint ObjTrotOff = 0xB0u;
+    const uint ObjMiscOff = 0xBCu;
+    const uint ObjMemOff = 0x15Cu;
+    const int ObjMemCount = 64;
+    const int PlatSlotTrans = 0;
+    const int PlatSlotRot = 3;
+    const int PlatSlotVel = 6;
+    const int PlatSlotTrot = 9;
+    const int PlatSlotMisc = 12;
+    const int PlatSlotPath = 15;
+    const int PlatSlotSpeed = 16;
+    const int PlatSlotMem = 17;
+    const int PlatSlotCrash = 17 + ObjMemCount;
+    const int PlatSlotScale = PlatSlotCrash + 3;
+    const int PlatSlotCount = PlatSlotScale + 3;
+    /// <summary>GOOL <c>360.0</c> (8.8). Seesaw wrap, not a teleport.</summary>
+    const int Deg360 = 360 << 8;
+    const int Deg180 = 180 << 8;
+
+    enum PlatDelta
+    {
+        Linear,
+        Ang12,
+        Auto,
+    }
     const uint ObjGlobalOff = 0x20u;
 
     const uint FlagGroundLand = 0x1u;
@@ -182,6 +222,8 @@ public static class FramePacing
     const uint FlagSolidTop = 0x20000u;
     const uint FlagStall = 0x10000000u;
     const uint GoolCategoryEnemy = 0x300u;
+    /// <summary>Platform GOOL (RuiOC, RWaOC, PoPlC, …). Header category 0x600.</summary>
+    const uint GoolCategoryPlatform = 0x600u;
     /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
     const uint GoolTypeBox = 0x22u;
     /// <summary>RooOC Ripper Roo objects. BIG TNT hops/rocks here, not BoxsC.</summary>
@@ -312,6 +354,13 @@ public static class FramePacing
     static double _spawnAcc;
     static readonly Dictionary<uint, double> _spawnCredit = new();
     static readonly Dictionary<uint, double> _simAcc = new();
+    static readonly Dictionary<uint, double[]> _platFrac = new();
+    static readonly int[] _platFrom = new int[PlatSlotCount];
+    static bool _platObj;
+    static bool _platFirst;
+    static bool _platChild;
+    static bool _platCarry;
+    static int _platLog;
     static int _objClassLog;
     static int _stampLog;
     static uint _worldDraw;
@@ -428,6 +477,9 @@ public static class FramePacing
         _spawnAcc = 0;
         _spawnCredit.Clear();
         _simAcc.Clear();
+        _platFrac.Clear();
+        _platObj = false;
+        _platLog = 0;
         _objClassLog = 0;
         _stampLog = 0;
         _paceLog = 0;
@@ -884,10 +936,17 @@ public static class FramePacing
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
+        _platObj = false;
+        _platFirst = false;
+        _platChild = false;
+        _platCarry = false;
         if (!IsActive(m)) return true;
         SnapshotObject(m, c.A0);
         _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0)
             && (HasSolidPhysics(m, c.A0) || IsJunocButterfly(m, c.A0));
+        _platObj = _haveObj && !_crashObj && !_solidObj && IsPlatformObj(m, c.A0);
+        _platFirst = _platObj && IsFirstFrame(m, c.A0);
+        _platChild = _platObj && IsPacedPlatformChild(m, c.A0);
         LogObjectClass(m, c.A0);
         if (_solidObj)
         {
@@ -934,6 +993,14 @@ public static class FramePacing
             // wait=0 on Crash / path TNT is next present — hold to wall dt.
             if (_haveObj)
                 HoldAnimWait(m, c.A0);
+            if (_platObj)
+            {
+                // Original 34-tick spd()/Euler, then Post keeps dt/34.
+                // Children of a paced parent only need ticks=34 for spd(force).
+                if (!_platChild)
+                    SnapshotPlatform(m, c.A0);
+                WriteAllTicks(m, RefTicks);
+            }
         }
         if (_crashObj)
             HoldCrashStall(m, c.A0);
@@ -993,6 +1060,8 @@ public static class FramePacing
         }
         if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
+        else if (_platObj && !_platFirst && !_platChild && _haveObj)
+            PacePlatform(m);
         else if (!_crashObj && !_solidObj && _haveObj)
         {
             PaceSpriteAnim(m);
@@ -1079,6 +1148,9 @@ public static class FramePacing
         _svtxCrashLog = 0;
         _svtxBoxLog = 0;
         _stampLog = 0;
+        _platFrac.Clear();
+        _platObj = false;
+        _platLog = 0;
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -1557,6 +1629,38 @@ public static class FramePacing
                 return false;
             uint state = m.ReadU32(obj + ObjStateOff);
             return state == StateButterflyFly || state == StateButterflyPose;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsPlatformObj(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            if (IsHud(m, obj)) return false;
+            if (!TryReadGoolClass(m, obj, out _, out uint cat) || cat != GoolCategoryPlatform)
+                return false;
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            if ((b & (FlagSolidTop | FlagSolidSides)) == 0) return false;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsPacedPlatformChild(IMemory m, uint obj)
+    {
+        try
+        {
+            uint parent = m.ReadU32(obj + ObjParentOff);
+            if (parent == 0 || parent == obj) return false;
+            return IsPlatformObj(m, parent);
         }
         catch
         {
@@ -2185,8 +2289,9 @@ public static class FramePacing
             uint b = m.ReadU32(obj + ObjStatusBOff);
             TryReadGoolClass(m, obj, out uint type, out uint cat);
             bool tnt = type == GoolTypeBox || type == GoolTypeRooO;
-            if (!tnt && _objClassLog >= 8) return;
-            if (tnt && _objClassLog >= 24) return;
+            bool plat = cat == GoolCategoryPlatform;
+            if (!tnt && !plat && _objClassLog >= 8) return;
+            if ((tnt || plat) && _objClassLog >= 24) return;
             _objClassLog++;
             PaceLog($"obj 0x{obj:X8} b=0x{b:X} type={type} cat=0x{cat:X} solid={_solidObj}");
         }
@@ -2825,6 +2930,180 @@ public static class FramePacing
         {
             // object freed
         }
+    }
+
+    /// <summary>
+    /// Category 0x600 trans is one original 30 Hz Euler/spd step. Run it
+    /// with ticks=34 so spd is not 0, then keep wall dt/34 of every field
+    /// (remainder carries sub-integer motion at uncapped). Not a 30 Hz skip
+    /// and not a 60/120/240 table.
+    /// </summary>
+    static void SnapshotPlatform(IMemory m, uint obj)
+    {
+        try
+        {
+            ReadPlatVec(m, obj + ObjTransOff, PlatSlotTrans);
+            ReadPlatVec(m, obj + ObjRotOff, PlatSlotRot);
+            ReadPlatVec(m, obj + ObjScaleOff, PlatSlotScale);
+            ReadPlatVec(m, obj + ObjVelXOff, PlatSlotVel);
+            ReadPlatVec(m, obj + ObjTrotOff, PlatSlotTrot);
+            ReadPlatVec(m, obj + ObjMiscOff, PlatSlotMisc);
+            _platFrom[PlatSlotPath] = (int)m.ReadU32(obj + ObjPathProgOff);
+            _platFrom[PlatSlotSpeed] = (int)m.ReadU32(obj + ObjSpeedOff);
+            for (int i = 0; i < ObjMemCount; i++)
+                _platFrom[PlatSlotMem + i] = (int)m.ReadU32(obj + ObjMemOff + (uint)i * 4u);
+            _platCarry = false;
+            uint crash = m.ReadU32(CrashPtrAddr);
+            uint col = m.ReadU32(obj + ObjColliderOff);
+            if (crash != 0 && col == crash && (crash & 0xFF000000u) == 0x80000000u)
+            {
+                _platCarry = true;
+                ReadPlatVec(m, crash + ObjTransOff, PlatSlotCrash);
+            }
+        }
+        catch
+        {
+            _platObj = false;
+        }
+    }
+
+    static void ReadPlatVec(IMemory m, uint addr, int slot)
+    {
+        _platFrom[slot] = (int)m.ReadU32(addr);
+        _platFrom[slot + 1] = (int)m.ReadU32(addr + 4);
+        _platFrom[slot + 2] = (int)m.ReadU32(addr + 8);
+    }
+
+    static void PacePlatform(IMemory m)
+    {
+        if (_exactTicks >= RefTicks - 0.01) return;
+        uint o = _obj;
+        try
+        {
+            if (_platFrac.Count > 96)
+                _platFrac.Clear();
+            WritePlatVec(m, o + ObjTransOff, PlatSlotTrans, PlatDelta.Linear);
+            WritePlatVec(m, o + ObjRotOff, PlatSlotRot, PlatDelta.Ang12);
+            WritePlatVec(m, o + ObjScaleOff, PlatSlotScale, PlatDelta.Linear);
+            WritePlatVec(m, o + ObjVelXOff, PlatSlotVel, PlatDelta.Linear);
+            WritePlatVec(m, o + ObjTrotOff, PlatSlotTrot, PlatDelta.Ang12);
+            WritePlatVec(m, o + ObjMiscOff, PlatSlotMisc, PlatDelta.Linear);
+            WritePlatWord(m, o + ObjPathProgOff, PlatSlotPath, PlatDelta.Linear);
+            WritePlatWord(m, o + ObjSpeedOff, PlatSlotSpeed, PlatDelta.Linear);
+            for (int i = 0; i < ObjMemCount; i++)
+                WritePlatWord(m, o + ObjMemOff + (uint)i * 4u, PlatSlotMem + i, PlatDelta.Auto);
+            if (_platCarry)
+            {
+                uint crash = m.ReadU32(CrashPtrAddr);
+                if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
+                    WritePlatVec(m, crash + ObjTransOff, PlatSlotCrash, PlatDelta.Linear);
+            }
+            if (_platLog < 6)
+            {
+                _platLog++;
+                int y0 = _platFrom[PlatSlotTrans + 1];
+                int y1 = (int)m.ReadU32(o + ObjTransOff + 4);
+                PaceLog($"plat 0x{o:X8} y {y0}->{y1} dt={_exactTicks:0.00}");
+            }
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static void WritePlatVec(IMemory m, uint addr, int slot, PlatDelta kind)
+    {
+        WritePlatWord(m, addr, slot, kind);
+        WritePlatWord(m, addr + 4, slot + 1, kind);
+        WritePlatWord(m, addr + 8, slot + 2, kind);
+    }
+
+    static void WritePlatWord(IMemory m, uint addr, int slot, PlatDelta kind)
+    {
+        int from = _platFrom[slot];
+        int to = (int)m.ReadU32(addr);
+        m.WriteU32(addr, (uint)KeepPlatDelta(_obj, slot, from, to, kind));
+    }
+
+    static bool IsGoolPtr(int v) => ((uint)v & 0xFF000000u) == 0x80000000u;
+
+    static bool IsAng12Field(int from, int to) =>
+        (uint)from <= 0x1FFFu && (uint)to <= 0x1FFFu;
+
+    static bool IsDeg360Field(int from, int to) =>
+        from >= 0 && from <= Deg360 && to >= 0 && to <= Deg360;
+
+    static int KeepPlatDelta(uint obj, int slot, int from, int to, PlatDelta kind)
+    {
+        if (IsGoolPtr(from) || IsGoolPtr(to)) return to;
+
+        long d;
+        bool wrap88 = false;
+
+        if (kind == PlatDelta.Ang12 && IsAng12Field(from, to))
+        {
+            d = AngDelta(from, to);
+        }
+        else
+        {
+            d = (long)to - from;
+            if (d > Teleport || d < -Teleport) return to;
+            if (Math.Abs(from) <= 16 && Math.Abs(to) <= 16 && Math.Abs((int)d) <= 16)
+                return to;
+            // Real 0↔360.0 step only. Y/speed in this range must stay linear
+            // or a 60000→20000 drop is treated as a full turn.
+            if (kind != PlatDelta.Linear && IsDeg360Field(from, to)
+                && (d > Deg180 || d < -Deg180))
+            {
+                if (d > Deg180) d -= Deg360;
+                else d += Deg360;
+                wrap88 = true;
+            }
+        }
+
+        if (d == 0) return to;
+        if (_exactTicks <= 0) return from;
+
+        if (!_platFrac.TryGetValue(obj, out double[]? frac) || frac.Length != PlatSlotCount)
+        {
+            frac = new double[PlatSlotCount];
+            _platFrac[obj] = frac;
+        }
+
+        double step = d * _exactTicks / RefTicks + frac[slot];
+        int kept = (int)Math.Truncate(step);
+        frac[slot] = step - kept;
+        long r = (long)from + kept;
+
+        if (kind == PlatDelta.Ang12 && IsAng12Field(from, to))
+            return (int)r & 0xFFF;
+
+        if (wrap88)
+        {
+            // GOOL already crossed into quadrant 4 (359…). Keep that
+            // representation so gravity sign matches the Euler.
+            r %= Deg360;
+            if (r < 0) r += Deg360;
+            return (int)r;
+        }
+
+        // Sub-zero leftover of a Q1 step: writing 359.99 flips accel sign.
+        if (kind != PlatDelta.Linear && IsDeg360Field(from, to))
+        {
+            if (r < 0)
+            {
+                frac[slot] += r;
+                return 0;
+            }
+            if (r >= Deg360)
+            {
+                frac[slot] += r - Deg360;
+                return 0;
+            }
+        }
+
+        return (int)r;
     }
 
     /// <summary>
