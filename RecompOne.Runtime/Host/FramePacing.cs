@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Reflection;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Memory;
+using RecompOne.Runtime.Modding;
 
 namespace RecompOne.Runtime.Host;
 
@@ -17,9 +19,10 @@ namespace RecompOne.Runtime.Host;
 /// through the spawn floor; 34+scale every display frame is hang/gravity
 /// at 30 Hz × fps (infinite jump + faster FALL_KILL loop).
 /// Trans/ani stay in GoolObjectUpdate every display frame.
-/// Enemies (GOOL category 0x300) and boxes (type 0x22) run one original
-/// 34-tick GOOL update per 34 wall ticks and still draw every display
-/// frame. Gated crate AABB is the last real GoolObjectBound, not a
+/// Enemies (GOOL category 0x300), boxes (type 0x22), and Ripper Roo
+/// objects (RooOC type 39, not 2D) run one original 34-tick GOOL update
+/// per 34 wall ticks and still draw every display frame. Gated crate AABB
+/// is the last real GoolObjectBound, not a
 /// reconstructed col/yaw. Box stacks share velocity with box_link;
 /// 300 Hz trans/collide eats the pile.
 /// Path rollers stay on real dt every frame.
@@ -34,10 +37,26 @@ namespace RecompOne.Runtime.Host;
 /// HUD uses real ticks. Crash anim_frame is not scaled (GOOL wait).
 /// ChangeAnim wait=0 is "next GoolObjectUpdate", not 33 ms. At unlocked
 /// refresh that replays look/TNT rock frames every present. Hold that
-/// wait until 34 wall ticks; trans and physics still run. Gated boxes
-/// skip Update — draw lerps last pose (yaw, trans, svtx origin/verts)
-/// from→to with the same wall fraction so GOOL and skip frames share
-/// one crate. Yaw-only left the mesh hopping a few cm each 30 Hz frame.
+/// wait until 34 wall ticks and rewrite the tag every present with the
+/// current frames_elapsed — a one-shot wait=1 expires on the next
+/// display if that stamp advances per GoolUpdateObjects (pause + FPS
+/// switch makes the leftover vibrate track refresh, not wall dt).
+/// Trans interpret has no SUSPEND_ON_ANIM, so ChangeAnim in tp still
+/// writes anim_frame every present (the wait tag is pushed on the trans
+/// frame and popped before the code wait check). Hold anim_seq/frame to
+/// one original 33 ms of wall time; 240 Hz and uncapped then step alike.
+/// Trans and physics still run. Gated boxes skip Update — draw lerps
+/// last pose (yaw, trans) from→to. Vertex meshes lerp the previous SVTX
+/// keyframe toward the current one over 33 ms wall (not current toward
+/// next: look-at-cam reverse, and look-ahead overshoots).
+/// Hold does not treat reverse as a teleport — stance look is
+/// playanim 14↔19 wait=0. Ripper Roo BIG TNT (RooOC type 39) is not a
+/// mesh ping-pong: BIG_TNT is 1 CVTX frame. Stop-state trans does
+/// <c>troty = randi(±10deg)</c> when GOOL <c>time(0.4s)</c> is 0.
+/// time() is <c>(offset + draw_count) % period</c>. Without a 30 Hz gate
+/// that test stays true for every present in the 33 ms wall bucket, so
+/// yaw re-rolls at refresh rate. In-game pause must not keep skip-frame
+/// look-aheads running.
 /// World UV anim (draw_count @ 0x80057960) and water ripple use a dedicated
 /// wall clock. Worlds run before object AdvanceWallClock, so they must not
 /// reuse leftover ticks (that is +1 per display frame).
@@ -60,6 +79,12 @@ public static class FramePacing
     const uint GfxC2pAddr = 0x80058408u;
     const uint GfxCurAddr = 0x8005840Cu;
     const uint TicksPerFrameOff = 0x84u;
+    /// <summary>
+    /// gfx_context: prims_tail +4 = draw_stamp, +8 = sync_stamp, +12 = ticks_per_frame.
+    /// GoolUpdateObjects does frames_elapsed = c2_p-&gt;draw_stamp / 34.
+    /// </summary>
+    const uint DrawStampOff = 0x7Cu;
+    const uint SyncStampOff = 0x80u;
 
     const uint GoolUpdateObjectsAddr = 0x8001D5ECu;
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
@@ -73,7 +98,12 @@ public static class FramePacing
     const uint ObjBoundOff = 0x8u;
     const uint LevelUpdateAddr = 0x80025A60u;
     const uint GpuUpdateAddr = 0x80016E5Cu;
+    const uint NsLookupAddr = 0x80015A98u;
     const uint NsInitAddr = 0x80015B58u;
+    const uint NsPteBucketsAddr = 0x8005C530u;
+    const uint NsPageTableAddr = 0x8005C534u;
+    const uint NsNsdAddr = 0x8005C540u;
+    const uint NsdPageTableSizeOff = 0x404u;
     const uint DrawSkipAddr = 0x8005C54Cu;
     const uint GfxUpdateMatricesAddr = 0x80017A14u;
     const uint GfxTransformSvtxAddr = 0x80018964u;
@@ -151,6 +181,8 @@ public static class FramePacing
     const uint GoolCategoryEnemy = 0x300u;
     /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
     const uint GoolTypeBox = 0x22u;
+    /// <summary>RooOC Ripper Roo objects. BIG TNT hops/rocks here, not BoxsC.</summary>
+    const uint GoolTypeRooO = 39u;
     /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
     const uint GoolTypeJunO = 22u;
     /// <summary>JunOC <c>Butterfly_Fly</c> / <c>Butterfly_Pose</c>.</summary>
@@ -174,6 +206,7 @@ public static class FramePacing
     const byte AnimTypeSprite = 2;
     const byte AnimTypeVtx = 1;
     const uint SvtxEntryType = 1;
+    const uint CvtxEntryType = 20;
     const int SvtxHeaderBytes = 56;
     const int SvtxVertBytes = 6;
     const int SvtxVertMax = 512;
@@ -188,6 +221,24 @@ public static class FramePacing
         public int Fx, Fy, Fz, Tx, Ty, Tz;
         public int Px, Py, Pz, Qx, Qy, Qz;
         public int FromAnim, ToAnim;
+    }
+
+    struct PoseClock
+    {
+        public int Idx;
+        public int From;
+        public long Ts;
+    }
+
+    struct AnimPose
+    {
+        public uint Seq;
+        public int Frame;
+        public int Target;
+        public int LastStep;
+        public long Ts;
+        public bool Have;
+        public bool Holding;
     }
 
     static readonly long IrqPeriod = Stopwatch.Frequency / 60;
@@ -231,6 +282,11 @@ public static class FramePacing
     static bool _haveTransY;
     static readonly Dictionary<uint, BoundSnap> _lastBound = new();
     static readonly Dictionary<uint, double> _animAcc = new();
+    static readonly HashSet<uint> _animHold = new();
+    static readonly Dictionary<uint, long> _waitHoldTs = new();
+    static readonly Dictionary<uint, PoseClock> _poseClock = new();
+    static readonly Dictionary<uint, AnimPose> _animPose = new();
+    static int _poseHoldLog;
     static readonly Dictionary<uint, GatePose> _gateRot = new();
     static int _dispSaveX, _dispSaveY, _dispSaveZ;
     static int _dispSavePx, _dispSavePy, _dispSavePz;
@@ -242,7 +298,10 @@ public static class FramePacing
     static int _svtxSaveN;
     static uint _svtxFrame;
     static bool _svtxPatched;
-    static bool _animHeld;
+    static int _svtxLog;
+    static int _svtxCrashLog;
+    static int _svtxBoxLog;
+    static bool _gfxHookTried;
     static bool _spawnBurst;
     static bool _didSpawn;
     static bool _spawnFirstFrame;
@@ -251,6 +310,7 @@ public static class FramePacing
     static readonly Dictionary<uint, double> _spawnCredit = new();
     static readonly Dictionary<uint, double> _simAcc = new();
     static int _objClassLog;
+    static int _stampLog;
     static uint _worldDraw;
     static double _worldDrawFrac;
     static double _rippleFrac;
@@ -346,10 +406,18 @@ public static class FramePacing
         _landPhysRan = false;
         _lastBound.Clear();
         _animAcc.Clear();
+        _animHold.Clear();
+        _waitHoldTs.Clear();
+        _poseClock.Clear();
+        _animPose.Clear();
+        _poseHoldLog = 0;
         _gateRot.Clear();
         _dispRotApplied = false;
         _dispTransApplied = false;
         _svtxPatched = false;
+        _svtxLog = 0;
+        _svtxCrashLog = 0;
+        _svtxBoxLog = 0;
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
@@ -358,6 +426,7 @@ public static class FramePacing
         _spawnCredit.Clear();
         _simAcc.Clear();
         _objClassLog = 0;
+        _stampLog = 0;
         _paceLog = 0;
         _vsyncsInGpu = 0;
         _inGpuUpdate = false;
@@ -381,7 +450,7 @@ public static class FramePacing
         try
         {
             Directory.CreateDirectory(AppPaths.LogsDir);
-            File.WriteAllText(Path.Combine(AppPaths.LogsDir, "pacing.txt"),
+            File.AppendAllText(Path.Combine(AppPaths.LogsDir, "pacing.txt"),
                 $"{DateTime.Now:HH:mm:ss.fff} reset{Environment.NewLine}");
         }
         catch { /* ignore */ }
@@ -528,6 +597,46 @@ public static class FramePacing
         WriteTicks(m, GfxC1pAddr, ticks);
         WriteTicks(m, GfxC2pAddr, ticks);
         WriteTicks(m, GfxCurAddr, ticks);
+    }
+
+    /// <summary>
+    /// GOOL waits on frames_elapsed = draw_stamp/34. GpuUpdate copies
+    /// ticks_elapsed into draw_stamp after the object tree. If that guest
+    /// clock only moves +1 per present, wait=1 lasts 34 displays (~1 Hz at
+    /// 60 FPS, faster at 120). Publish wall ticks into ticks_elapsed and
+    /// every gfx draw_stamp before GoolUpdateObjects so /34 is 30 Hz at
+    /// any refresh.
+    /// </summary>
+    static void PublishWallStamps(IMemory m)
+    {
+        try { m.WriteU32(TicksElapsedAddr, _guestTicks); }
+        catch { /* overlay swap */ }
+        WriteDrawStamp(m, GfxC1pAddr);
+        WriteDrawStamp(m, GfxC2pAddr);
+        WriteDrawStamp(m, GfxCurAddr);
+        if (_stampLog >= 6) return;
+        try
+        {
+            _stampLog++;
+            uint fe = m.ReadU32(FramesElapsedAddr);
+            PaceLog($"stamp ticks={_guestTicks} fe={fe} wallFe={_guestTicks / RefTicks} dt={_exactTicks:0.00}/{_frameTicks}");
+        }
+        catch { /* */ }
+    }
+
+    static void WriteDrawStamp(IMemory m, uint ptrAddr)
+    {
+        try
+        {
+            uint ctx = m.ReadU32(ptrAddr);
+            if ((ctx & 0xFF000000u) != 0x80000000u) return;
+            m.WriteU32(ctx + DrawStampOff, _guestTicks);
+            m.WriteU32(ctx + SyncStampOff, _guestTicks);
+        }
+        catch
+        {
+            // overlay swap
+        }
     }
 
     /// <summary>
@@ -713,6 +822,7 @@ public static class FramePacing
         if (IsActive(m))
         {
             AdvanceWallClock(m);
+            PublishWallStamps(m);
             RefillSpawnBudget();
         }
         else
@@ -746,7 +856,7 @@ public static class FramePacing
         GoolObjectPhysicsAddr => PrePhysics(c, m),
         GoolObjectCreateAddr => PreObjectCreate(c, m),
         GfxUpdateMatricesAddr => PreGfxUpdateMatrices(c, m),
-        GfxTransformSvtxAddr or GfxTransformCvtxAddr => true,
+        GfxTransformSvtxAddr or GfxTransformCvtxAddr => PreGfxTransformMesh(c, m),
         GfxTransformWorldsAddr or GfxTransformWorldsFogAddr
             or GfxTransformWorldsLightningAddr
             or GfxTransformWorldsDarkAddr
@@ -771,7 +881,6 @@ public static class FramePacing
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
-        _animHeld = false;
         if (!IsActive(m)) return true;
         SnapshotObject(m, c.A0);
         _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0)
@@ -789,6 +898,15 @@ public static class FramePacing
             {
                 _simAcc[_obj] = 0;
                 WriteAllTicks(m, RefTicks);
+            }
+            else if (GamePaused(m))
+            {
+                // Display still runs every present. Do not accumulate skip
+                // t or let wait=0 GOOL fire at refresh rate.
+                _gatedSolid = true;
+                DrawGatedObject(c, m, _obj);
+                c.V0 = GoolSuccess;
+                return false;
             }
             else
             {
@@ -853,6 +971,10 @@ public static class FramePacing
             case GoolObjectTransformAddr:
                 RestoreGatedDisplayRot(m, c.A0);
                 return;
+            case GfxTransformSvtxAddr:
+            case GfxTransformCvtxAddr:
+                RestoreSvtx(m);
+                return;
             case GoolObjectUpdateAddr:
                 break;
             default:
@@ -879,9 +1001,15 @@ public static class FramePacing
 
     public static bool PreTransform(CpuContext c, IMemory m)
     {
+        EnsureGfxHook();
         if (IsActive(m))
+        {
             ClampAnimFrame(m, c.A0);
+            HoldAnimPose(m, c.A0);
+        }
         ApplyGatedDisplayPose(m, c.A0);
+        if (IsActive(m) && c.A0 == _obj)
+            PatchObjectMesh(c, m, c.A0);
         return true;
     }
 
@@ -932,10 +1060,19 @@ public static class FramePacing
         ResetWaterClock();
         _lastBound.Clear();
         _animAcc.Clear();
+        _animHold.Clear();
+        _waitHoldTs.Clear();
+        _poseClock.Clear();
+        _animPose.Clear();
+        _poseHoldLog = 0;
         _gateRot.Clear();
         _dispRotApplied = false;
         _dispTransApplied = false;
         _svtxPatched = false;
+        _svtxLog = 0;
+        _svtxCrashLog = 0;
+        _svtxBoxLog = 0;
+        _stampLog = 0;
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -1005,13 +1142,102 @@ public static class FramePacing
         }
     }
 
-    /// <summary>
-    /// Guest already integrated with wall dt. Only keep the jump from being
-    /// cancelled: GROUNDLAND + floor snap on a small first step.
-    /// </summary>
-    static bool PreTransformSvtx(CpuContext c, IMemory m) => true;
+    static void EnsureGfxHook()
+    {
+        if (_gfxHookTried) return;
+        _gfxHookTried = true;
+        TryHookGfx(GfxTransformSvtxAddr, "func_80018964");
+        TryHookGfx(GfxTransformCvtxAddr, "func_80018A40");
+        try
+        {
+            HookManager.Commit();
+        }
+        catch (Exception ex)
+        {
+            PaceLog($"gfx commit fail {ex.GetType().Name}: {ex.Message}");
+        }
+    }
 
-    static bool PreTransformCvtx(CpuContext c, IMemory m) => true;
+    static void TryHookGfx(uint addr, string name)
+    {
+        MethodInfo? mi = null;
+        foreach (var ov in Dispatcher.Overlays.Values)
+        {
+            if (ov.Functions.TryGetValue(addr, out var fn))
+            {
+                mi = fn.Method;
+                break;
+            }
+        }
+        if (mi == null)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[]? types;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException ex) { types = ex.Types ?? Type.EmptyTypes; }
+                catch { continue; }
+                if (types == null) continue;
+                foreach (var t in types)
+                {
+                    if (t is null) continue;
+                    var found = t.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    if (found == null) continue;
+                    mi = found;
+                    break;
+                }
+                if (mi != null) break;
+            }
+        }
+        if (mi == null)
+        {
+            PaceLog($"no gfx fn {name} 0x{addr:X8} overlays={Dispatcher.Overlays.Count}");
+            return;
+        }
+        HookManager.AddPre(mi, PreGfxTransformMesh);
+        HookManager.AddPost(mi, PostGfxTransformMesh);
+        PaceLog($"hook gfx {mi.DeclaringType?.Name}.{mi.Name}");
+    }
+
+    /// <summary>
+    /// GoolObjectTransform already NSLookup'd the svtx. A0 is the drawn
+    /// frame, A2 the object. Patch toward the next item with wall t —
+    /// PreTransform is too early (seq+4 still an EID).
+    /// </summary>
+    public static bool PreGfxTransformMesh(CpuContext c, IMemory m)
+    {
+        if (!IsActive(m) || _svtxPatched) return true;
+        if (GamePaused(m)) return true;
+        // Full original 33 ms step already landed on the GOOL pose.
+        if (_exactTicks >= RefTicks - 0.01) return true;
+        uint drawn = c.A0;
+        uint obj = c.A2;
+        if ((obj & 0xFF000000u) != 0x80000000u)
+            obj = _obj;
+        if ((obj & 0xFF000000u) != 0x80000000u) return true;
+        bool crash = false;
+        bool box = false;
+        try
+        {
+            crash = obj == m.ReadU32(CrashPtrAddr);
+            box = TryReadGoolClass(m, obj, out uint typ, out _) && typ == GoolTypeBox;
+        }
+        catch
+        {
+            // keep going; mesh resolve decides
+        }
+        try
+        {
+            PatchDrawnLookAhead(c, m, obj, drawn, crash, box);
+        }
+        catch
+        {
+            RestoreSvtx(m);
+        }
+        return true;
+    }
+
+    public static void PostGfxTransformMesh(CpuContext c, IMemory m) => RestoreSvtx(m);
 
     /// <summary>
     /// CoreLoop: ShaderParams (writes ripple_speed) → GfxUpdateMatrices →
@@ -1288,6 +1514,13 @@ public static class FramePacing
             // Crates: stack link lives in the velocity union. 300 Hz trans
             // collides them and GOOL_EVENT_BOX_STACK_BREAK eats the pile.
             if (type == GoolTypeBox) return true;
+            // Ripper Roo BIG TNT: pathprog += 0.07 and troty = randi(±10deg)
+            // in trans (draw_count time()). Not TRANS_MOTION, not BoxsC.
+            if (type == GoolTypeRooO)
+            {
+                uint rb = m.ReadU32(obj + ObjStatusBOff);
+                if ((rb & Flag2D) == 0) return true;
+            }
             // Enemies (0x300): one original 30 Hz GOOL update per 34 wall ticks.
             if (cat == GoolCategoryEnemy) return true;
             uint b = m.ReadU32(obj + ObjStatusBOff);
@@ -1407,99 +1640,67 @@ public static class FramePacing
 
     /// <summary>
     /// Display-only. Logic pose stays at the GOOL result; restore after Transform.
-    /// t = wall ticks since that step / 34. The TNT hop is the svtx frame
-    /// origin/verts snapping every 30 Hz — lerp those too.
+    /// t = wall ticks since that step / 34. Ripper Roo TNT yaw/path is this
+    /// rot+trans lerp; BoxsC TNT is a single CVTX frame (no mesh ping-pong).
     /// </summary>
     static void ApplyGatedDisplayPose(IMemory m, uint obj)
     {
         if (_dispRotApplied || _dispTransApplied || _svtxPatched)
             RestoreGatedDisplayRot(m, _dispRotObj);
         if (obj != _obj) return;
-        if (!_solidObj && !_crashObj) return;
+        if (!_solidObj) return;
+        if (GamePaused(m)) return;
         if (_exactTicks >= RefTicks - 0.01) return;
 
-        double t;
-        int fromAnim, toAnim;
+        if (!_simAcc.TryGetValue(obj, out double acc)) return;
+        double t = acc / RefTicks;
         int fx, fy, fz, tx, ty, tz;
         int px, py, pz, qx, qy, qz;
-        bool lerpTrans = _solidObj;
-        if (_solidObj)
+        if (_gatedSolid)
         {
-            if (!_simAcc.TryGetValue(obj, out double acc)) return;
-            t = acc / RefTicks;
-            if (_gatedSolid)
-            {
-                if (!_gateRot.TryGetValue(obj, out GatePose g)) return;
-                fx = g.Fx; fy = g.Fy; fz = g.Fz;
-                tx = g.Tx; ty = g.Ty; tz = g.Tz;
-                px = g.Px; py = g.Py; pz = g.Pz;
-                qx = g.Qx; qy = g.Qy; qz = g.Qz;
-                fromAnim = g.FromAnim;
-                toAnim = g.ToAnim;
-            }
-            else
-            {
-                fx = _orx; fy = _ory; fz = _orz;
-                px = _ox; py = _oy; pz = _oz;
-                fromAnim = _oanim;
-                try
-                {
-                    tx = (int)m.ReadU32(obj + ObjRotOff);
-                    ty = (int)m.ReadU32(obj + ObjRotOff + 4);
-                    tz = (int)m.ReadU32(obj + ObjRotOff + 8);
-                    qx = (int)m.ReadU32(obj + ObjTransOff);
-                    qy = (int)m.ReadU32(obj + ObjTransOff + 4);
-                    qz = (int)m.ReadU32(obj + ObjTransOff + 8);
-                    toAnim = (int)m.ReadU32(obj + ObjAnimFrameOff);
-                }
-                catch
-                {
-                    return;
-                }
-            }
+            if (!_gateRot.TryGetValue(obj, out GatePose g)) return;
+            fx = g.Fx; fy = g.Fy; fz = g.Fz;
+            tx = g.Tx; ty = g.Ty; tz = g.Tz;
+            px = g.Px; py = g.Py; pz = g.Pz;
+            qx = g.Qx; qy = g.Qy; qz = g.Qz;
         }
         else
         {
-            // Crash: vertex look/walk is 30 Hz (wait hold). Do not lerp trans
-            // (FinishPacedScale already did). Same t as the ani wait.
-            _animAcc.TryGetValue(obj, out double acc);
-            t = acc / RefTicks;
-            fromAnim = _oanim;
-            try { toAnim = (int)m.ReadU32(obj + ObjAnimFrameOff); }
-            catch { return; }
-            fx = fy = fz = tx = ty = tz = 0;
-            px = py = pz = qx = qy = qz = 0;
-            lerpTrans = false;
+            fx = _orx; fy = _ory; fz = _orz;
+            px = _ox; py = _oy; pz = _oz;
+            try
+            {
+                tx = (int)m.ReadU32(obj + ObjRotOff);
+                ty = (int)m.ReadU32(obj + ObjRotOff + 4);
+                tz = (int)m.ReadU32(obj + ObjRotOff + 8);
+                qx = (int)m.ReadU32(obj + ObjTransOff);
+                qy = (int)m.ReadU32(obj + ObjTransOff + 4);
+                qz = (int)m.ReadU32(obj + ObjTransOff + 8);
+            }
+            catch
+            {
+                return;
+            }
         }
         if (t < 0) t = 0;
         if (t > 1) t = 1;
         try
         {
             _dispRotObj = obj;
-            if (_solidObj)
-            {
-                _dispSaveX = (int)m.ReadU32(obj + ObjRotOff);
-                _dispSaveY = (int)m.ReadU32(obj + ObjRotOff + 4);
-                _dispSaveZ = (int)m.ReadU32(obj + ObjRotOff + 8);
-                m.WriteU32(obj + ObjRotOff, (uint)LerpAng(fx, tx, t));
-                m.WriteU32(obj + ObjRotOff + 4, (uint)LerpAng(fy, ty, t));
-                m.WriteU32(obj + ObjRotOff + 8, (uint)LerpAng(fz, tz, t));
-                _dispRotApplied = true;
-            }
-            if (lerpTrans)
-            {
-                _dispSavePx = (int)m.ReadU32(obj + ObjTransOff);
-                _dispSavePy = (int)m.ReadU32(obj + ObjTransOff + 4);
-                _dispSavePz = (int)m.ReadU32(obj + ObjTransOff + 8);
-                int x = LerpPos(px, qx, t);
-                int y = LerpPos(py, qy, t);
-                int z = LerpPos(pz, qz, t);
-                m.WriteU32(obj + ObjTransOff, (uint)x);
-                m.WriteU32(obj + ObjTransOff + 4, (uint)y);
-                m.WriteU32(obj + ObjTransOff + 8, (uint)z);
-                _dispTransApplied = true;
-            }
-            PatchSvtxLerp(m, obj, fromAnim, toAnim, t);
+            _dispSaveX = (int)m.ReadU32(obj + ObjRotOff);
+            _dispSaveY = (int)m.ReadU32(obj + ObjRotOff + 4);
+            _dispSaveZ = (int)m.ReadU32(obj + ObjRotOff + 8);
+            m.WriteU32(obj + ObjRotOff, (uint)LerpAng(fx, tx, t));
+            m.WriteU32(obj + ObjRotOff + 4, (uint)LerpAng(fy, ty, t));
+            m.WriteU32(obj + ObjRotOff + 8, (uint)LerpAng(fz, tz, t));
+            _dispRotApplied = true;
+            _dispSavePx = (int)m.ReadU32(obj + ObjTransOff);
+            _dispSavePy = (int)m.ReadU32(obj + ObjTransOff + 4);
+            _dispSavePz = (int)m.ReadU32(obj + ObjTransOff + 8);
+            m.WriteU32(obj + ObjTransOff, (uint)LerpPos(px, qx, t));
+            m.WriteU32(obj + ObjTransOff + 4, (uint)LerpPos(py, qy, t));
+            m.WriteU32(obj + ObjTransOff + 8, (uint)LerpPos(pz, qz, t));
+            _dispTransApplied = true;
         }
         catch
         {
@@ -1542,48 +1743,99 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// anim_seq+4 starts as an EID (LSB=1). After the first Transform,
-    /// NSLookup writes the NSD PTE there. PTE.entry is the svtx entry.
+    /// anim_seq+4 starts as an EID (LSB=1). NSLookup may write a PTE there.
+    /// Probe the NSD page table so vertex lerp can run before that writeback.
     /// </summary>
-    static bool TrySvtxEntry(IMemory m, uint obj, out uint en, out uint seq)
+    static bool TrySvtxEntry(CpuContext c, IMemory m, uint obj, out uint en, out uint seq)
     {
         en = 0;
         seq = m.ReadU32(obj + ObjAnimSeqOff);
         if ((seq & 0xFF000000u) != 0x80000000u) return false;
         if (m.ReadU8(seq) != AnimTypeVtx) return false;
         uint r = m.ReadU32(seq + 4);
-        if ((r & 1u) != 0) return false;
-        if ((r & 0xFF000000u) != 0x80000000u) return false;
-        uint magic = m.ReadU32(r);
-        if (magic == EntryMagic)
-            en = r;
-        else
-        {
-            if ((magic & 1u) != 0) return false;
-            en = magic;
-            if ((en & 0xFF000000u) != 0x80000000u) return false;
-            if (m.ReadU32(en) != EntryMagic) return false;
-        }
-        if (m.ReadU32(en + 8) != SvtxEntryType) return false;
-        return true;
+        en = ResolveSvtxEntry(m, r);
+        if (en == 0)
+            en = LookupAnimEntry(c, m, seq);
+        if (en == 0) return false;
+        uint type = m.ReadU32(en + 8);
+        return type == SvtxEntryType || type == CvtxEntryType;
     }
 
-    static bool TrySvtxFrames(IMemory m, uint obj, int fromIdx, int toIdx,
-        out uint fromFrame, out uint toFrame, out int nverts)
+    static uint ResolveSvtxEntry(IMemory m, uint r)
     {
-        fromFrame = 0;
-        toFrame = 0;
-        nverts = 0;
-        if (!TrySvtxEntry(m, obj, out uint en, out _)) return false;
-        int items = (int)m.ReadU32(en + 12);
-        if ((uint)fromIdx >= (uint)items || (uint)toIdx >= (uint)items) return false;
-        fromFrame = EntryItem(m, en, fromIdx);
-        toFrame = EntryItem(m, en, toIdx);
-        int nTo = SvtxVertCount(m, toFrame);
-        int nFrom = SvtxVertCount(m, fromFrame);
-        if (nTo <= 0 || nTo != nFrom || nTo > SvtxVertMax) return false;
-        nverts = nTo;
-        return true;
+        uint en = EntryFromRef(m, r);
+        if (en != 0) return en;
+        return ProbeEidEntry(m, r);
+    }
+
+    static uint LookupAnimEntry(CpuContext c, IMemory m, uint seq)
+    {
+        uint a0 = c.A0, a1 = c.A1, a2 = c.A2, a3 = c.A3, v0 = c.V0, v1 = c.V1;
+        try
+        {
+            c.A0 = seq + 4;
+            Dispatcher.Call(c, m, NsLookupAddr);
+            uint en = c.V0;
+            if ((en & 0xFF000000u) != 0x80000000u) return 0;
+            if (m.ReadU32(en) != EntryMagic) return 0;
+            return en;
+        }
+        catch
+        {
+            return 0;
+        }
+        finally
+        {
+            c.A0 = a0;
+            c.A1 = a1;
+            c.A2 = a2;
+            c.A3 = a3;
+            c.V0 = v0;
+            c.V1 = v1;
+        }
+    }
+
+    static uint EntryFromRef(IMemory m, uint r)
+    {
+        if ((r & 1u) != 0) return 0;
+        if ((r & 0xFF000000u) != 0x80000000u) return 0;
+        uint magic = m.ReadU32(r);
+        if (magic == EntryMagic) return r;
+        if ((magic & 1u) != 0) return 0;
+        if ((magic & 0xFF000000u) != 0x80000000u) return 0;
+        if (m.ReadU32(magic) != EntryMagic) return 0;
+        return magic;
+    }
+
+    static uint ProbeEidEntry(IMemory m, uint eid)
+    {
+        if ((eid & 1u) == 0) return 0;
+        uint buckets = m.ReadU32(NsPteBucketsAddr);
+        uint pageTable = m.ReadU32(NsPageTableAddr);
+        uint nsd = m.ReadU32(NsNsdAddr);
+        if ((buckets & 0xFF000000u) != 0x80000000u) return 0;
+        int tableSize = 4096;
+        if ((nsd & 0xFF000000u) == 0x80000000u)
+        {
+            int n = (int)m.ReadU32(nsd + NsdPageTableSizeOff);
+            if (n > 0 && n <= 65536) tableSize = n;
+        }
+        uint pte = m.ReadU32(buckets + ((eid >> 15) & 0xFFu) * 4u);
+        uint tableEnd = 0;
+        if ((pageTable & 0xFF000000u) == 0x80000000u)
+            tableEnd = pageTable + (uint)tableSize * 8u;
+        for (int i = 0; i < tableSize; i++, pte += 8)
+        {
+            if ((pte & 0xFF000000u) != 0x80000000u) break;
+            if (tableEnd != 0 && pte >= tableEnd) break;
+            if (m.ReadU32(pte + 4) != eid) continue;
+            uint v = m.ReadU32(pte);
+            if ((v & 1u) != 0) return 0;
+            if ((v & 0xFF000000u) != 0x80000000u) return 0;
+            if (m.ReadU32(v) != EntryMagic) return 0;
+            return v;
+        }
+        return 0;
     }
 
     static int SvtxVertCount(IMemory m, uint frame)
@@ -1593,54 +1845,164 @@ public static class FramePacing
         return (bytes - SvtxHeaderBytes) / SvtxVertBytes;
     }
 
-    static void PatchSvtxLerp(IMemory m, uint obj, int fromAnim, int toAnim, double t)
+    static void PatchObjectMesh(CpuContext c, IMemory m, uint obj)
     {
-        int fromIdx = fromAnim >> 8;
-        int toIdx = toAnim >> 8;
-        int d = toIdx - fromIdx;
-        if (d < 0) d = -d;
-        if (d > 2) return;
-        bool lookAhead = false;
-        if (d == 0)
+        if (_svtxPatched) return;
+        if (GamePaused(m)) return;
+        if (_exactTicks >= RefTicks - 0.01) return;
+        bool box = false;
+        try { box = TryReadGoolClass(m, obj, out uint typ, out _) && typ == GoolTypeBox; }
+        catch { /* */ }
+        try
         {
-            // Crash wait=0 hold: Transform still draws this frame. Blend it
-            // toward the next item; patching the next item would be invisible.
-            if (!_crashObj || !_animHeld) return;
-            if (!TrySvtxEntry(m, obj, out _, out uint seq)) return;
-            int len = m.ReadU8(seq + 2);
-            if (len <= 1) return;
-            int next = fromIdx + 1;
-            if (next >= len) return;
-            toIdx = next;
-            lookAhead = true;
+            if (!TrySvtxEntry(c, m, obj, out uint en, out _))
+            {
+                if (WantSvtxLog(_crashObj, box))
+                {
+                    uint seq2 = 0, r = 0;
+                    byte at = 0;
+                    try
+                    {
+                        seq2 = m.ReadU32(obj + ObjAnimSeqOff);
+                        if ((seq2 & 0xFF000000u) == 0x80000000u)
+                        {
+                            at = m.ReadU8(seq2);
+                            r = m.ReadU32(seq2 + 4);
+                        }
+                    }
+                    catch { /* */ }
+                    NoteSvtxLog(_crashObj, box,
+                        $"svtx miss obj=0x{obj:X8} crash={_crashObj} box={box} seq=0x{seq2:X8} type={at} ref=0x{r:X8}");
+                }
+                return;
+            }
+            int items = (int)m.ReadU32(en + 12);
+            int cur = (int)m.ReadU32(obj + ObjAnimFrameOff) >> 8;
+            if ((uint)cur >= (uint)items) return;
+            PatchDrawnLookAhead(c, m, obj, EntryItem(m, en, cur), _crashObj, box, items);
         }
-        else if (_crashObj)
+        catch
         {
-            return;
+            RestoreSvtx(m);
         }
-        if (!TrySvtxFrames(m, obj, fromIdx, toIdx, out uint fromFrame, out uint toFrame, out int n))
-            return;
+    }
 
-        // Gated: draw index is `to` (already advanced). Crash hold: draw is `from`.
-        uint drawn = lookAhead ? fromFrame : toFrame;
-        uint srcFrom = fromFrame;
-        uint srcTo = toFrame;
+    static bool WantSvtxLog(bool crash, bool box) =>
+        crash ? _svtxCrashLog < 6 : box ? _svtxBoxLog < 6 : _svtxLog < 4;
+
+    static void NoteSvtxLog(bool crash, bool box, string msg)
+    {
+        if (crash) _svtxCrashLog++;
+        else if (box) _svtxBoxLog++;
+        else _svtxLog++;
+        PaceLog(msg);
+    }
+
+    /// <summary>
+    /// Fraction of one original 33 ms pose, from wall time since this
+    /// object's SVTX index last changed. fromIdx is the previous keyframe.
+    /// Look-ahead (cur→cur+dir) overshoots when look-at-cam / TNT reverse.
+    /// </summary>
+    static double WallAnimFrac(uint obj, int idx, out int fromIdx)
+    {
+        fromIdx = idx;
+        long now = Stopwatch.GetTimestamp();
+        if (_poseClock.TryGetValue(obj, out PoseClock p) && p.Idx == idx)
+        {
+            fromIdx = p.From;
+            double sec = (now - p.Ts) / (double)Stopwatch.Frequency;
+            if (sec < 0) sec = 0;
+            if (sec > HitchSeconds) sec = HitchSeconds;
+            return sec / HitchSeconds;
+        }
+        int from = idx;
+        if (_poseClock.TryGetValue(obj, out p))
+            from = p.Idx;
+        fromIdx = from;
+        _poseClock[obj] = new PoseClock { Idx = idx, From = from, Ts = now };
+        return 0;
+    }
+
+    static bool TryAnimLerpKeys(uint obj, int drawnIdx, int items,
+        out int fromIdx, out int toIdx, out double t)
+    {
+        fromIdx = drawnIdx;
+        toIdx = drawnIdx;
+        t = 0;
+        if (_gateRot.TryGetValue(obj, out GatePose g) &&
+            _simAcc.TryGetValue(obj, out double acc))
+        {
+            fromIdx = g.FromAnim >> 8;
+            toIdx = g.ToAnim >> 8;
+            t = acc / RefTicks;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+        }
+        else if (_animPose.TryGetValue(obj, out AnimPose ap) && ap.Have && ap.Holding)
+        {
+            fromIdx = ap.Frame >> 8;
+            toIdx = ap.Target >> 8;
+            double sec = (Stopwatch.GetTimestamp() - ap.Ts) / (double)Stopwatch.Frequency;
+            if (sec < 0) sec = 0;
+            if (sec > HitchSeconds) sec = HitchSeconds;
+            t = sec / HitchSeconds;
+        }
+        else
+        {
+            t = WallAnimFrac(obj, drawnIdx, out fromIdx);
+            toIdx = drawnIdx;
+        }
+        if (fromIdx == toIdx) return false;
+        if ((uint)fromIdx >= (uint)items || (uint)toIdx >= (uint)items) return false;
+        return t < 0.99;
+    }
+
+    static void PatchDrawnLookAhead(
+        CpuContext c, IMemory m, uint obj, uint drawn, bool crash, bool box, int itemsHint = 0)
+    {
+        if ((drawn & 0xFF000000u) != 0x80000000u) return;
+        if (GamePaused(m)) return;
+
+        if (!TrySvtxEntry(c, m, obj, out uint en, out _) &&
+            !TryEntryFromFrame(m, drawn, out en))
+        {
+            if (WantSvtxLog(crash, box))
+                NoteSvtxLog(crash, box,
+                    $"svtx miss obj=0x{obj:X8} crash={crash} box={box} drawn=0x{drawn:X8}");
+            return;
+        }
+
+        int items = itemsHint > 0 ? itemsHint : (int)m.ReadU32(en + 12);
+        int cur = FrameIndex(m, en, items, drawn);
+        if (cur < 0) return;
+        if (!TryAnimLerpKeys(obj, cur, items, out int from, out int to, out double t))
+            return;
+        uint srcFrom = EntryItem(m, en, from);
+        uint srcTo = EntryItem(m, en, to);
+        int n = SvtxVertCount(m, drawn);
+        int nFrom = SvtxVertCount(m, srcFrom);
+        int nTo = SvtxVertCount(m, srcTo);
+        if (n <= 0 || n != nFrom || n != nTo || n > SvtxVertMax) return;
+        if (WantSvtxLog(crash, box))
+            NoteSvtxLog(crash, box,
+                $"svtx lerp obj=0x{obj:X8} crash={crash} box={box} {from}->{to} n={n} t={t:0.00}");
+
         _svtxSaveOx = (int)m.ReadU32(drawn + 8);
         _svtxSaveOy = (int)m.ReadU32(drawn + 12);
         _svtxSaveOz = (int)m.ReadU32(drawn + 16);
-        int ox0 = lookAhead ? _svtxSaveOx : (int)m.ReadU32(srcFrom + 8);
-        int oy0 = lookAhead ? _svtxSaveOy : (int)m.ReadU32(srcFrom + 12);
-        int oz0 = lookAhead ? _svtxSaveOz : (int)m.ReadU32(srcFrom + 16);
-        int ox1 = (int)m.ReadU32(srcTo + 8);
-        int oy1 = (int)m.ReadU32(srcTo + 12);
-        int oz1 = (int)m.ReadU32(srcTo + 16);
-        m.WriteU32(drawn + 8, (uint)LerpPos(ox0, ox1, t));
-        m.WriteU32(drawn + 12, (uint)LerpPos(oy0, oy1, t));
-        m.WriteU32(drawn + 16, (uint)LerpPos(oz0, oz1, t));
+        int fromOx = (int)m.ReadU32(srcFrom + 8);
+        int fromOy = (int)m.ReadU32(srcFrom + 12);
+        int fromOz = (int)m.ReadU32(srcFrom + 16);
+        int toOx = (int)m.ReadU32(srcTo + 8);
+        int toOy = (int)m.ReadU32(srcTo + 12);
+        int toOz = (int)m.ReadU32(srcTo + 16);
+        m.WriteU32(drawn + 8, (uint)LerpPos(fromOx, toOx, t));
+        m.WriteU32(drawn + 12, (uint)LerpPos(fromOy, toOy, t));
+        m.WriteU32(drawn + 16, (uint)LerpPos(fromOz, toOz, t));
 
+        uint drawnV = drawn + (uint)SvtxHeaderBytes;
         uint fromV = srcFrom + (uint)SvtxHeaderBytes;
         uint toV = srcTo + (uint)SvtxHeaderBytes;
-        uint drawnV = drawn + (uint)SvtxHeaderBytes;
         int bytes = n * SvtxVertBytes;
         for (int i = 0; i < bytes; i++)
             _svtxSave[i] = m.ReadU8(drawnV + (uint)i);
@@ -1648,7 +2010,7 @@ public static class FramePacing
         {
             for (int k = 0; k < 3; k++)
             {
-                int a = lookAhead ? _svtxSave[i + k] : m.ReadU8(fromV + (uint)(i + k));
+                int a = m.ReadU8(fromV + (uint)(i + k));
                 int b = m.ReadU8(toV + (uint)(i + k));
                 m.WriteU8(drawnV + (uint)(i + k), (byte)(a + (int)Math.Round((b - a) * t)));
             }
@@ -1656,6 +2018,33 @@ public static class FramePacing
         _svtxFrame = drawn;
         _svtxSaveN = bytes;
         _svtxPatched = true;
+    }
+
+    static int FrameIndex(IMemory m, uint en, int items, uint frame)
+    {
+        for (int i = 0; i < items; i++)
+            if (EntryItem(m, en, i) == frame) return i;
+        return -1;
+    }
+
+    static bool TryEntryFromFrame(IMemory m, uint frame, out uint en)
+    {
+        en = 0;
+        uint page = frame & ~0xFFFFu;
+        uint p = frame & ~3u;
+        for (int n = 0; n < 4096 && p > page + 16; n++)
+        {
+            p -= 4;
+            if (m.ReadU32(p) != EntryMagic) continue;
+            uint type = m.ReadU32(p + 8);
+            if (type != SvtxEntryType && type != CvtxEntryType) continue;
+            int items = (int)m.ReadU32(p + 12);
+            if (items <= 0 || items > 256) continue;
+            if (FrameIndex(m, p, items, frame) < 0) continue;
+            en = p;
+            return true;
+        }
+        return false;
     }
 
     static void RestoreSvtx(IMemory m)
@@ -1776,11 +2165,14 @@ public static class FramePacing
 
     static void LogObjectClass(IMemory m, uint obj)
     {
-        if (_objClassLog >= 8 || !_haveObj || _crashObj) return;
+        if (!_haveObj || _crashObj) return;
         try
         {
             uint b = m.ReadU32(obj + ObjStatusBOff);
             TryReadGoolClass(m, obj, out uint type, out uint cat);
+            bool tnt = type == GoolTypeBox || type == GoolTypeRooO;
+            if (!tnt && _objClassLog >= 8) return;
+            if (tnt && _objClassLog >= 24) return;
             _objClassLog++;
             PaceLog($"obj 0x{obj:X8} b=0x{b:X} type={type} cat=0x{cat:X} solid={_solidObj}");
         }
@@ -1894,10 +2286,121 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// ChangeAnim pushes <c>(wait&lt;&lt;24)|frames_elapsed</c>. wait=0 means
-    /// next Update, which at unlocked refresh replays the same vertex frames
-    /// (Crash look-at-cam, TNT rock). Hold until 34 wall ticks. Trans and
-    /// physics still run this Update. Does not depend on 60/120/240.
+    /// Trans ChangeAnim does not suspend (no SUSPEND_ON_ANIM), so anim_frame
+    /// still advances every present even when the code wait tag is held.
+    /// Keep seq/frame at the last committed pose until 33 ms of wall time
+    /// pass. Reverse is the look ping-pong, not a cut — hold it too.
+    /// Gated solids already step at 30 Hz; holding them again made
+    /// CaptureGateRot see from==to so the mesh never lerped.
+    /// </summary>
+    static void HoldAnimPose(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
+        if (IsHud(m, obj)) return;
+        if (GamePaused(m)) return;
+        if (obj == _obj && _solidObj) return;
+        try
+        {
+            uint type = m.ReadU32(obj);
+            if (type is 0 or 2) return;
+            uint seq = m.ReadU32(obj + ObjAnimSeqOff);
+            if ((seq & 0xFF000000u) != 0x80000000u) return;
+            if (m.ReadU8(seq) != AnimTypeVtx) return;
+            int frame = (int)m.ReadU32(obj + ObjAnimFrameOff);
+            long now = Stopwatch.GetTimestamp();
+            if (_exactTicks >= RefTicks - 0.01)
+            {
+                CommitAnimPose(obj, seq, frame, 0, now);
+                return;
+            }
+            if (!_animPose.TryGetValue(obj, out AnimPose p) || !p.Have)
+            {
+                CommitAnimPose(obj, seq, frame, 0, now);
+                return;
+            }
+            if (seq != p.Seq)
+            {
+                CommitAnimPose(obj, seq, frame, 0, now);
+                return;
+            }
+            int a = frame >> 8;
+            int b = p.Frame >> 8;
+            if (a == b)
+            {
+                if (!p.Holding) return;
+                double holdSec = (now - p.Ts) / (double)Stopwatch.Frequency;
+                if (holdSec < HitchSeconds) return;
+                long holdTick = (long)(HitchSeconds * Stopwatch.Frequency);
+                long holdTs = p.Ts + holdTick;
+                if (now - holdTs > holdTick)
+                    holdTs = now;
+                m.WriteU32(obj + ObjAnimFrameOff, (uint)p.Target);
+                CommitAnimPose(obj, seq, p.Target, p.LastStep, holdTs);
+                return;
+            }
+            int step = a - b;
+            int d = step < 0 ? -step : step;
+            if (d > 2)
+            {
+                CommitAnimPose(obj, seq, frame, step, now);
+                return;
+            }
+            double sec = (now - p.Ts) / (double)Stopwatch.Frequency;
+            if (sec < 0) sec = 0;
+            if (sec < HitchSeconds)
+            {
+                m.WriteU32(obj + ObjAnimSeqOff, p.Seq);
+                m.WriteU32(obj + ObjAnimFrameOff, (uint)p.Frame);
+                p.Target = frame;
+                p.LastStep = step;
+                p.Holding = true;
+                _animPose[obj] = p;
+                if (_poseHoldLog < 8)
+                {
+                    _poseHoldLog++;
+                    bool crash = false;
+                    try { crash = obj == m.ReadU32(CrashPtrAddr); } catch { /* */ }
+                    PaceLog($"pose hold obj=0x{obj:X8} crash={crash} {b}->{a} sec={sec:0.000}");
+                }
+                return;
+            }
+            long tick = (long)(HitchSeconds * Stopwatch.Frequency);
+            long ts = p.Ts + tick;
+            if (now - ts > tick)
+                ts = now;
+            CommitAnimPose(obj, seq, frame, step, ts);
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static void CommitAnimPose(uint obj, uint seq, int frame, int step, long ts)
+    {
+        _animPose[obj] = new AnimPose
+        {
+            Seq = seq,
+            Frame = frame,
+            Target = frame,
+            LastStep = step,
+            Ts = ts,
+            Have = true,
+            Holding = false
+        };
+        int idx = frame >> 8;
+        int from = idx;
+        if (_poseClock.TryGetValue(obj, out PoseClock p))
+            from = p.Idx;
+        long behind = (long)(HitchSeconds * Stopwatch.Frequency);
+        _poseClock[obj] = new PoseClock { Idx = idx, From = from, Ts = ts - behind };
+    }
+
+    /// <summary>
+    /// wait=0 is next Update. Hold it for one original 33 ms of wall time
+    /// so 300 FPS and 500 FPS take the same pose step. A present that is
+    /// already a full 34-tick step does not hold (that is the original
+    /// 30 Hz loop, not a 60/120 table).
     /// </summary>
     static void HoldAnimWait(IMemory m, uint obj)
     {
@@ -1905,6 +2408,8 @@ public static class FramePacing
         if (IsFirstFrame(m, obj))
         {
             _animAcc[obj] = 0;
+            _animHold.Remove(obj);
+            _waitHoldTs.Remove(obj);
             return;
         }
         try
@@ -1913,31 +2418,51 @@ public static class FramePacing
             if ((sp & 0xFF000000u) != 0x80000000u || sp < 4) return;
             uint tagAddr = sp - 4;
             uint top = m.ReadU32(tagAddr);
-            if ((top >> 24) != 0) return;
-            uint ts = top & 0x00FFFFFFu;
-            if (ts == 0) return;
-            uint fe = m.ReadU32(FramesElapsedAddr) & 0x00FFFFFFu;
-            int dt = (int)fe - (int)ts;
-            if (dt < 0) dt = -dt;
-            if (dt > 4) return;
-            if (_animAcc.Count > 128)
-                _animAcc.Clear();
-            _animAcc.TryGetValue(obj, out double acc);
-            acc += _exactTicks;
-            if (acc < RefTicks)
+            uint wait = top >> 24;
+            if (wait > 1)
             {
-                _animAcc[obj] = acc;
-                _animHeld = true;
+                _animHold.Remove(obj);
+                _waitHoldTs.Remove(obj);
+                return;
+            }
+            uint fe = m.ReadU32(FramesElapsedAddr) & 0x00FFFFFFu;
+            bool holding = _waitHoldTs.ContainsKey(obj) || _animHold.Contains(obj);
+            if (wait == 1 && !holding) return;
+            if (_waitHoldTs.Count > 128)
+            {
+                _waitHoldTs.Clear();
+                _animHold.Clear();
+                _animAcc.Clear();
+            }
+            long now = Stopwatch.GetTimestamp();
+            if (!_waitHoldTs.TryGetValue(obj, out long start))
+            {
+                _waitHoldTs[obj] = now;
+                start = now;
+            }
+            double sec = (now - start) / (double)Stopwatch.Frequency;
+            if (sec < HitchSeconds)
+            {
+                _animAcc[obj] = sec * TicksPerSecond;
+                _animHold.Add(obj);
                 m.WriteU32(tagAddr, 0x01000000u | fe);
                 return;
             }
-            _animAcc[obj] = acc - RefTicks;
+            _waitHoldTs.Remove(obj);
+            _animHold.Remove(obj);
+            _animAcc[obj] = 0;
             m.WriteU32(tagAddr, fe);
         }
         catch
         {
             // stack not mapped
         }
+    }
+
+    static bool GamePaused(IMemory m)
+    {
+        try { return m.ReadU32(PausedAddr) != 0; }
+        catch { return false; }
     }
 
     static int ScaleStep(int step)
