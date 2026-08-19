@@ -23,6 +23,11 @@ namespace RecompOne.Runtime.Host;
 /// reconstructed col/yaw. Box stacks share velocity with box_link;
 /// 300 Hz trans/collide eats the pile.
 /// Path rollers stay on real dt every frame.
+/// JunOC butterflies (type 22, Fly/Pose) do <c>loopseek(pathprog, …, 0.02)</c>
+/// and <c>x += velx</c> in trans with no spd()/ticks. One display-frame step
+/// per refresh finishes the path and they freeze in Pose. Same 30 Hz gate as
+/// enemies: one original update per 34 wall ticks, still drawn. Not all of
+/// JunOC — rollers keep real dt.
 /// Unscaled trans <c>x += vel</c> (later turtles) is kept at dt/34 of the extra.
 /// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
 /// object pool. Wumpa sprite frames are <c>+= 1</c> per trans; scaled to dt/34.
@@ -138,6 +143,11 @@ public static class FramePacing
     const uint GoolCategoryEnemy = 0x300u;
     /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
     const uint GoolTypeBox = 0x22u;
+    /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
+    const uint GoolTypeJunO = 22u;
+    /// <summary>JunOC <c>Butterfly_Fly</c> / <c>Butterfly_Pose</c>.</summary>
+    const uint StateButterflyFly = 1;
+    const uint StateButterflyPose = 2;
     const uint ErrorObjectPoolFull = 0xFFFFFFEAu;
     const uint GoolSuccess = 0xFFFFFF01u; // SUCCESS -255
     const uint EntryMagic = 0x100FFFFu;
@@ -725,7 +735,8 @@ public static class FramePacing
         _spawnFirstFrame = false;
         if (!IsActive(m)) return true;
         SnapshotObject(m, c.A0);
-        _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0) && HasSolidPhysics(m, c.A0);
+        _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0)
+            && (HasSolidPhysics(m, c.A0) || IsJunocButterfly(m, c.A0));
         LogObjectClass(m, c.A0);
         if (_solidObj)
         {
@@ -1224,6 +1235,29 @@ public static class FramePacing
             if ((b & FlagTransMotion) == 0) return false;
             if ((b & FlagStoppedBySolid) != 0) return true;
             return (b & FlagGravity) != 0 && (b & FlagCollidable) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// JunOC butterfly trans is per display frame, not per tick: pathprog
+    /// seeks 0.02 and <c>x += velx</c> (rand impulse, no spd). At unlocked
+    /// refresh that finishes the patrol path and they sit in Pose. Gate like
+    /// enemies so one original step runs per 34 wall ticks at any fps.
+    /// Rollers in the same executable use spd() — leave them on real dt.
+    /// </summary>
+    static bool IsJunocButterfly(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeJunO)
+                return false;
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state == StateButterflyFly || state == StateButterflyPose;
         }
         catch
         {
