@@ -30,15 +30,32 @@ namespace RecompOne.Runtime.Host;
 /// reconstructed col/yaw. Box stacks share velocity with box_link;
 /// 300 Hz trans/collide eats the pile.
 /// Path rollers stay on real dt every frame.
-/// GOOL category 0x600 solid meshes (RuiOC pillars / RWaOC seesaws)
+/// GOOL category 0x600 solid meshes: RWaOC seesaws / PoPlC path plats
 /// trans is a 30 Hz Euler step: <c>spd()</c> plus <c>rot += accel</c>.
 /// Wall ticks 2–3 make spd 0; Euler every present at 400 Hz slams to
 /// rest. Each display frame runs the original 34-tick trans then keeps
-/// dt/34 (remainder so a 2-tick frame is not lost). Sprites in the same
-/// executable (torch flame) stay on wall ticks — <c>scalex += 0.1S</c>
+/// dt/34 (remainder so a 2-tick frame is not lost). RuiOC (Temple Ruins
+/// orbit slabs, spears, torches) is the same executable as those flames:
+/// <c>vectransf2</c>, <c>playanim</c> loops, <c>time()</c> spawn. One original
+/// interpret per 34 wall ticks, still drawn — Euler every present froze
+/// the process as soon as the camera saw them (30 FPS is fine).
+/// Sprites in the same executable (torch flame) stay on wall ticks — <c>scalex += 0.1S</c>
 /// plus <c>200&lt;&lt;shrink</c> must not see ticks=34 every present.
 /// Children that <c>vectransf2</c> from a paced parent are not scaled
 /// again (that double-step added seesaw momentum).
+/// RuiOC orbit slabs (Temple Ruins) trans does <c>spd(troty)</c> then
+/// <c>vectransf2</c>, and on Crash <c>RotPlatCarryPlayer</c>. GoolObjectBound
+/// sets collider after Pre; Physics clears it before Post. Snapshot Crash
+/// every platform step and keep dt/34 of whatever trans actually wrote —
+/// not <c>collider==crash</c> at Pre (that was always 0, so carry stayed a
+/// full 34-tick orbit every present and StopAtWalls froze on touch).
+/// Temple Ruins / Jaws PoPlC (type 11, the octagonal slabs) is worse:
+/// only those lids set <c>PlatformRotSpeed = 70deg</c> and then
+/// <c>RotPlatCarryPlayer</c>. The 0.985 pull is per trans call, not per
+/// tick. At 30 Hz that is original; at 400 Hz Crash is in the mesh in ~1 s
+/// and PlotObjWalls hangs. Other lids leave rot speed 0 and Euler works.
+/// Those two lids 30 Hz-gate every type-11 — Wait's 0.8 s collider test
+/// is also per interpret, so Euler never even starts the path.
 /// Seesaw <c>PlatOrbitRot</c> is GOOL 8.8 in 0..360.0. Writing a
 /// negative leftover as uint (or wrapping 0-epsilon to 359.99) flips
 /// the gravity quadrant and the slabs rubber-band, then 360. Unwrap
@@ -228,7 +245,9 @@ public static class FramePacing
     const int PlatSlotMem = 17;
     const int PlatSlotCrash = 17 + ObjMemCount;
     const int PlatSlotScale = PlatSlotCrash + 3;
-    const int PlatSlotCount = PlatSlotScale + 3;
+    /// <summary>WillC troty. RotPlatCarryPlayer does <c>spd(player.troty)</c>.</summary>
+    const int PlatSlotCrashTrot = PlatSlotScale + 3;
+    const int PlatSlotCount = PlatSlotCrashTrot + 1;
     /// <summary>GOOL <c>360.0</c> (8.8). Seesaw wrap, not a teleport.</summary>
     const int Deg360 = 360 << 8;
     const int Deg180 = 180 << 8;
@@ -266,10 +285,18 @@ public static class FramePacing
     const uint GoolTypeRooO = 39u;
     /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
     const uint GoolTypeJunO = 22u;
-    /// <summary>LizaC. Header often fails to parse; RuiOC 42 without SOLID_TOP is the live mesh.</summary>
+    /// <summary>LizaC. Header often fails to parse; Wait flags without SOLID_TOP.</summary>
     const uint GoolTypeLiza = 47u;
-    /// <summary>RuiOC. Pillars have SOLID_TOP; hoppers / bats do not.</summary>
+    /// <summary>
+    /// RuiOC (Temple Ruins / Jaws). Orbit slabs, spears, torches, crushers.
+    /// Never Euler — CODE/trans is per interpret (<c>vectransf2</c>, <c>time()</c>).
+    /// </summary>
     const uint GoolTypeRuiO = 42u;
+    /// <summary>PoPlC path platforms. Euler everywhere except Temple / Jaws.</summary>
+    const uint GoolTypePoPl = 11u;
+    /// <summary>NTSC-U <c>s</c> / <c>t</c> — only lids with PoPlC 70deg + 0.985 carry.</summary>
+    const uint LidTempleRuins = 28u;
+    const uint LidJawsOfDarkness = 29u;
     /// <summary>JunOC <c>Butterfly_Fly</c> / <c>Butterfly_Pose</c>.</summary>
     const uint StateButterflyFly = 1;
     const uint StateButterflyPose = 2;
@@ -1869,6 +1896,7 @@ public static class FramePacing
     /// Real wall dt every display. Standing platforms need Euler dt/34
     /// (SOLID_TOP). Everything else — lizards, turtles, boxes, unknown
     /// GOOL — one original 30 Hz step, same skip at 60 and uncapped.
+    /// RuiOC is cat 0x600 with SOLID_TOP but is not Euler: gate it.
     /// </summary>
     static bool KeepRealDt(IMemory m, uint obj)
     {
@@ -1876,13 +1904,17 @@ public static class FramePacing
         try
         {
             if (IsHud(m, obj)) return true;
-            if (IsPathHopper(m, obj)) return false;
-            if (HasSolidPhysics(m, obj) || IsJunocButterfly(m, obj)) return false;
             TryReadGoolClass(m, obj, out uint type, out uint cat);
+            if (IsGatedTempleSolid(m, type)) return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) != 0
                 && (IsPlatformGoolType(type) || cat == GoolCategoryPlatform))
+            {
+                _pathHoppers.Remove(obj);
                 return true;
+            }
+            if (IsPathHopper(m, obj)) return false;
+            if (HasSolidPhysics(m, obj) || IsJunocButterfly(m, obj)) return false;
             if ((b & FlagTrackPathRot) != 0) return true;
             if (type == GoolTypeJunO && !IsJunocButterfly(m, obj)) return true;
             if (type == 3u) return true; // FruiC
@@ -1895,7 +1927,28 @@ public static class FramePacing
     }
 
     static bool IsPlatformGoolType(uint type) =>
-        type is 11 or 26 or 28 or 33 or 42 or 46 or 58;
+        type is 11 or 26 or 28 or 33 or 46 or 58;
+
+    /// <summary>
+    /// RuiOC always, and PoPlC only on Temple Ruins / Jaws of Darkness.
+    /// Those lids' type-11 trans uses per-interpret 0.985 carry after a
+    /// 0.8 s Wait. Other lids' PoPlC stay Euler so Crash does not fall
+    /// through between 30 Hz AABBs.
+    /// </summary>
+    static bool IsGatedTempleSolid(IMemory m, uint type)
+    {
+        if (type == GoolTypeRuiO) return true;
+        if (type != GoolTypePoPl) return false;
+        try
+        {
+            uint lid = m.ReadU32(Catalog.LevelIdAddr);
+            return lid == LidTempleRuins || lid == LidJawsOfDarkness;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     static bool HasSolidPhysics(IMemory m, uint obj)
     {
@@ -1946,6 +1999,10 @@ public static class FramePacing
     /// <summary>
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
+    /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
+    /// Temple / Jaws PoPlC too (0.985 carry per interpret). Other lids'
+    /// PoPlC spawn CODE writes SOLID_TOP after the first Pre; drop the
+    /// sticky bit so those path plats can Euler. Lizards stay sticky.
     /// </summary>
     static bool IsPathHopper(IMemory m, uint obj)
     {
@@ -1958,15 +2015,25 @@ public static class FramePacing
                 _pathHoppers.Remove(obj);
                 return false;
             }
-            if (_pathHoppers.Contains(obj)) return true;
-            if (type == GoolTypeLiza)
+            if (IsGatedTempleSolid(m, type))
             {
                 _pathHoppers.Add(obj);
                 return true;
             }
             uint b = m.ReadU32(obj + ObjStatusBOff);
-            bool hop = type == GoolTypeRuiO && (b & FlagSolidTop) == 0;
-            if (!hop && IsLizaWaitFlags(b)) hop = true;
+            if ((b & FlagSolidTop) != 0
+                && (IsPlatformGoolType(type) || cat == GoolCategoryPlatform))
+            {
+                _pathHoppers.Remove(obj);
+                return false;
+            }
+            if (type == GoolTypeLiza)
+            {
+                _pathHoppers.Add(obj);
+                return true;
+            }
+            if (_pathHoppers.Contains(obj)) return true;
+            bool hop = IsLizaWaitFlags(b);
             if (!hop && HasPatrolPath(m, obj) && (b & FlagSolidTop) == 0)
                 hop = true;
             if (!hop && cat == GoolCategoryEnemy
@@ -2011,7 +2078,10 @@ public static class FramePacing
         {
             if (IsHud(m, obj)) return false;
             if (IsPathHopper(m, obj)) return false;
-            if (!TryReadGoolClass(m, obj, out _, out uint cat) || cat != GoolCategoryPlatform)
+            if (!TryReadGoolClass(m, obj, out uint type, out uint cat))
+                return false;
+            if (IsGatedTempleSolid(m, type)) return false;
+            if (!IsPlatformGoolType(type) && cat != GoolCategoryPlatform)
                 return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             // SOLID_SIDES alone is an enemy hitbox (LizaC Wait). Pillars have a top.
@@ -2677,7 +2747,7 @@ public static class FramePacing
             if (!tnt && !plat && _objClassLog >= 8) return;
             if ((tnt || plat) && _objClassLog >= 24) return;
             _objClassLog++;
-            PaceLog($"obj 0x{obj:X8} b=0x{b:X} type={type} cat=0x{cat:X} solid={_solidObj}");
+            PaceLog($"obj 0x{obj:X8} b=0x{b:X} type={type} cat=0x{cat:X} solid={_solidObj} plat={_platObj} hop={_pathHoppers.Contains(obj)}");
         }
         catch
         {
@@ -3355,6 +3425,9 @@ public static class FramePacing
     /// with ticks=34 so spd is not 0, then keep wall dt/34 of every field
     /// (remainder carries sub-integer motion at uncapped). Not a 30 Hz skip
     /// and not a 60/120/240 table.
+    /// Bound runs inside Update; Physics clears collider before Post. Always
+    /// snapshot Crash — Pace keeps dt/34 of a real carry, no-ops if trans
+    /// did not write him.
     /// </summary>
     static void SnapshotPlatform(IMemory m, uint obj)
     {
@@ -3372,11 +3445,11 @@ public static class FramePacing
                 _platFrom[PlatSlotMem + i] = (int)m.ReadU32(obj + ObjMemOff + (uint)i * 4u);
             _platCarry = false;
             uint crash = m.ReadU32(CrashPtrAddr);
-            uint col = m.ReadU32(obj + ObjColliderOff);
-            if (crash != 0 && col == crash && (crash & 0xFF000000u) == 0x80000000u)
+            if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
             {
                 _platCarry = true;
                 ReadPlatVec(m, crash + ObjTransOff, PlatSlotCrash);
+                _platFrom[PlatSlotCrashTrot] = (int)m.ReadU32(crash + ObjTrotOff + 4);
             }
         }
         catch
@@ -3414,7 +3487,10 @@ public static class FramePacing
             {
                 uint crash = m.ReadU32(CrashPtrAddr);
                 if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
+                {
                     WritePlatVec(m, crash + ObjTransOff, PlatSlotCrash, PlatDelta.Linear);
+                    WritePlatWord(m, crash + ObjTrotOff + 4, PlatSlotCrashTrot, PlatDelta.Ang12);
+                }
             }
             if (_platLog < 6)
             {
@@ -3466,7 +3542,10 @@ public static class FramePacing
         else
         {
             d = (long)to - from;
-            if (d > Teleport || d < -Teleport) return to;
+            // Orbit vectransf2 can exceed Teleport (4m×~22°) and still be
+            // one 30 Hz step — keep dt/34. True warps are first-frame.
+            int cap = kind == PlatDelta.Linear ? VelTeleport : Teleport;
+            if (d > cap || d < -cap) return to;
             if (Math.Abs(from) <= 16 && Math.Abs(to) <= 16 && Math.Abs((int)d) <= 16)
                 return to;
             // Real 0↔360.0 step only. Y/speed in this range must stay linear
