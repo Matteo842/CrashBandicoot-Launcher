@@ -14,11 +14,11 @@ namespace RecompOne.Runtime.Host;
 /// Crash: grounded 34-tick trans+physics then scale(dt/34) so StopAtWalls
 /// sees a real bitmap cell. Jump trans hang uses wall ticks; physics XZ
 /// stays 34+scale; Y is hang + wall-dt gravity.
-/// After pit death, Warp_In / Force_Fall physics runs once per 34 wall
-/// ticks (original step, not 34+scale every refresh). Wall ticks clip
-/// through the spawn floor; 34+scale every display frame is hang/gravity
-/// at 30 Hz × fps (infinite jump + faster FALL_KILL loop).
-/// Trans/ani stay in GoolObjectUpdate every display frame.
+/// After pit death, Warp_In / Force_Fall / death cine interpret once per
+/// 34 wall ticks (still drawn). wait=1 is next Update, so every present
+/// is FALL_KILL at 30 Hz × fps. Physics on those 30 Hz steps is original
+/// 34 ticks — not 34+scale, and not a second skip (that stacked to ~4 Hz).
+/// Walk / jump / hog keep trans every display frame.
 /// Default: one original 34-tick GOOL update per 34 wall ticks (still
 /// drawn). That is the turtle skip, at 60 and at uncapped — not an
 /// <c>if (fps==60)</c> branch. 60 Hz is two presents per 34 ticks.
@@ -436,8 +436,8 @@ public static class FramePacing
     static bool _waterArmed;
     static bool _waterDoneThisLoop;
     static int _waterLog;
-    static double _landPhysAcc;
-    static bool _landPhysRan;
+    static uint _crashGateState = uint.MaxValue;
+    static bool _crashSpawnUsed;
     static bool _inCamFollow;
     static int _camOffZ, _camOffX, _camOffY, _camZoom;
     static int _camLog;
@@ -623,8 +623,8 @@ public static class FramePacing
         _gatedSolid = false;
         _objScaled = false;
         _crashAir = false;
-        _landPhysAcc = 0;
-        _landPhysRan = false;
+        _crashGateState = uint.MaxValue;
+        _crashSpawnUsed = false;
         _lastBound.Clear();
         _animAcc.Clear();
         _animHold.Clear();
@@ -960,39 +960,59 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Respawn/death: one original 34-tick physics per 34 wall ticks. Extra
-    /// display frames skip physics (interpret still runs). 34+scale every
-    /// refresh reapplies hang/gravity at 30 Hz × fps.
+    /// Warp_In / first-frame must run once so entity is bound before
+    /// calcpath. A stuck first-frame flag must not run every present
+    /// (that is the FALL_KILL loop).
     /// </summary>
-    static bool SkipLandLockedPhysics(IMemory m)
+    static bool CrashDeathInitFrame(IMemory m, uint obj)
     {
-        if (!_crashObj || !IsLandLockedState(m, _obj))
-        {
-            _landPhysAcc = 0;
-            _landPhysRan = false;
+        if (!_crashObj || !IsLandLockedState(m, obj))
             return false;
-        }
-        if (!_landPhysRan)
-        {
-            _landPhysRan = true;
-            WriteAllTicks(m, RefTicks);
-            _crashAir = false;
-            // Let FinishPacedScale keep dt/34 of this step. A full unscaled
-            // 34-tick displace here is leftover jump vely as a rocket, and
-            // only matches 30 when the death hitch already dropped to 30 Hz.
-            return false;
-        }
-        _landPhysAcc += _exactTicks;
-        if (_landPhysAcc < RefTicks)
+        uint st;
+        try { st = m.ReadU32(obj + ObjStateOff); }
+        catch { return false; }
+        bool entered = st != _crashGateState;
+        _crashGateState = st;
+        bool first = IsFirstFrame(m, obj);
+        bool once = first && !_crashSpawnUsed;
+        _crashSpawnUsed = first;
+        if (entered)
+            PaceLog($"crash death gate st={st}");
+        return entered || once;
+    }
+
+    /// <summary>
+    /// Death cine / Warp_In / Force_Fall: one original 34-tick interpret
+    /// per 34 wall ticks. Extra presents only draw. Wall dt, not an FPS cap.
+    /// </summary>
+    static bool CrashLandShouldUpdate(IMemory m, CpuContext c)
+    {
+        if (_simAcc.Count > 128)
+            _simAcc.Clear();
+        if (GamePaused(m))
         {
             _objScaled = true;
+            DrawGatedObject(c, m, _obj);
+            c.V0 = GoolSuccess;
+            return false;
+        }
+        if (CrashDeathInitFrame(m, _obj))
+        {
+            _simAcc[_obj] = 0;
             return true;
         }
-        _landPhysAcc -= RefTicks;
-        WriteAllTicks(m, RefTicks);
-        _crashAir = false;
-        _objScaled = true;
-        return false;
+        _simAcc.TryGetValue(_obj, out double acc);
+        acc += _exactTicks;
+        if (acc < RefTicks)
+        {
+            _simAcc[_obj] = acc;
+            _objScaled = true;
+            DrawGatedObject(c, m, _obj);
+            c.V0 = GoolSuccess;
+            return false;
+        }
+        _simAcc[_obj] = acc - RefTicks;
+        return true;
     }
 
     static void WriteCrashOrObjectTicks(IMemory m)
@@ -1167,6 +1187,23 @@ public static class FramePacing
         }
         SnapshotObject(m, c.A0);
         _solidObj = _haveObj && !_crashObj && !KeepRealDt(m, c.A0);
+        if (_crashObj)
+        {
+            if (!IsLandLockedState(m, _obj))
+            {
+                _crashGateState = uint.MaxValue;
+                if (!IsFirstFrame(m, _obj))
+                    _crashSpawnUsed = false;
+                _simAcc.Remove(_obj);
+            }
+            else if (!CrashLandShouldUpdate(m, c))
+                return false;
+            else
+            {
+                WriteAllTicks(m, RefTicks);
+                _objScaled = true;
+            }
+        }
         _platObj = _haveObj && !_crashObj && !_solidObj && IsPlatformObj(m, c.A0);
         _platFirst = _platObj && IsFirstFrame(m, c.A0);
         _platChild = _platObj && IsPacedPlatformChild(m, c.A0);
@@ -1209,7 +1246,7 @@ public static class FramePacing
                 WriteAllTicks(m, RefTicks);
             }
         }
-        else
+        else if (!(_crashObj && IsLandLockedState(m, _obj)))
         {
             WriteCrashOrObjectTicks(m);
             // Gated objects already run one Update per 34 wall ticks.
@@ -1317,11 +1354,12 @@ public static class FramePacing
     public static bool PrePhysics(CpuContext c, IMemory m)
     {
         if (!IsActive(m)) return true;
-        if (SkipLandLockedPhysics(m)) return false;
         // CODE may have Warp_In → hog spawn (calcpath) or EventHit → death.
         // Snapshot ran on the previous state, so re-read the ride flag.
         if (_crashObj)
             _crashHog = CrashOnWarthog(m, _obj);
+        // Death is already a 30 Hz GoolObjectUpdate. Do not 34+scale or
+        // skip physics on that step (that stacked to ~4 Hz Force_Fall).
         if (_crashObj && IsLandLockedState(m, _obj))
             return true;
         WriteCrashOrObjectTicks(m);
@@ -3054,6 +3092,8 @@ public static class FramePacing
         try
         {
             _objScaled = true;
+            if (IsLandLockedState(m, _obj))
+                return;
             if (_crashAir)
             {
                 FinishJumpScale(m);
