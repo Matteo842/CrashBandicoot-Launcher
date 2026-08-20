@@ -19,9 +19,13 @@ namespace RecompOne.Runtime.Host;
 /// through the spawn floor; 34+scale every display frame is hang/gravity
 /// at 30 Hz × fps (infinite jump + faster FALL_KILL loop).
 /// Trans/ani stay in GoolObjectUpdate every display frame.
-/// Enemies (GOOL category 0x300), boxes (type 0x22), and Ripper Roo
-/// objects (RooOC type 39, not 2D) run one original 34-tick GOOL update
-/// per 34 wall ticks and still draw every display frame. Gated crate AABB
+/// Default: one original 34-tick GOOL update per 34 wall ticks (still
+/// drawn). That is the turtle skip, at 60 and at uncapped — not an
+/// <c>if (fps==60)</c> branch. 60 Hz is two presents per 34 ticks.
+/// Opt out HUD, SOLID_TOP platforms (Euler dt/34), path rollers,
+/// JunOC rollers, and FruiC. Hoppers (i+=1 / lerp / loopseek) never
+/// opt into Euler; Jump may OR SOLID_TOP, sticky ids keep the skip.
+/// Gated crate AABB
 /// is the last real GoolObjectBound, not a
 /// reconstructed col/yaw. Box stacks share velocity with box_link;
 /// 300 Hz trans/collide eats the pile.
@@ -180,12 +184,17 @@ public static class FramePacing
     const uint ObjAnimCounterOff = 0x104u;
     const uint FramesElapsedAddr = 0x80060E04u;
     const uint ObjPathProgOff = 0x114u;
+    /// <summary>gool_process.path_length (entity path_length &lt;&lt; 8).</summary>
+    const uint ObjPathLenOff = 0x118u;
     const uint ObjSpeedOff = 0x124u;
     const uint ObjColliderOff = 0x78u;
     const uint ObjParentOff = 0x64u;
     const uint ObjTrotOff = 0xB0u;
     const uint ObjMiscOff = 0xBCu;
     const uint ObjMemOff = 0x15Cu;
+    const uint ObjEntityOff = 0x110u;
+    const uint EntityTypeOff = 18u;
+    const uint ObjExternalOff = 0x24u;
     const int ObjMemCount = 64;
     const int PlatSlotTrans = 0;
     const int PlatSlotRot = 3;
@@ -213,11 +222,13 @@ public static class FramePacing
     const uint FlagGroundLand = 0x1u;
     const uint FlagFirstFrame = 0x20u;
     const uint Flag2D = 0x200u;
+    const uint FlagTrackPathRot = 0x2u;
     const uint FlagStoppedBySolid = 0x8u;
     const uint FlagCollidable = 0x10u;
     const uint FlagGravity = 0x20u;
     const uint FlagTransMotion = 0x40u;
     const uint FlagInvisible = 0x100u;
+    const uint FlagSolidGround = 0x4000u;
     const uint FlagSolidSides = 0x10000u;
     const uint FlagSolidTop = 0x20000u;
     const uint FlagStall = 0x10000000u;
@@ -230,6 +241,10 @@ public static class FramePacing
     const uint GoolTypeRooO = 39u;
     /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
     const uint GoolTypeJunO = 22u;
+    /// <summary>LizaC. Header often fails to parse; RuiOC 42 without SOLID_TOP is the live mesh.</summary>
+    const uint GoolTypeLiza = 47u;
+    /// <summary>RuiOC. Pillars have SOLID_TOP; hoppers / bats do not.</summary>
+    const uint GoolTypeRuiO = 42u;
     /// <summary>JunOC <c>Butterfly_Fly</c> / <c>Butterfly_Pose</c>.</summary>
     const uint StateButterflyFly = 1;
     const uint StateButterflyPose = 2;
@@ -362,6 +377,8 @@ public static class FramePacing
     static bool _platCarry;
     static int _platLog;
     static int _objClassLog;
+    /// <summary>Jump may OR SOLID_TOP. Remember hoppers from Wait so they stay on the 30 Hz skip.</summary>
+    static readonly HashSet<uint> _pathHoppers = new();
     static int _stampLog;
     static uint _worldDraw;
     static double _worldDrawFrac;
@@ -477,6 +494,7 @@ public static class FramePacing
         _spawnAcc = 0;
         _spawnCredit.Clear();
         _simAcc.Clear();
+        _pathHoppers.Clear();
         _platFrac.Clear();
         _platObj = false;
         _platLog = 0;
@@ -940,10 +958,17 @@ public static class FramePacing
         _platFirst = false;
         _platChild = false;
         _platCarry = false;
-        if (!IsActive(m)) return true;
+        // Hold / NSInit run GOOL with pacing off. Hoppers Wait then Jump
+        // (may OR SOLID_TOP). If we do not record them here, unlock treats
+        // them as pillars and i+=1 runs every present until Crash dies and
+        // they spawn again while unlocked.
+        if (!IsActive(m))
+        {
+            IsPathHopper(m, c.A0);
+            return true;
+        }
         SnapshotObject(m, c.A0);
-        _solidObj = _haveObj && !_crashObj && !IsHud(m, c.A0)
-            && (HasSolidPhysics(m, c.A0) || IsJunocButterfly(m, c.A0));
+        _solidObj = _haveObj && !_crashObj && !KeepRealDt(m, c.A0);
         _platObj = _haveObj && !_crashObj && !_solidObj && IsPlatformObj(m, c.A0);
         _platFirst = _platObj && IsFirstFrame(m, c.A0);
         _platChild = _platObj && IsPacedPlatformChild(m, c.A0);
@@ -1151,6 +1176,7 @@ public static class FramePacing
         _platFrac.Clear();
         _platObj = false;
         _platLog = 0;
+        _pathHoppers.Clear();
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -1583,6 +1609,38 @@ public static class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// Real wall dt every display. Standing platforms need Euler dt/34
+    /// (SOLID_TOP). Everything else — lizards, turtles, boxes, unknown
+    /// GOOL — one original 30 Hz step, same skip at 60 and uncapped.
+    /// </summary>
+    static bool KeepRealDt(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return true;
+        try
+        {
+            if (IsHud(m, obj)) return true;
+            if (IsPathHopper(m, obj)) return false;
+            if (HasSolidPhysics(m, obj) || IsJunocButterfly(m, obj)) return false;
+            TryReadGoolClass(m, obj, out uint type, out uint cat);
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            if ((b & FlagSolidTop) != 0
+                && (IsPlatformGoolType(type) || cat == GoolCategoryPlatform))
+                return true;
+            if ((b & FlagTrackPathRot) != 0) return true;
+            if (type == GoolTypeJunO && !IsJunocButterfly(m, obj)) return true;
+            if (type == 3u) return true; // FruiC
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsPlatformGoolType(uint type) =>
+        type is 11 or 26 or 28 or 33 or 42 or 46 or 58;
+
     static bool HasSolidPhysics(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
@@ -1606,6 +1664,60 @@ public static class FramePacing
             if ((b & FlagTransMotion) == 0) return false;
             if ((b & FlagStoppedBySolid) != 0) return true;
             return (b & FlagGravity) != 0 && (b & FlagCollidable) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool HasPatrolPath(IMemory m, uint obj)
+    {
+        try
+        {
+            return m.ReadU32(obj + ObjPathLenOff) >= 0x200u;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsLizaWaitFlags(uint b) =>
+        (b & (FlagCollidable | FlagSolidGround | FlagSolidSides | FlagSolidTop))
+            == (FlagCollidable | FlagSolidGround | FlagSolidSides);
+
+    /// <summary>
+    /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
+    /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
+    /// </summary>
+    static bool IsPathHopper(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            TryReadGoolClass(m, obj, out uint type, out uint cat);
+            if (type == GoolTypeBox)
+            {
+                _pathHoppers.Remove(obj);
+                return false;
+            }
+            if (_pathHoppers.Contains(obj)) return true;
+            if (type == GoolTypeLiza)
+            {
+                _pathHoppers.Add(obj);
+                return true;
+            }
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            bool hop = type == GoolTypeRuiO && (b & FlagSolidTop) == 0;
+            if (!hop && IsLizaWaitFlags(b)) hop = true;
+            if (!hop && HasPatrolPath(m, obj) && (b & FlagSolidTop) == 0)
+                hop = true;
+            if (!hop && cat == GoolCategoryEnemy
+                && (b & FlagSolidSides) != 0 && (b & FlagSolidTop) == 0)
+                hop = true;
+            if (hop) _pathHoppers.Add(obj);
+            return hop;
         }
         catch
         {
@@ -1642,10 +1754,12 @@ public static class FramePacing
         try
         {
             if (IsHud(m, obj)) return false;
+            if (IsPathHopper(m, obj)) return false;
             if (!TryReadGoolClass(m, obj, out _, out uint cat) || cat != GoolCategoryPlatform)
                 return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
-            if ((b & (FlagSolidTop | FlagSolidSides)) == 0) return false;
+            // SOLID_SIDES alone is an enemy hitbox (LizaC Wait). Pillars have a top.
+            if ((b & FlagSolidTop) == 0) return false;
             return true;
         }
         catch
@@ -1670,9 +1784,15 @@ public static class FramePacing
 
     static bool TryReadGoolClass(IMemory m, uint obj, out uint type, out uint cat)
     {
+        if (TryReadGoolClassFrom(m, m.ReadU32(obj + ObjGlobalOff), out type, out cat))
+            return true;
+        return TryReadGoolClassFrom(m, m.ReadU32(obj + ObjExternalOff), out type, out cat);
+    }
+
+    static bool TryReadGoolClassFrom(IMemory m, uint en, out uint type, out uint cat)
+    {
         type = 0;
         cat = 0;
-        uint en = m.ReadU32(obj + ObjGlobalOff);
         if ((en & 0xFF000000u) != 0x80000000u) return false;
         uint magic = m.ReadU32(en);
         uint item0 = m.ReadU32(en + 16);
@@ -1688,10 +1808,18 @@ public static class FramePacing
         cat = m.ReadU32(header + 4);
         if (type > 63)
         {
-            type = 0;
-            cat = 0;
-            return false;
+            uint shifted = type >> 8;
+            if ((type & 0xFF) == 0 && shifted > 0 && shifted <= 63)
+                type = shifted;
+            else
+            {
+                type = 0;
+                cat = 0;
+                return false;
+            }
         }
+        if (cat > 0 && cat < 16)
+            cat <<= 8;
         return true;
     }
 
