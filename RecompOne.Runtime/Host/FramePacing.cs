@@ -80,8 +80,11 @@ namespace RecompOne.Runtime.Host;
 /// World UV anim (draw_count @ 0x80057960) and water ripple use a dedicated
 /// wall clock. Worlds run before object AdvanceWallClock, so they must not
 /// reuse leftover ticks (that is +1 per display frame).
-/// Bonus rounds and Willy_Warp_Out stay on the original 30 Hz pad so CardC
-/// save/continue cannot skip.
+/// Bonus rounds use the same wall dt as gameplay. CardC save UI (Tawna
+/// Congrats spawn, Warp_Out playnull) and the crate-tally complete lid
+/// stay on the original 30 Hz pad — playnull is per interpret, and BonoC
+/// spawn() is not Crash so the 30 Hz burst cap would eat CardC. Sticky
+/// until NSInit so TryArmUnlock cannot re-arm 30 presents later.
 /// CamFollow look-behind is cam_offset_z += 0x3200 per display frame
 /// (12 original frames from -0x12C00 to +0x12C00). Scale that seek — not
 /// CamFollow snaps, not CamAdjustProgress (PreLevelUpdate already paces
@@ -248,6 +251,21 @@ public static class FramePacing
     /// <summary>JunOC <c>Butterfly_Fly</c> / <c>Butterfly_Pose</c>.</summary>
     const uint StateButterflyFly = 1;
     const uint StateButterflyPose = 2;
+    /// <summary>BonoC / CardC (NTSC-U GOOL header type).</summary>
+    const uint GoolTypeBono = 56u;
+    const uint GoolTypeCard = 57u;
+    /// <summary>BonoC <c>Tawna_Congrats</c> — spawns CardC-34 after the wave.</summary>
+    const uint StateTawnaCongrats = 1;
+    /// <summary>BonoC <c>Brio_Escape</c> / <c>Cortex_Escape</c> at the round end.</summary>
+    const uint StateBrioEscape = 6;
+    const uint StateCortexEscape = 8;
+    const uint HandlesAddr = 0x80060DB8u;
+    const int HandleCount = 8;
+    const uint HandleChildrenOff = 4u;
+    const uint ObjSiblingOff = 0x68u;
+    const uint ObjChildrenOff = 0x6Cu;
+    const uint HandleListType = 2;
+    const int ObjectPoolMax = 96;
     const uint ErrorObjectPoolFull = 0xFFFFFFEAu;
     const uint GoolSuccess = 0xFFFFFF01u; // SUCCESS -255
     const uint EntryMagic = 0x100FFFFu;
@@ -320,6 +338,8 @@ public static class FramePacing
     static bool _inNsInit;
     /// <summary>Unlocked VSync only after a gameplay GpuUpdate with Crash spawned.</summary>
     static bool _levelReady;
+    /// <summary>CardC / Warp_Out / Tawna Congrats — stay on the 30 Hz pad until NSInit.</summary>
+    static bool _saveUiPad;
     /// <summary>GpuUpdates to keep at 30 FPS after the first real DrawOTag.</summary>
     static int _holdLocked;
     /// <summary>Last PsyQ VSync HLE timestamp. Gap &gt; 0.5 ms starts a new GpuUpdate burst.</summary>
@@ -420,7 +440,7 @@ public static class FramePacing
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            if (!Catalog.Levels.AllowsUnlockedFps(id) || IsWarpOut(m))
+            if (!Catalog.Levels.AllowsUnlockedFps(id) || WantsOriginalPad(m))
             {
                 DropToOriginalPad(m, id);
                 return false;
@@ -442,6 +462,105 @@ public static class FramePacing
         uint crash = m.ReadU32(CrashPtrAddr);
         if ((crash & 0xFF000000u) != 0x80000000u) return false;
         return m.ReadU32(crash + ObjStateOff) == StateWarpOut;
+    }
+
+    /// <summary>
+    /// Warp_Out, Tawna/Brio/Cortex end, or a live CardC object. Sticky so
+    /// TryArmUnlock cannot re-arm after 30 presents (0.1 s at uncapped).
+    /// </summary>
+    static void ArmSaveUiPad()
+    {
+        if (_saveUiPad) return;
+        _saveUiPad = true;
+        PaceLog("save UI pad");
+    }
+
+    static bool WantsOriginalPad(IMemory m)
+    {
+        if (_saveUiPad) return true;
+        try
+        {
+            if (IsWarpOut(m))
+            {
+                ArmSaveUiPad();
+                return true;
+            }
+        }
+        catch
+        {
+            // overlay swap
+        }
+        return false;
+    }
+
+    static void NoteSaveUiObject(IMemory m, uint obj)
+    {
+        if (_saveUiPad) return;
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
+        try
+        {
+            if (m.ReadU32(obj) == HandleListType) return;
+            if (!TryReadGoolClass(m, obj, out uint type, out _)) return;
+            if (type == GoolTypeCard)
+            {
+                ArmSaveUiPad();
+                return;
+            }
+            if (type != GoolTypeBono) return;
+            uint state = m.ReadU32(obj + ObjStateOff);
+            if (state is StateTawnaCongrats or StateBrioEscape or StateCortexEscape)
+                ArmSaveUiPad();
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static void NoteSaveUiWorld(IMemory m)
+    {
+        if (_saveUiPad) return;
+        try
+        {
+            if (IsWarpOut(m))
+            {
+                ArmSaveUiPad();
+                return;
+            }
+            int left = ObjectPoolMax;
+            for (int h = 0; h < HandleCount && left > 0; h++)
+            {
+                uint handle = HandlesAddr + (uint)(h * 8);
+                uint child = m.ReadU32(handle + HandleChildrenOff);
+                WalkSaveUi(m, child, ref left);
+                if (_saveUiPad) return;
+            }
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void WalkSaveUi(IMemory m, uint obj, ref int left)
+    {
+        int n = 0;
+        while ((obj & 0xFF000000u) == 0x80000000u && n++ < ObjectPoolMax && left-- > 0)
+        {
+            uint kind = m.ReadU32(obj);
+            if (kind == HandleListType)
+            {
+                WalkSaveUi(m, m.ReadU32(obj + HandleChildrenOff), ref left);
+            }
+            else
+            {
+                NoteSaveUiObject(m, obj);
+                if (_saveUiPad) return;
+                WalkSaveUi(m, m.ReadU32(obj + ObjChildrenOff), ref left);
+                if (_saveUiPad) return;
+            }
+            obj = m.ReadU32(obj + ObjSiblingOff);
+        }
     }
 
     static void DropToOriginalPad(IMemory m, uint id)
@@ -508,6 +627,7 @@ public static class FramePacing
         _loggedUnlockGpu = false;
         _inNsInit = false;
         _levelReady = false;
+        _saveUiPad = false;
         _holdLocked = 0;
         _lastVsyncHleTs = 0;
         _armedThisGpu = false;
@@ -892,6 +1012,7 @@ public static class FramePacing
         if (_didPreUpdateObjects) return true;
         _didPreUpdateObjects = true;
         _ticksTakenThisLoop = false;
+        NoteSaveUiWorld(m);
         if (IsActive(m))
         {
             AdvanceWallClock(m);
@@ -1077,7 +1198,10 @@ public static class FramePacing
         }
         NoteSpawnUsed();
         if (_haveObj)
+        {
+            NoteSaveUiObject(m, _obj);
             RestoreGatedDisplayRot(m, _obj);
+        }
         if (_solidObj && !_gatedSolid && _haveObj)
         {
             CaptureBound(m, _obj);
@@ -1155,6 +1279,7 @@ public static class FramePacing
     {
         _inNsInit = true;
         _levelReady = false;
+        _saveUiPad = false;
         _holdLocked = 0;
         _loggedUnlockGpu = false;
         ResetWaterClock();
@@ -1195,7 +1320,8 @@ public static class FramePacing
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            if (!Catalog.Levels.AllowsUnlockedFps(id))
+            NoteSaveUiWorld(m);
+            if (!Catalog.Levels.AllowsUnlockedFps(id) || _saveUiPad)
             {
                 _holdLocked = 0;
                 return;
@@ -2481,7 +2607,8 @@ public static class FramePacing
             _didSpawn = true;
             return true;
         }
-        if (TryReadGoolClass(m, _obj, out uint ptype, out _) && ptype == GoolTypeBox)
+        if (TryReadGoolClass(m, _obj, out uint ptype, out _)
+            && ptype is GoolTypeBox or GoolTypeBono or GoolTypeCard)
         {
             _didSpawn = true;
             return true;

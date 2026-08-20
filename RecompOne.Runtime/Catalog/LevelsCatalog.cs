@@ -71,14 +71,14 @@ public sealed class LevelsCatalog
         TryGet(id, out var info) ? info.Kind == LevelKind.Gameplay : !IsUiOrCinema(id);
 
     /// <summary>
-    /// Gameplay only. Bonus stays on the original 30 Hz pad — Tawna/CardC
-    /// save UI is playnull-per-display-frame and skips if unlocked.
-    /// Complete/title/cinema are already excluded via kind.
+    /// Gameplay and bonus rounds. CardC / crate-tally UI still drop to the
+    /// original 30 Hz pad in FramePacing — not a whole-bonus lock.
+    /// Complete/title/cinema stay excluded via kind.
     /// </summary>
     public bool AllowsUnlockedFps(uint id)
     {
         if (TryGet(id, out var info))
-            return info.Kind == LevelKind.Gameplay;
+            return info.Kind is LevelKind.Gameplay or LevelKind.Bonus;
         return !IsUiOrCinema(id);
     }
 
