@@ -94,6 +94,8 @@ namespace RecompOne.Runtime.Host;
 /// half-steps at 60 (looks like 30) and a rocket at 120/240. Rebuild
 /// Y from hang×dt + gravity×dt like the foot jump. Ride is
 /// TRACK_PATH_SIGN, not a WillC state index.
+/// Hog spawn calcpath is a checkpoint snap — do not lerp XZ from the
+/// death pose. Death cine is stateflag 0x4000 (not a WillC index).
 /// CamFollow look-behind is cam_offset_z += 0x3200 per display frame
 /// (12 original frames from -0x12C00 to +0x12C00). Scale that seek — not
 /// CamFollow snaps, not CamAdjustProgress (PreLevelUpdate already paces
@@ -200,6 +202,8 @@ public static class FramePacing
     const uint ObjPathProgOff = 0x114u;
     /// <summary>gool_process.path_length (entity path_length &lt;&lt; 8).</summary>
     const uint ObjPathLenOff = 0x118u;
+    /// <summary>gool_process.state_flags. Death_Fall / Death_Warthog set 0x4000.</summary>
+    const uint ObjStateFlagsOff = 0x120u;
     const uint ObjSpeedOff = 0x124u;
     const uint ObjColliderOff = 0x78u;
     const uint ObjParentOff = 0x64u;
@@ -235,6 +239,8 @@ public static class FramePacing
 
     const uint FlagGroundLand = 0x1u;
     const uint FlagFirstFrame = 0x20u;
+    /// <summary>WillC death cine <c>stateflag 0x4000</c> (Fall / Warthog). Not a state index.</summary>
+    const uint FlagStateDeathCine = 0x4000u;
     const uint Flag2D = 0x200u;
     const uint FlagTrackPathRot = 0x2u;
     const uint FlagTrackPathSign = 0x4u;
@@ -932,9 +938,12 @@ public static class FramePacing
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
-            return state == StateForceFall || state == StateWarpIn || state == StateDeathFlat
+            if (state == StateForceFall || state == StateWarpIn || state == StateDeathFlat
                 || state == StateDeathWarthog
-                || (state >= StateDeathFall && state <= StateDeathFast);
+                || (state >= StateDeathFall && state <= StateDeathFast))
+                return true;
+            // NTSC-U vs J shifts WillC indices; 0x4000 is on the death cine itself.
+            return (m.ReadU32(obj + ObjStateFlagsOff) & FlagStateDeathCine) != 0;
         }
         catch
         {
@@ -960,7 +969,9 @@ public static class FramePacing
             _landPhysRan = true;
             WriteAllTicks(m, RefTicks);
             _crashAir = false;
-            _objScaled = true;
+            // Let FinishPacedScale keep dt/34 of this step. A full unscaled
+            // 34-tick displace here is leftover jump vely as a rocket, and
+            // only matches 30 when the death hitch already dropped to 30 Hz.
             return false;
         }
         _landPhysAcc += _exactTicks;
@@ -1299,6 +1310,10 @@ public static class FramePacing
     {
         if (!IsActive(m)) return true;
         if (SkipLandLockedPhysics(m)) return false;
+        // CODE may have Warp_In → hog spawn (calcpath) or EventHit → death.
+        // Snapshot ran on the previous state, so re-read the ride flag.
+        if (_crashObj)
+            _crashHog = CrashOnWarthog(m, _obj);
         if (_crashObj && IsLandLockedState(m, _obj))
             return true;
         WriteCrashOrObjectTicks(m);
@@ -3042,6 +3057,20 @@ public static class FramePacing
             if (_exactTicks >= RefTicks - 0.01) return;
 
             uint o = _obj;
+            // Spawn CODE sets pathprog from z then calcpath. Lerping XZ from
+            // the death pose toward that snap leaves Crash beside the path
+            // whenever dt&lt;34 (uncapped). At a 30 Hz hitch the lerp is off
+            // so the checkpoint looks correct — same 60-only trap.
+            if (_crashHog && IsFirstFrame(m, o))
+            {
+                _hogPathFrac = 0;
+                _hogTrotFrac = 0;
+                _hogComboFrac = 0;
+                if (_haveTransY)
+                    FinishHogJumpY(m);
+                RejectCrateEmbed(m);
+                return;
+            }
             m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
             m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
 
