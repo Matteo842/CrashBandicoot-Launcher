@@ -88,7 +88,9 @@ namespace RecompOne.Runtime.Host;
 /// Crash on the warthog (Hog Wild / Whole Hog) writes pathprog with
 /// spd() then calcpath into x/z. Grounded 34+scale keeps StopAtWalls
 /// but leaves pathprog at the full 30 Hz step, so the hog runs at
-/// 30 Hz × fps. Keep dt/34 of pathprog, ComboBounce, and troty.
+/// 30 Hz × fps. Keep dt/34 of pathprog, ComboBounce (mem scan, not a
+/// WillC index), and troty. 15deg is per present — 8.8 vs 12-bit from
+/// the raw step so &amp; 0xFFF cannot trash trot.
 /// Jump Y cannot use that lerp: CODE sets vely and trans does
 /// spd(vely, hang) on a 34-tick present, so ScaleExact(Y) is two
 /// half-steps at 60 (looks like 30) and a rocket at 120/240. Rebuild
@@ -168,8 +170,10 @@ public static class FramePacing
     const uint StateDeathFlat = 31;
     const uint StateDeathWarthog = 40;
     const uint StateWarpIn = 41;
-    /// <summary>WillC <c>ComboBounce</c> — crate combo on foot, lateral hog offset on the hog.</summary>
-    const int MemComboBounce = 16;
+    /// <summary>WillC process vars. Hog lateral is ComboBounce (spd 1440/480); index is not trusted.</summary>
+    const int HogMemCount = 24;
+    /// <summary>Crate combo is ±1.0 (256). Hog strafe spd is thousands per 34-tick step.</summary>
+    const int HogMemMinStep = 512;
     const uint CamZoneAddr = 0x80057914u;
     const uint CamPathAddr = 0x8005791Cu;
     const uint CamProgressAddr = 0x80057920u;
@@ -369,8 +373,10 @@ public static class FramePacing
     static uint _obj;
     static int _ox, _oy, _oz, _orx, _ory, _orz, _oanim;
     static int _ovy, _ovx, _ovz, _ospeed;
-    static int _opath, _otrotY, _ocombo;
-    static double _hogPathFrac, _hogTrotFrac, _hogComboFrac;
+    static int _opath, _otrotX, _otrotY, _otrotZ;
+    static double _hogPathFrac, _hogTrotFracX, _hogTrotFracY, _hogTrotFracZ;
+    static readonly int[] _hogMem = new int[HogMemCount];
+    static readonly double[] _hogMemFrac = new double[HogMemCount];
     static bool _crashHog;
     static int _paceLog;
     static bool _haveObj;
@@ -609,8 +615,10 @@ public static class FramePacing
         _crashObj = false;
         _crashHog = false;
         _hogPathFrac = 0;
-        _hogTrotFrac = 0;
-        _hogComboFrac = 0;
+        _hogTrotFracX = 0;
+        _hogTrotFracY = 0;
+        _hogTrotFracZ = 0;
+        Array.Clear(_hogMemFrac);
         _solidObj = false;
         _gatedSolid = false;
         _objScaled = false;
@@ -1382,8 +1390,10 @@ public static class FramePacing
         _platLog = 0;
         _pathHoppers.Clear();
         _hogPathFrac = 0;
-        _hogTrotFrac = 0;
-        _hogComboFrac = 0;
+        _hogTrotFracX = 0;
+        _hogTrotFracY = 0;
+        _hogTrotFracZ = 0;
+        Array.Clear(_hogMemFrac);
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -3064,8 +3074,10 @@ public static class FramePacing
             if (_crashHog && IsFirstFrame(m, o))
             {
                 _hogPathFrac = 0;
-                _hogTrotFrac = 0;
-                _hogComboFrac = 0;
+                _hogTrotFracX = 0;
+                _hogTrotFracY = 0;
+                _hogTrotFracZ = 0;
+                Array.Clear(_hogMemFrac);
                 if (_haveTransY)
                     FinishHogJumpY(m);
                 RejectCrateEmbed(m);
@@ -3254,8 +3266,11 @@ public static class FramePacing
         if (_crashHog)
         {
             m.WriteU32(o + ObjPathProgOff, (uint)_opath);
+            m.WriteU32(o + ObjTrotOff, (uint)_otrotX);
             m.WriteU32(o + ObjTrotOff + 4, (uint)_otrotY);
-            m.WriteU32(o + ObjMemOff + (uint)MemComboBounce * 4u, (uint)_ocombo);
+            m.WriteU32(o + ObjTrotOff + 8, (uint)_otrotZ);
+            for (int i = 0; i < HogMemCount; i++)
+                m.WriteU32(o + ObjMemOff + (uint)i * 4u, (uint)_hogMem[i]);
         }
     }
 
@@ -3474,8 +3489,17 @@ public static class FramePacing
         uint o = _obj;
         m.WriteU32(o + ObjPathProgOff, (uint)KeepHogPath(_opath, (int)m.ReadU32(o + ObjPathProgOff)));
         FinishWarthogSteer(m);
-        m.WriteU32(o + ObjMemOff + (uint)MemComboBounce * 4u,
-            (uint)KeepHogDelta(_ocombo, (int)m.ReadU32(o + ObjMemOff + (uint)MemComboBounce * 4u), ref _hogComboFrac, ang: false));
+        for (int i = 0; i < HogMemCount; i++)
+        {
+            int from = _hogMem[i];
+            int to = (int)m.ReadU32(o + ObjMemOff + (uint)i * 4u);
+            long d = (long)to - from;
+            if (d == 0 || d > Teleport || d < -Teleport) continue;
+            if (IsGoolPtr(from) || IsGoolPtr(to)) continue;
+            if (d < HogMemMinStep && d > -HogMemMinStep) continue;
+            m.WriteU32(o + ObjMemOff + (uint)i * 4u,
+                (uint)KeepHogDelta(from, to, ref _hogMemFrac[i], ang: false));
+        }
     }
 
     /// <summary>
@@ -3529,8 +3553,23 @@ public static class FramePacing
 
     static void FinishWarthogSteer(IMemory m)
     {
-        m.WriteU32(_obj + ObjTrotOff + 4,
-            (uint)KeepHogDelta(_otrotY, (int)m.ReadU32(_obj + ObjTrotOff + 4), ref _hogTrotFrac, ang: true));
+        uint o = _obj;
+        m.WriteU32(o + ObjTrotOff, (uint)KeepHogSteer(_otrotX, (int)m.ReadU32(o + ObjTrotOff), ref _hogTrotFracX));
+        m.WriteU32(o + ObjTrotOff + 4, (uint)KeepHogSteer(_otrotY, (int)m.ReadU32(o + ObjTrotOff + 4), ref _hogTrotFracY));
+        m.WriteU32(o + ObjTrotOff + 8, (uint)KeepHogSteer(_otrotZ, (int)m.ReadU32(o + ObjTrotOff + 8), ref _hogTrotFracZ));
+    }
+
+    /// <summary>
+    /// <c>troty += 15deg</c> is per present. 12-bit 15deg is ~171; 8.8 15deg
+    /// is 3840, which AngDelta treats as a wrap to -256 and then <c>&amp; 0xFFF</c>
+    /// corrupts 8.8. Linear when the raw step is larger than 180° 12-bit.
+    /// </summary>
+    static int KeepHogSteer(int from, int to, ref double frac)
+    {
+        long raw = (long)to - from;
+        if (raw > 0x800 || raw < -0x800)
+            return KeepHogDelta(from, to, ref frac, ang: false);
+        return KeepHogDelta(from, to, ref frac, ang: true);
     }
 
     static int KeepHogDelta(int from, int to, ref double frac, bool ang)
@@ -3610,14 +3649,19 @@ public static class FramePacing
             if (_crashHog)
             {
                 _opath = (int)m.ReadU32(obj + ObjPathProgOff);
+                _otrotX = (int)m.ReadU32(obj + ObjTrotOff);
                 _otrotY = (int)m.ReadU32(obj + ObjTrotOff + 4);
-                _ocombo = (int)m.ReadU32(obj + ObjMemOff + (uint)MemComboBounce * 4u);
+                _otrotZ = (int)m.ReadU32(obj + ObjTrotOff + 8);
+                for (int i = 0; i < HogMemCount; i++)
+                    _hogMem[i] = (int)m.ReadU32(obj + ObjMemOff + (uint)i * 4u);
             }
             else
             {
                 _hogPathFrac = 0;
-                _hogTrotFrac = 0;
-                _hogComboFrac = 0;
+                _hogTrotFracX = 0;
+                _hogTrotFracY = 0;
+                _hogTrotFracZ = 0;
+                Array.Clear(_hogMemFrac);
             }
             _haveObj = true;
         }
