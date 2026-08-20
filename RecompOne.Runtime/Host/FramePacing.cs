@@ -88,7 +88,12 @@ namespace RecompOne.Runtime.Host;
 /// Crash on the warthog (Hog Wild / Whole Hog) writes pathprog with
 /// spd() then calcpath into x/z. Grounded 34+scale keeps StopAtWalls
 /// but leaves pathprog at the full 30 Hz step, so the hog runs at
-/// 30 Hz × fps. Keep dt/34 of pathprog, ComboBounce, and troty too.
+/// 30 Hz × fps. Keep dt/34 of pathprog, ComboBounce, and troty.
+/// Jump Y cannot use that lerp: CODE sets vely and trans does
+/// spd(vely, hang) on a 34-tick present, so ScaleExact(Y) is two
+/// half-steps at 60 (looks like 30) and a rocket at 120/240. Rebuild
+/// Y from hang×dt + gravity×dt like the foot jump. Ride is
+/// TRACK_PATH_SIGN, not a WillC state index.
 /// CamFollow look-behind is cam_offset_z += 0x3200 per display frame
 /// (12 original frames from -0x12C00 to +0x12C00). Scale that seek — not
 /// CamFollow snaps, not CamAdjustProgress (PreLevelUpdate already paces
@@ -161,9 +166,6 @@ public static class FramePacing
     const uint StateDeathFlat = 31;
     const uint StateDeathWarthog = 40;
     const uint StateWarpIn = 41;
-    /// <summary>WillC hog ride. Spawn 36 / Run_Start 38 do not spd the path.</summary>
-    const uint StateWarthogRun = 37;
-    const uint StateWarthogJump = 39;
     /// <summary>WillC <c>ComboBounce</c> — crate combo on foot, lateral hog offset on the hog.</summary>
     const int MemComboBounce = 16;
     const uint CamZoneAddr = 0x80057914u;
@@ -235,6 +237,7 @@ public static class FramePacing
     const uint FlagFirstFrame = 0x20u;
     const uint Flag2D = 0x200u;
     const uint FlagTrackPathRot = 0x2u;
+    const uint FlagTrackPathSign = 0x4u;
     const uint FlagStoppedBySolid = 0x8u;
     const uint FlagCollidable = 0x10u;
     const uint FlagGravity = 0x20u;
@@ -869,15 +872,36 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Hog Wild / Whole Hog ride. Trans does <c>pathprog = spd(pathprog, 4)</c>
-    /// then calcpath into x/z — not walk physics. Spawn/intro do not spd.
+    /// Hog Wild / Whole Hog. Spawn sets TRACK_PATH_SIGN and trans does
+    /// <c>pathprog = spd(pathprog, 4)</c> then calcpath — not walk physics.
+    /// State indices differ by region; the flag does not.
     /// </summary>
     static bool CrashOnWarthog(IMemory m, uint obj)
     {
         try
         {
-            uint state = m.ReadU32(obj + ObjStateOff);
-            return state == StateWarthogRun || state == StateWarthogJump;
+            if (IsLandLockedState(m, obj)) return false;
+            return (m.ReadU32(obj + ObjStatusBOff) & FlagTrackPathSign) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Hog jump / bounce. GROUNDLAND is still set on the takeoff present
+    /// (CODE writes vely, trans is skipped). vy&gt;0 covers that frame;
+    /// clear GROUNDLAND covers the hang. Not a WillC state index.
+    /// </summary>
+    static bool HogNeedsJumpY(IMemory m)
+    {
+        if (!_crashHog) return false;
+        try
+        {
+            if ((m.ReadU32(_obj + ObjStatusAOff) & FlagGroundLand) == 0)
+                return true;
+            return (int)m.ReadU32(_obj + ObjVelYOff) > 0;
         }
         catch
         {
@@ -1286,6 +1310,12 @@ public static class FramePacing
             _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
             _haveTransY = true;
             WriteAllTicks(m, RefTicks);
+        }
+        else if (_crashObj && HogNeedsJumpY(m))
+        {
+            _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
+            _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
+            _haveTransY = true;
         }
         return true;
     }
@@ -3015,12 +3045,14 @@ public static class FramePacing
             m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
             m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
 
+            bool hogJumpY = _crashHog && _haveTransY;
             int yTo = (int)m.ReadU32(o + ObjTransOff + 4);
-            int y = ScaleExact(_oy, yTo, VelTeleport);
-            m.WriteU32(o + ObjTransOff + 4, (uint)y);
+            if (!hogJumpY)
+                m.WriteU32(o + ObjTransOff + 4, (uint)ScaleExact(_oy, yTo, VelTeleport));
             m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport));
             int vyTo = (int)m.ReadU32(o + ObjVelYOff);
-            m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, vyTo, VelTeleport));
+            if (!hogJumpY)
+                m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, vyTo, VelTeleport));
             m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
             if (_crashObj && speedTo <= 4 && speedTo >= -4)
@@ -3032,8 +3064,10 @@ public static class FramePacing
             m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
             if (_crashHog)
                 FinishWarthogScale(m);
+            if (hogJumpY)
+                FinishHogJumpY(m);
 
-            if (_crashObj)
+            if (_crashObj && !hogJumpY)
             {
                 uint statusA = m.ReadU32(o + ObjStatusAOff);
                 if ((statusA & FlagGroundLand) != 0 && vyTo > 0 && yTo > _oy + 0x100)
@@ -3409,10 +3443,65 @@ public static class FramePacing
     static void FinishWarthogScale(IMemory m)
     {
         uint o = _obj;
-        m.WriteU32(o + ObjPathProgOff, (uint)KeepHogDelta(_opath, (int)m.ReadU32(o + ObjPathProgOff), ref _hogPathFrac, ang: false));
-        m.WriteU32(o + ObjTrotOff + 4, (uint)KeepHogDelta(_otrotY, (int)m.ReadU32(o + ObjTrotOff + 4), ref _hogTrotFrac, ang: true));
+        m.WriteU32(o + ObjPathProgOff, (uint)KeepHogPath(_opath, (int)m.ReadU32(o + ObjPathProgOff)));
+        FinishWarthogSteer(m);
         m.WriteU32(o + ObjMemOff + (uint)MemComboBounce * 4u,
             (uint)KeepHogDelta(_ocombo, (int)m.ReadU32(o + ObjMemOff + (uint)MemComboBounce * 4u), ref _hogComboFrac, ang: false));
+    }
+
+    /// <summary>
+    /// Hog jump trans did a 34-tick hang <c>spd(vely)</c> and physics a
+    /// 34-tick displace. ScaleExact on Y is two half-steps at 60. Takeoff
+    /// / bounce is a SET (keep vy). Hang is dt/34 of that spd add. Then
+    /// y += vy×dt/1024, gravity 4000×dt — same order as the guest, any fps.
+    /// </summary>
+    static void FinishHogJumpY(IMemory m)
+    {
+        uint o = _obj;
+        int vyAfter = _vyTrans;
+        int dvy = vyAfter - _ovy;
+        // Takeoff/bounce SET is millions; 34-tick hang spd is much smaller.
+        // Scaling the SET is the 60-only half-impulse. Keep it; scale hang.
+        int vyHang = IsFirstFrame(m, o) || dvy > 0x80000 || dvy < -0x80000
+            ? vyAfter
+            : _ovy + (int)Math.Round(dvy * _exactTicks / RefTicks);
+        int y = _yTrans + (int)Math.Round(vyHang * _exactTicks / 1024.0);
+        int vy = vyHang - (int)Math.Round(4000.0 * _exactTicks);
+        if (vy < -0x2EE000) vy = -0x2EE000;
+
+        int yPhys = (int)m.ReadU32(o + ObjTransOff + 4);
+        uint statusA = m.ReadU32(o + ObjStatusAOff);
+        bool landed = (statusA & FlagGroundLand) != 0;
+        if (landed && y > yPhys + 0x400)
+            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+        else if (landed)
+        {
+            m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
+            m.WriteU32(o + ObjVelYOff, 0);
+            return;
+        }
+
+        m.WriteU32(o + ObjTransOff + 4, (uint)y);
+        m.WriteU32(o + ObjVelYOff, (uint)vy);
+        if (vy > 0)
+        {
+            statusA = m.ReadU32(o + ObjStatusAOff);
+            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+        }
+    }
+
+    static int KeepHogPath(int from, int to)
+    {
+        long d = (long)to - from;
+        // Spawn/checkpoint writes (73.0 / 138.0) are snaps, not spd(…, 4).
+        if (d > 0x1000 || d < -0x1000) return to;
+        return KeepHogDelta(from, to, ref _hogPathFrac, ang: false);
+    }
+
+    static void FinishWarthogSteer(IMemory m)
+    {
+        m.WriteU32(_obj + ObjTrotOff + 4,
+            (uint)KeepHogDelta(_otrotY, (int)m.ReadU32(_obj + ObjTrotOff + 4), ref _hogTrotFrac, ang: true));
     }
 
     static int KeepHogDelta(int from, int to, ref double frac, bool ang)
