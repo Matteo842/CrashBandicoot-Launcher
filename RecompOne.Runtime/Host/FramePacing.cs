@@ -128,6 +128,10 @@ namespace RecompOne.Runtime.Host;
 /// (12 original frames from -0x12C00 to +0x12C00). Scale that seek — not
 /// CamFollow snaps, not CamAdjustProgress (PreLevelUpdate already paces
 /// same-path progress). Double-scaling those made walk/spin slow-mo.
+/// Death orbit is CamDeath (SPIN_DEATH). Do not lerp or rewind its pose:
+/// GoolTransform SETs a circle, so dt/34 of the coords is a chord (wrong
+/// radius). Skip extra CamDeath calls; one original interpret per 34 wall
+/// ticks. Same clock as the death cine. CamFollow is untouched.
 /// </summary>
 public static class FramePacing
 {
@@ -217,6 +221,10 @@ public static class FramePacing
     const int CamSeekX = 0x6400;
     const int CamSeekY = 0x6400;
     const int CamSeekZoom = 0x1900;
+    /// <summary>CamDeath (NTSC-U). SPIN_DEATH orbit; skip extras, do not rewrite pose.</summary>
+    const uint CamDeathAddr = 0x8002BAB4u;
+    const uint DisplayFlagsAddr = 0x800618B0u;
+    const uint FlagSpinDeath = 0x10000u;
 
     const uint ObjTransOff = 0x80u;
     const uint ObjRotOff = 0x8Cu;
@@ -499,6 +507,9 @@ public static class FramePacing
     static bool _inCamFollow;
     static int _camOffZ, _camOffX, _camOffY, _camZoom;
     static int _camLog;
+    static bool _dcamArmed;
+    static double _dcamAcc;
+    static int _dcamLog;
 
     public static bool ForceOriginal { get; set; }
 
@@ -733,6 +744,8 @@ public static class FramePacing
         _ripplePatched = false;
         _inCamFollow = false;
         _camLog = 0;
+        ClearDeathCam();
+        _dcamLog = 0;
         ResetWaterClock();
         try
         {
@@ -1218,6 +1231,7 @@ public static class FramePacing
         LevelUpdateAddr => PreLevelUpdate(c, m),
         GoolSeekAddr => PreGoolSeek(c, m),
         CamFollowAddr or CamUpdateAddr => PreCamFollow(c, m),
+        CamDeathAddr => PreCamDeath(c, m),
         GoolObjectUpdateAddr => PreGoolObjectUpdate(c, m),
         GoolObjectInterpretAddr => PreGoolInterpret(c, m),
         _ => true,
@@ -1506,6 +1520,7 @@ public static class FramePacing
         _hogTrotFracZ = 0;
         Array.Clear(_hogMemFrac);
         ClearCrashScaleFrac();
+        ClearDeathCam();
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -1821,6 +1836,12 @@ public static class FramePacing
     /// </summary>
     public static bool PreGfxUpdateMatrices(CpuContext c, IMemory m)
     {
+        try
+        {
+            if ((m.ReadU32(DisplayFlagsAddr) & FlagSpinDeath) == 0)
+                ClearDeathCam();
+        }
+        catch { /* overlay swap */ }
         AdvanceWater(m);
         return true;
     }
@@ -2052,6 +2073,49 @@ public static class FramePacing
         {
             // overlay swap
         }
+    }
+
+    /// <summary>
+    /// CamDeath GoolTransforms onto the orbit then looks. That is a SET.
+    /// Extra presents must not run it (and must not rewrite the pose after).
+    /// One original call per 34 wall ticks; first death present always runs.
+    /// </summary>
+    public static bool PreCamDeath(CpuContext c, IMemory m)
+    {
+        if (!IsActive(m))
+        {
+            ClearDeathCam();
+            return true;
+        }
+        if (!_dcamArmed)
+        {
+            _dcamArmed = true;
+            _dcamAcc = 0;
+            if (_dcamLog < 8)
+            {
+                _dcamLog++;
+                PaceLog($"death cam start dt={_exactTicks:0.00}");
+            }
+            return true;
+        }
+        if (GamePaused(m) || _exactTicks <= 0)
+            return false;
+        if (_exactTicks >= RefTicks - 0.01)
+        {
+            _dcamAcc = 0;
+            return true;
+        }
+        _dcamAcc += _exactTicks;
+        if (_dcamAcc < RefTicks)
+            return false;
+        _dcamAcc -= RefTicks;
+        return true;
+    }
+
+    static void ClearDeathCam()
+    {
+        _dcamArmed = false;
+        _dcamAcc = 0;
     }
 
     static void BlendCamSeek(IMemory m, uint addr, int from, int maxStep)

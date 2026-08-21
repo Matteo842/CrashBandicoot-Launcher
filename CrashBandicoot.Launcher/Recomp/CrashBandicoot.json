@@ -59,7 +59,8 @@
     { "address": "80024628", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreGoolSeek" },
     { "address": "80025A60", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreLevelUpdate" },
     { "address": "8002A82C", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreCamFollow" },
-    { "address": "8002A82C", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostCamFollow" }
+    { "address": "8002A82C", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostCamFollow" },
+    { "address": "8002BAB4", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreCamDeath" }
   ],
   "overlays": []
 }
