@@ -55,7 +55,8 @@ namespace RecompOne.Runtime.Host;
 /// Crash and PlotObjWalls hangs. All type-11 on those lids stay 30 Hz
 /// so Wait CODE (<c>sleepframe(0)</c> shared with Active) does not Euler.
 /// Bound-before-trans can clear collider; Interpret Pre rewrites it if
-/// Crash is on the AABB so the 0.8 s Wait test can fire. RuiOC torch
+/// Crash is on the AABB so Wait and CarryCollider fire on every lid
+/// (Cortex Power discs included), not only Temple / Jaws. RuiOC torch
 /// flames stay gated even after sprite FLAG_2D.
 /// Gated SOLID_TOP skip presents freeze the Bound AABB while Crash still
 /// does grounded 34+scale. He walks on a floor that is not moving, so he
@@ -1692,9 +1693,9 @@ public static class FramePacing
 
     /// <summary>
     /// Bound-before-trans can clear collider when stamps match. Wait is
-    /// <c>if (!collider) statetime = frametime</c>; Active CarryCollider and
-    /// 0.985 need the same pointer. Rewrite after Bound on the 30 Hz
-    /// interpret only — not every present, so Active is not Euler.
+    /// <c>if (!collider) statetime = frametime</c>; Active CarryCollider
+    /// (and Temple 0.985) need the same pointer. Rewrite after Bound.
+    /// Any lid: Cortex Power discs are the same PoPlC without 70deg rot.
     /// </summary>
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
     {
@@ -1710,8 +1711,6 @@ public static class FramePacing
         {
             if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypePoPl)
                 return;
-            uint lid = m.ReadU32(Catalog.LevelIdAddr);
-            if (lid != LidTempleRuins && lid != LidJawsOfDarkness) return;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) == 0) return;
             uint crash = m.ReadU32(CrashPtrAddr);
