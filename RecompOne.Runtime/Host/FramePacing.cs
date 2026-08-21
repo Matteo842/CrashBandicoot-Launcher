@@ -51,13 +51,12 @@ namespace RecompOne.Runtime.Host;
 /// full 34-tick orbit every present and StopAtWalls froze on touch).
 /// Temple Ruins / Jaws PoPlC (type 11, the round path plats) is worse:
 /// only those lids set <c>PlatformRotSpeed = 70deg</c> and then
-/// <c>RotPlatCarryPlayer</c>. NTSC-U <c>LoopPathProg</c> is per interpret,
-/// not <c>spd()</c>. A 30 Hz gate makes Crash (real dt) fall off at 60.
-/// Euler + Pace (dt/34 of path, rot, and Crash carry) is the wall clock.
-/// The 0.985 pull is one original step then dt/34 of that delta — same
-/// as other 0x600 plats. Auto still gates: <c>TimePathProg(time())</c>.
-/// Wait is <c>if (!collider) statetime = frametime</c>. Bound may skip or
-/// clear collider before trans; rewrite it if Crash is on the AABB.
+/// <c>RotPlatCarryPlayer</c> (0.985 per trans). Euler Active at 240 embeds
+/// Crash and PlotObjWalls hangs. All type-11 on those lids stay 30 Hz
+/// so Wait CODE (<c>sleepframe(0)</c> shared with Active) does not Euler.
+/// Bound-before-trans can clear collider; Interpret Pre rewrites it if
+/// Crash is on the AABB so the 0.8 s Wait test can fire. RuiOC torch
+/// flames stay gated even after sprite FLAG_2D.
 /// Seesaw <c>PlatOrbitRot</c> is GOOL 8.8 in 0..360.0. Writing a
 /// negative leftover as uint (or wrapping 0-epsilon to 359.99) flips
 /// the gravity quadrant and the slabs rubber-band, then 360. Unwrap
@@ -145,7 +144,7 @@ public static class FramePacing
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
     const uint GoolObjectTransformAddr = 0x8001DE78u;
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
-    /// <summary>GoolObjectInterpret. Trans jal — after Bound, before physics.</summary>
+    /// <summary>GoolObjectInterpret. Trans jal after Bound, before physics.</summary>
     const uint GoolObjectInterpretAddr = 0x800201DCu;
     const uint GoolSeekAddr = 0x80024628u;
     const uint GoolObjectCreateAddr = 0x8001C6C8u;
@@ -298,8 +297,9 @@ public static class FramePacing
     const uint GoolTypeRuiO = 42u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
-    /// <summary>PoPlC <c>Platform_Path_Auto</c> — <c>TimePathProg(time())</c>.</summary>
-    const uint StatePoPlAuto = 8;
+    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait.</summary>
+    const uint StatePoPlSpawn = 5;
+    const uint StatePoPlWait = 6;
     /// <summary>0.5 m. Wait/Active carry tests <c>player.y - y &gt; -0.5m</c>.</summary>
     const int HalfMeter = 0xC800;
     /// <summary>NTSC-U <c>s</c> / <c>t</c> — only lids with PoPlC 70deg + 0.985 carry.</summary>
@@ -1642,14 +1642,14 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Bound runs before trans and may skip (anim_stamp) or clear collider.
-    /// Wait is <c>if (!collider) statetime = frametime</c> — rewrite Crash
-    /// if he is on the AABB so 0.8 s can elapse at uncapped.
+    /// Bound-before-trans can clear collider when stamps match. Wait is
+    /// <c>if (!collider) statetime = frametime</c> — rewrite after Bound.
+    /// Wait stays 30 Hz gated; this is only that interpret, not Active 0.985.
     /// </summary>
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
     {
-        if (IsActive(m))
-            TryFillTemplePlatCollider(m, c.A0);
+        if (!IsActive(m)) return true;
+        TryFillTemplePlatCollider(m, c.A0);
         return true;
     }
 
@@ -1658,17 +1658,19 @@ public static class FramePacing
         if ((obj & 0xFF000000u) != 0x80000000u) return;
         try
         {
-            if (!TryReadGoolClass(m, obj, out uint type, out _)) return;
-            if (type != GoolTypePoPl && type != GoolTypeRuiO) return;
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypePoPl)
+                return;
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
             if (lid != LidTempleRuins && lid != LidJawsOfDarkness) return;
+            uint state = m.ReadU32(obj + ObjStateOff);
+            if (state != StatePoPlWait && state != StatePoPlSpawn) return;
             uint crash = m.ReadU32(CrashPtrAddr);
             if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
             if (!CrashOnSolidTop(m, obj, crash)) return;
             m.WriteU32(obj + ObjColliderOff, crash);
             if (_platColLog >= 8) return;
             _platColLog++;
-            PaceLog($"plat col 0x{obj:X8} type={type} crash=0x{crash:X8}");
+            PaceLog($"plat col 0x{obj:X8} crash=0x{crash:X8}");
         }
         catch
         {
@@ -2020,15 +2022,18 @@ public static class FramePacing
     /// (SOLID_TOP). Everything else — lizards, turtles, boxes, unknown
     /// GOOL — one original 30 Hz step, same skip at 60 and uncapped.
     /// RuiOC is cat 0x600 with SOLID_TOP but is not Euler: gate it.
+    /// Torch flames are the same exe with <c>do playanim while 1</c>. Sprite
+    /// anims OR FLAG_2D; IsHud must not run first or they Euler at refresh
+    /// and Interpret never returns (CHECK room freeze, FPS overlay stale).
     /// </summary>
     static bool KeepRealDt(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return true;
         try
         {
-            if (IsHud(m, obj)) return true;
             TryReadGoolClass(m, obj, out uint type, out uint cat);
             if (IsGatedTempleSolid(m, obj, type)) return false;
+            if (IsHud(m, obj)) return true;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) != 0
                 && (IsPlatformGoolType(type) || cat == GoolCategoryPlatform))
@@ -2053,10 +2058,9 @@ public static class FramePacing
         type is 11 or 26 or 28 or 33 or 46 or 58;
 
     /// <summary>
-    /// RuiOC always. Temple / Jaws PoPlC Auto only (<c>TimePathProg(time())</c>).
-    /// Wait / Active are Euler + Pace: NTSC-U path is per interpret, and a
-    /// 30 Hz gate leaves Crash (real dt) twice as fast at 60. The 0.985
-    /// carry is one original step then dt/34.
+    /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
+    /// loops). Temple / Jaws every PoPlC: Wait Euler ran CODE every present
+    /// and froze; Active 0.985 embeds Crash. Other lids' PoPlC stay Euler.
     /// </summary>
     static bool IsGatedTempleSolid(IMemory m, uint obj, uint type)
     {
@@ -2065,8 +2069,7 @@ public static class FramePacing
         try
         {
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
-            if (lid != LidTempleRuins && lid != LidJawsOfDarkness) return false;
-            return m.ReadU32(obj + ObjStateOff) == StatePoPlAuto;
+            return lid == LidTempleRuins || lid == LidJawsOfDarkness;
         }
         catch
         {
@@ -2124,8 +2127,7 @@ public static class FramePacing
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
     /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
-    /// Temple / Jaws Auto too (<c>time()</c>). Wait / Active Euler so path
-    /// and carry share Crash's wall dt. Other lids' PoPlC spawn CODE writes
+    /// Temple / Jaws every PoPlC too. Other lids' PoPlC spawn CODE writes
     /// SOLID_TOP after the first Pre; drop the sticky bit so those path
     /// plats can Euler. Lizards stay sticky.
     /// </summary>
