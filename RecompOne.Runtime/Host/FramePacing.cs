@@ -305,7 +305,7 @@ public static class FramePacing
     const uint GoolTypeRuiO = 42u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
-    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait.</summary>
+    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait. Active is 7.</summary>
     const uint StatePoPlSpawn = 5;
     const uint StatePoPlWait = 6;
     /// <summary>0.5 m. Wait/Active carry tests <c>player.y - y &gt; -0.5m</c>.</summary>
@@ -479,6 +479,8 @@ public static class FramePacing
     static double _rideLeft;
     static double _rideFracX, _rideFracY, _rideFracZ;
     static int _rideLog;
+    /// <summary>Crash already FinishPacedScale this present (object-list order).</summary>
+    static bool _crashDidScale;
     static int _objClassLog;
     /// <summary>Jump may OR SOLID_TOP. Remember hoppers from Wait so they stay on the 30 Hz skip.</summary>
     static readonly HashSet<uint> _pathHoppers = new();
@@ -1167,6 +1169,7 @@ public static class FramePacing
         if (_didPreUpdateObjects) return true;
         _didPreUpdateObjects = true;
         _ticksTakenThisLoop = false;
+        _crashDidScale = false;
         NoteSaveUiWorld(m);
         if (IsActive(m))
         {
@@ -1674,8 +1677,9 @@ public static class FramePacing
 
     /// <summary>
     /// Bound-before-trans can clear collider when stamps match. Wait is
-    /// <c>if (!collider) statetime = frametime</c> — rewrite after Bound.
-    /// Wait stays 30 Hz gated; this is only that interpret, not Active 0.985.
+    /// <c>if (!collider) statetime = frametime</c>; Active CarryCollider and
+    /// 0.985 need the same pointer. Rewrite after Bound on the 30 Hz
+    /// interpret only — not every present, so Active is not Euler.
     /// </summary>
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
     {
@@ -1693,15 +1697,16 @@ public static class FramePacing
                 return;
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
             if (lid != LidTempleRuins && lid != LidJawsOfDarkness) return;
-            uint state = m.ReadU32(obj + ObjStateOff);
-            if (state != StatePoPlWait && state != StatePoPlSpawn) return;
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            if ((b & FlagSolidTop) == 0) return;
             uint crash = m.ReadU32(CrashPtrAddr);
             if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
-            if (!CrashOnSolidTop(m, obj, crash)) return;
+            if (!CrashStandingOnPlat(m, obj, crash)) return;
             m.WriteU32(obj + ObjColliderOff, crash);
             if (_platColLog >= 8) return;
             _platColLog++;
-            PaceLog($"plat col 0x{obj:X8} crash=0x{crash:X8}");
+            uint state = m.ReadU32(obj + ObjStateOff);
+            PaceLog($"plat col 0x{obj:X8} st={state} spawn={StatePoPlSpawn} wait={StatePoPlWait} crash=0x{crash:X8}");
         }
         catch
         {
@@ -1711,10 +1716,31 @@ public static class FramePacing
 
     static bool CrashOnSolidTop(IMemory m, uint obj, uint crash)
     {
+        int px = (int)m.ReadU32(obj + ObjTransOff);
         int py = (int)m.ReadU32(obj + ObjTransOff + 4);
+        int pz = (int)m.ReadU32(obj + ObjTransOff + 8);
+        return CrashOnPlatPos(m, obj, crash, px, py, pz);
+    }
+
+    /// <summary>
+    /// Logic AABB or the skip-frame visual lerp. Interpret leftover t is ~0
+    /// so they match; skip Crash can sit on the drawn pose while trans is Q.
+    /// </summary>
+    static bool CrashStandingOnPlat(IMemory m, uint obj, uint crash)
+    {
+        if (CrashOnSolidTop(m, obj, crash)) return true;
+        if (!TryGatedSolidVisual(obj, out int vx, out int vy, out int vz))
+            return false;
+        return CrashOnPlatPos(m, obj, crash, vx, vy, vz);
+    }
+
+    static bool CrashOnPlatPos(IMemory m, uint plat, uint crash, int px, int py, int pz)
+    {
         int cy = (int)m.ReadU32(crash + ObjTransOff + 4);
         if (cy - py <= -HalfMeter) return false;
-        return AabbOverlapXz(m, obj, crash);
+        int cx = (int)m.ReadU32(crash + ObjTransOff);
+        int cz = (int)m.ReadU32(crash + ObjTransOff + 8);
+        return AabbOverlapXzAt(m, plat, px, pz, crash, cx, cz);
     }
 
     static bool AabbOverlapXz(IMemory m, uint a, uint b)
@@ -1723,6 +1749,11 @@ public static class FramePacing
         int az = (int)m.ReadU32(a + ObjTransOff + 8);
         int bx = (int)m.ReadU32(b + ObjTransOff);
         int bz = (int)m.ReadU32(b + ObjTransOff + 8);
+        return AabbOverlapXzAt(m, a, ax, az, b, bx, bz);
+    }
+
+    static bool AabbOverlapXzAt(IMemory m, uint a, int ax, int az, uint b, int bx, int bz)
+    {
         int a1x = ax + (int)m.ReadU32(a + ObjBoundOff);
         int a2x = ax + (int)m.ReadU32(a + ObjBoundOff + 12);
         int a1z = az + (int)m.ReadU32(a + ObjBoundOff + 8);
@@ -2316,7 +2347,6 @@ public static class FramePacing
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
             if ((statusB & FlagInvisible) != 0) return;
             RegisterGatedBound(m, obj, statusB);
-            ApplyGatedRide(m, obj);
             uint a0 = c.A0;
             c.A0 = obj;
             Dispatcher.Call(c, m, GoolObjectTransformAddr);
@@ -2935,9 +2965,7 @@ public static class FramePacing
     {
         try
         {
-            if (IsLandLockedState(m, crash) || CrashOnWarthog(m, crash))
-                return false;
-            return !CrashAirborne(m, crash);
+            return !IsLandLockedState(m, crash) && !CrashOnWarthog(m, crash);
         }
         catch
         {
@@ -3029,33 +3057,34 @@ public static class FramePacing
                 ClearGatedRide();
                 return;
             }
-            if (dx == 0 && dy == 0 && dz == 0)
+            if (dx == 0 && dy == 0 && dz == 0
+                && !TryGatedPlatDelta(m, obj, crash, out dx, out dy, out dz))
             {
                 if (_rideObj == obj)
                     ClearGatedRide();
                 return;
             }
-            double t = _exactTicks / RefTicks;
-            int kx = (int)Math.Round(dx * t);
-            int ky = (int)Math.Round(dy * t);
-            int kz = (int)Math.Round(dz * t);
-            m.WriteU32(crash + ObjTransOff, (uint)(_rideSnapX + kx));
-            m.WriteU32(crash + ObjTransOff + 4, (uint)(_rideSnapY + ky));
-            m.WriteU32(crash + ObjTransOff + 8, (uint)(_rideSnapZ + kz));
+            // Undo the 30 Hz GOOL write. Spread it from Crash's FinishPacedScale
+            // so extra StopAtWalls cannot eat the skip remainder.
+            m.WriteU32(crash + ObjTransOff, (uint)_rideSnapX);
+            m.WriteU32(crash + ObjTransOff + 4, (uint)_rideSnapY);
+            m.WriteU32(crash + ObjTransOff + 8, (uint)_rideSnapZ);
             _rideObj = obj;
-            _rideRemX = dx - kx;
-            _rideRemY = dy - ky;
-            _rideRemZ = dz - kz;
-            _rideLeft = RefTicks - _exactTicks;
+            _rideRemX = dx;
+            _rideRemY = dy;
+            _rideRemZ = dz;
+            _rideLeft = RefTicks;
             _rideFracX = 0;
             _rideFracY = 0;
             _rideFracZ = 0;
+            if (_crashDidScale)
+                ApplyGatedRideDelta(m, _exactTicks);
             if (_rideLeft < 0.01)
                 ClearGatedRide();
             else if (_rideLog < 8)
             {
                 _rideLog++;
-                PaceLog($"ride 0x{obj:X8} d={dx},{dz} keep={kx},{kz} dt={_exactTicks:0.00}");
+                PaceLog($"ride 0x{obj:X8} d={dx},{dz} dt={_exactTicks:0.00}");
             }
         }
         catch
@@ -3064,9 +3093,44 @@ public static class FramePacing
         }
     }
 
-    static void ApplyGatedRide(IMemory m, uint obj)
+    /// <summary>
+    /// Path delta when CarryCollider did not run (collider cleared). Crash is
+    /// still at the snapshot; GatePose P→Q is the 30 Hz step just captured.
+    /// </summary>
+    static bool TryGatedPlatDelta(IMemory m, uint obj, uint crash,
+        out long dx, out long dy, out long dz)
     {
-        if (_rideObj != obj) return;
+        dx = 0;
+        dy = 0;
+        dz = 0;
+        if (!_gateRot.TryGetValue(obj, out GatePose g)) return false;
+        bool onPlat = CrashOnPlatPos(m, obj, crash, g.Px, g.Py, g.Pz);
+        if (!onPlat)
+        {
+            try
+            {
+                onPlat = m.ReadU32(obj + ObjColliderOff) == crash;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        if (!onPlat) return false;
+        dx = (long)g.Qx - g.Px;
+        dy = (long)g.Qy - g.Py;
+        dz = (long)g.Qz - g.Pz;
+        if (dx == 0 && dy == 0 && dz == 0) return false;
+        if (dx > VelTeleport || dx < -VelTeleport
+            || dy > VelTeleport || dy < -VelTeleport
+            || dz > VelTeleport || dz < -VelTeleport)
+            return false;
+        return true;
+    }
+
+    static void RideAfterCrash(IMemory m)
+    {
+        if (_rideObj == 0) return;
         if (GamePaused(m)) return;
         ApplyGatedRideDelta(m, _exactTicks);
     }
@@ -3652,6 +3716,7 @@ public static class FramePacing
         try
         {
             _objScaled = true;
+            _crashDidScale = true;
             if (IsLandLockedState(m, _obj))
             {
                 ClearCrashScaleFrac();
@@ -3661,6 +3726,7 @@ public static class FramePacing
             {
                 ClearCrashScaleFrac();
                 FinishJumpScale(m);
+                RideAfterCrash(m);
                 return;
             }
             if (_exactTicks <= 0)
@@ -3724,6 +3790,7 @@ public static class FramePacing
                     m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
             }
             RejectCrateEmbed(m);
+            RideAfterCrash(m);
 
             if (++_paceLog >= 90)
             {
