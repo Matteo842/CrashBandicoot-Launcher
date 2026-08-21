@@ -103,8 +103,11 @@ namespace RecompOne.Runtime.Host;
 /// keyframe toward the current one over 33 ms wall (not current toward
 /// next: look-at-cam reverse, and look-ahead overshoots). Crash's mesh
 /// is not lerped — blending WillC keys tears the face (eyes/brows) and
-/// a signed 8-bit take exploded the whole model. HoldAnimWait still
-/// steps the pose at 30 Hz; extra presents hold the authored frame.
+/// a signed 8-bit take exploded the whole model. PinsC (Pinstripe) is
+/// the same SVTX wrap: unsigned lerp of signed xyz flies the suit and
+/// head apart. Still gated as an enemy (one original interpret per 34
+/// wall ticks); extra presents draw the authored key. HoldAnimWait still
+/// steps Crash's pose at 30 Hz; extra presents hold the authored frame.
 /// Hold does not treat reverse as a teleport — stance look is
 /// playanim 14↔19 wait=0. HoldAnimWait is the 30 Hz step; the mesh
 /// lerps previous→current on the Gfx SVTX pointer. HoldAnimPose is
@@ -324,6 +327,8 @@ public static class FramePacing
     const uint GoolTypeDisp = 4u;
     /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
     const uint GoolTypeBox = 0x22u;
+    /// <summary>PinsC Pinstripe. Enemy cat 0x300; SVTX skip like WillC.</summary>
+    const uint GoolTypePins = 15u;
     /// <summary>RooOC Ripper Roo objects. BIG TNT hops/rocks here, not BoxsC.</summary>
     const uint GoolTypeRooO = 39u;
     /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
@@ -2554,6 +2559,18 @@ public static class FramePacing
         }
     }
 
+    static bool IsPinsC(IMemory m, uint obj)
+    {
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypePins;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     static bool TryReadGoolClass(IMemory m, uint obj, out uint type, out uint cat)
     {
         if (TryReadGoolClassFrom(m, m.ReadU32(obj + ObjGlobalOff), out type, out cat))
@@ -2998,6 +3015,7 @@ public static class FramePacing
         CpuContext c, IMemory m, uint obj, uint drawn, bool crash, bool box, int itemsHint = 0)
     {
         if (crash) return;
+        if (IsPinsC(m, obj)) return;
         if ((drawn & 0xFF000000u) != 0x80000000u) return;
         if (GamePaused(m)) return;
 
