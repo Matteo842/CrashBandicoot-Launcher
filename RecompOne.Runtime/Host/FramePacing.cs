@@ -57,6 +57,11 @@ namespace RecompOne.Runtime.Host;
 /// Bound-before-trans can clear collider; Interpret Pre rewrites it if
 /// Crash is on the AABB so the 0.8 s Wait test can fire. RuiOC torch
 /// flames stay gated even after sprite FLAG_2D.
+/// Gated SOLID_TOP skip presents freeze the Bound AABB while Crash still
+/// does grounded 34+scale. He walks on a floor that is not moving, so he
+/// jitters and slides off XZ movers. Spread the interpret's Crash delta
+/// (CarryCollider + 0.985) across leftover wall ticks — do not re-run
+/// 0.985, and do not Euler Active. Skip AABB follows the display lerp.
 /// Seesaw <c>PlatOrbitRot</c> is GOOL 8.8 in 0..360.0. Writing a
 /// negative leftover as uint (or wrapping 0-epsilon to 359.99) flips
 /// the gravity quadrant and the slabs rubber-band, then 360. Unwrap
@@ -83,7 +88,10 @@ namespace RecompOne.Runtime.Host;
 /// Trans and physics still run. Gated boxes skip Update — draw lerps
 /// last pose (yaw, trans) from→to. Vertex meshes lerp the previous SVTX
 /// keyframe toward the current one over 33 ms wall (not current toward
-/// next: look-at-cam reverse, and look-ahead overshoots).
+/// next: look-at-cam reverse, and look-ahead overshoots). Crash's mesh
+/// is not lerped — blending WillC keys tears the face (eyes/brows) and
+/// a signed 8-bit take exploded the whole model. HoldAnimWait still
+/// steps the pose at 30 Hz; extra presents hold the authored frame.
 /// Hold does not treat reverse as a teleport — stance look is
 /// playanim 14↔19 wait=0. HoldAnimWait is the 30 Hz step; the mesh
 /// lerps previous→current on the Gfx SVTX pointer. HoldAnimPose is
@@ -410,6 +418,10 @@ public static class FramePacing
     static int _ovy, _ovx, _ovz, _ospeed;
     static int _opath, _otrotX, _otrotY, _otrotZ;
     static double _hogPathFrac, _hogTrotFracX, _hogTrotFracY, _hogTrotFracZ;
+    static double _crashFracTX, _crashFracTY, _crashFracTZ;
+    static double _crashFracVX, _crashFracVY, _crashFracVZ;
+    static double _crashFracRX, _crashFracRY, _crashFracRZ;
+    static double _crashFracSp;
     static readonly int[] _hogMem = new int[HogMemCount];
     static readonly double[] _hogMemFrac = new double[HogMemCount];
     static bool _crashHog;
@@ -459,6 +471,14 @@ public static class FramePacing
     static bool _platCarry;
     static int _platLog;
     static int _platColLog;
+    /// <summary>Gated SOLID_TOP whose last interpret carried Crash.</summary>
+    static uint _rideObj;
+    static int _rideSnapX, _rideSnapY, _rideSnapZ;
+    static bool _rideDidSnap;
+    static double _rideRemX, _rideRemY, _rideRemZ;
+    static double _rideLeft;
+    static double _rideFracX, _rideFracY, _rideFracZ;
+    static int _rideLog;
     static int _objClassLog;
     /// <summary>Jump may OR SOLID_TOP. Remember hoppers from Wait so they stay on the 30 Hz skip.</summary>
     static readonly HashSet<uint> _pathHoppers = new();
@@ -655,6 +675,7 @@ public static class FramePacing
         _hogTrotFracY = 0;
         _hogTrotFracZ = 0;
         Array.Clear(_hogMemFrac);
+        ClearCrashScaleFrac();
         _solidObj = false;
         _gatedSolid = false;
         _objScaled = false;
@@ -686,6 +707,8 @@ public static class FramePacing
         _platFrac.Clear();
         _platObj = false;
         _platLog = 0;
+        ClearGatedRide();
+        _rideLog = 0;
         _objClassLog = 0;
         _stampLog = 0;
         _paceLog = 0;
@@ -1258,6 +1281,8 @@ public static class FramePacing
             {
                 _simAcc[_obj] = 0;
                 WriteAllTicks(m, RefTicks);
+                FlushGatedRide(m, _obj);
+                SnapshotGatedCarry(m, _obj);
             }
             else if (GamePaused(m))
             {
@@ -1282,6 +1307,8 @@ public static class FramePacing
                 }
                 _simAcc[_obj] = acc - RefTicks;
                 WriteAllTicks(m, RefTicks);
+                FlushGatedRide(m, _obj);
+                SnapshotGatedCarry(m, _obj);
             }
         }
         else if (!(_crashObj && IsLandLockedState(m, _obj)))
@@ -1360,6 +1387,7 @@ public static class FramePacing
         {
             CaptureBound(m, _obj);
             CaptureGateRot(m, _obj);
+            PaceGatedCarry(m, _obj);
         }
         if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
@@ -1466,12 +1494,15 @@ public static class FramePacing
         _platFrac.Clear();
         _platObj = false;
         _platLog = 0;
+        ClearGatedRide();
+        _rideLog = 0;
         _pathHoppers.Clear();
         _hogPathFrac = 0;
         _hogTrotFracX = 0;
         _hogTrotFracY = 0;
         _hogTrotFracZ = 0;
         Array.Clear(_hogMemFrac);
+        ClearCrashScaleFrac();
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
@@ -2285,6 +2316,7 @@ public static class FramePacing
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
             if ((statusB & FlagInvisible) != 0) return;
             RegisterGatedBound(m, obj, statusB);
+            ApplyGatedRide(m, obj);
             uint a0 = c.A0;
             c.A0 = obj;
             Dispatcher.Call(c, m, GoolObjectTransformAddr);
@@ -2658,6 +2690,7 @@ public static class FramePacing
     static void PatchDrawnLookAhead(
         CpuContext c, IMemory m, uint obj, uint drawn, bool crash, bool box, int itemsHint = 0)
     {
+        if (crash) return;
         if ((drawn & 0xFF000000u) != 0x80000000u) return;
         if (GamePaused(m)) return;
 
@@ -2800,7 +2833,8 @@ public static class FramePacing
         int n = (int)m.ReadU32(ObjectBoundCountAddr);
         if ((uint)n >= (uint)ObjectBoundMax) return;
         uint slot = ObjectBoundsAddr + (uint)n * 28u;
-        if (_lastBound.TryGetValue(obj, out BoundSnap snap))
+        bool fromSnap = _lastBound.TryGetValue(obj, out BoundSnap snap);
+        if (fromSnap)
         {
             m.WriteU32(slot, (uint)snap.X1);
             m.WriteU32(slot + 4, (uint)snap.Y1);
@@ -2821,6 +2855,7 @@ public static class FramePacing
             m.WriteU32(slot + 16, (uint)(ty + (int)m.ReadU32(obj + ObjBoundOff + 16)));
             m.WriteU32(slot + 20, (uint)(tz + (int)m.ReadU32(obj + ObjBoundOff + 20)));
         }
+        TranslateGatedRideBound(m, obj, slot, fromSnap);
         m.WriteU32(slot + 24, obj);
         m.WriteU32(ObjectBoundCountAddr, (uint)(n + 1));
     }
@@ -2860,6 +2895,275 @@ public static class FramePacing
         {
             // object freed / overlay swap
         }
+    }
+
+    /// <summary>
+    /// Temple / Jaws PoPlC and RuiOC slabs. Not 2D flames, not Euler lids.
+    /// </summary>
+    static bool IsGatedRideSolid(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || !IsGatedTempleSolid(m, obj, type))
+                return false;
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            if ((b & Flag2D) != 0) return false;
+            return (b & FlagSolidTop) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool TryReadCrash(IMemory m, out uint crash)
+    {
+        crash = 0;
+        try
+        {
+            crash = m.ReadU32(CrashPtrAddr);
+            return crash != 0 && (crash & 0xFF000000u) == 0x80000000u;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool CrashCanRide(IMemory m, uint crash)
+    {
+        try
+        {
+            if (IsLandLockedState(m, crash) || CrashOnWarthog(m, crash))
+                return false;
+            return !CrashAirborne(m, crash);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void ClearGatedRide()
+    {
+        _rideObj = 0;
+        _rideDidSnap = false;
+        _rideRemX = 0;
+        _rideRemY = 0;
+        _rideRemZ = 0;
+        _rideLeft = 0;
+        _rideFracX = 0;
+        _rideFracY = 0;
+        _rideFracZ = 0;
+    }
+
+    static void SnapshotGatedCarry(IMemory m, uint obj)
+    {
+        _rideDidSnap = false;
+        if (!IsGatedRideSolid(m, obj) || !TryReadCrash(m, out uint crash))
+            return;
+        try
+        {
+            _rideSnapX = (int)m.ReadU32(crash + ObjTransOff);
+            _rideSnapY = (int)m.ReadU32(crash + ObjTransOff + 4);
+            _rideSnapZ = (int)m.ReadU32(crash + ObjTransOff + 8);
+            _rideDidSnap = true;
+        }
+        catch
+        {
+            _rideDidSnap = false;
+        }
+    }
+
+    /// <summary>
+    /// Finish the last 30 Hz carry before a new interpret so CarryCollider
+    /// sees Crash at the end of the previous step, not still mid-lerp.
+    /// </summary>
+    static void FlushGatedRide(IMemory m, uint obj)
+    {
+        if (_rideObj != obj) return;
+        ApplyGatedRideDelta(m, _rideLeft);
+        _rideDidSnap = false;
+    }
+
+    /// <summary>
+    /// Trans already wrote the full 30 Hz carry (including 0.985). Keep this
+    /// present's dt/34 and save the rest for skip presents. At 30 FPS dt is
+    /// 34 so this is a no-op and CarryCollider stays original.
+    /// </summary>
+    static void PaceGatedCarry(IMemory m, uint obj)
+    {
+        if (!_rideDidSnap)
+            return;
+        _rideDidSnap = false;
+        if (!IsGatedRideSolid(m, obj) || !TryReadCrash(m, out uint crash))
+        {
+            if (_rideObj == obj)
+                ClearGatedRide();
+            return;
+        }
+        try
+        {
+            if (!CrashCanRide(m, crash))
+            {
+                ClearGatedRide();
+                return;
+            }
+            if (_exactTicks >= RefTicks - 0.01)
+            {
+                if (_rideObj == obj)
+                    ClearGatedRide();
+                return;
+            }
+            int nx = (int)m.ReadU32(crash + ObjTransOff);
+            int ny = (int)m.ReadU32(crash + ObjTransOff + 4);
+            int nz = (int)m.ReadU32(crash + ObjTransOff + 8);
+            long dx = (long)nx - _rideSnapX;
+            long dy = (long)ny - _rideSnapY;
+            long dz = (long)nz - _rideSnapZ;
+            if (dx > VelTeleport || dx < -VelTeleport
+                || dy > VelTeleport || dy < -VelTeleport
+                || dz > VelTeleport || dz < -VelTeleport)
+            {
+                ClearGatedRide();
+                return;
+            }
+            if (dx == 0 && dy == 0 && dz == 0)
+            {
+                if (_rideObj == obj)
+                    ClearGatedRide();
+                return;
+            }
+            double t = _exactTicks / RefTicks;
+            int kx = (int)Math.Round(dx * t);
+            int ky = (int)Math.Round(dy * t);
+            int kz = (int)Math.Round(dz * t);
+            m.WriteU32(crash + ObjTransOff, (uint)(_rideSnapX + kx));
+            m.WriteU32(crash + ObjTransOff + 4, (uint)(_rideSnapY + ky));
+            m.WriteU32(crash + ObjTransOff + 8, (uint)(_rideSnapZ + kz));
+            _rideObj = obj;
+            _rideRemX = dx - kx;
+            _rideRemY = dy - ky;
+            _rideRemZ = dz - kz;
+            _rideLeft = RefTicks - _exactTicks;
+            _rideFracX = 0;
+            _rideFracY = 0;
+            _rideFracZ = 0;
+            if (_rideLeft < 0.01)
+                ClearGatedRide();
+            else if (_rideLog < 8)
+            {
+                _rideLog++;
+                PaceLog($"ride 0x{obj:X8} d={dx},{dz} keep={kx},{kz} dt={_exactTicks:0.00}");
+            }
+        }
+        catch
+        {
+            ClearGatedRide();
+        }
+    }
+
+    static void ApplyGatedRide(IMemory m, uint obj)
+    {
+        if (_rideObj != obj) return;
+        if (GamePaused(m)) return;
+        ApplyGatedRideDelta(m, _exactTicks);
+    }
+
+    static void ApplyGatedRideDelta(IMemory m, double dt)
+    {
+        if (_rideObj == 0 || _rideLeft <= 0 || dt <= 0)
+            return;
+        if (!TryReadCrash(m, out uint crash) || !CrashCanRide(m, crash))
+        {
+            ClearGatedRide();
+            return;
+        }
+        try
+        {
+            double use = dt;
+            if (use > _rideLeft)
+                use = _rideLeft;
+            double sx = _rideRemX * use / _rideLeft + _rideFracX;
+            double sy = _rideRemY * use / _rideLeft + _rideFracY;
+            double sz = _rideRemZ * use / _rideLeft + _rideFracZ;
+            int ix = (int)Math.Truncate(sx);
+            int iy = (int)Math.Truncate(sy);
+            int iz = (int)Math.Truncate(sz);
+            _rideFracX = sx - ix;
+            _rideFracY = sy - iy;
+            _rideFracZ = sz - iz;
+            _rideRemX -= _rideRemX * use / _rideLeft;
+            _rideRemY -= _rideRemY * use / _rideLeft;
+            _rideRemZ -= _rideRemZ * use / _rideLeft;
+            _rideLeft -= use;
+            if (ix != 0)
+                m.WriteU32(crash + ObjTransOff, (uint)((int)m.ReadU32(crash + ObjTransOff) + ix));
+            if (iy != 0)
+                m.WriteU32(crash + ObjTransOff + 4, (uint)((int)m.ReadU32(crash + ObjTransOff + 4) + iy));
+            if (iz != 0)
+                m.WriteU32(crash + ObjTransOff + 8, (uint)((int)m.ReadU32(crash + ObjTransOff + 8) + iz));
+            if (_rideLeft < 0.01)
+                ClearGatedRide();
+        }
+        catch
+        {
+            ClearGatedRide();
+        }
+    }
+
+    static bool TryGatedSolidVisual(uint obj, out int vx, out int vy, out int vz)
+    {
+        vx = 0;
+        vy = 0;
+        vz = 0;
+        if (!_gateRot.TryGetValue(obj, out GatePose g))
+            return false;
+        if (!_simAcc.TryGetValue(obj, out double acc))
+            return false;
+        double t = acc / RefTicks;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        vx = LerpPos(g.Px, g.Qx, t);
+        vy = LerpPos(g.Py, g.Qy, t);
+        vz = LerpPos(g.Pz, g.Qz, t);
+        return true;
+    }
+
+    /// <summary>
+    /// Bound ran before trans, so the snap is at GatePose P. Shift it to the
+    /// display lerp so Crash's extra StopAtWalls sees the moving floor.
+    /// </summary>
+    static void TranslateGatedRideBound(IMemory m, uint obj, uint slot, bool fromSnap)
+    {
+        if (!IsGatedRideSolid(m, obj)) return;
+        if (!TryGatedSolidVisual(obj, out int vx, out int vy, out int vz))
+            return;
+        if (!_gateRot.TryGetValue(obj, out GatePose g)) return;
+        int bx, by, bz;
+        if (fromSnap)
+        {
+            bx = g.Px;
+            by = g.Py;
+            bz = g.Pz;
+        }
+        else
+        {
+            bx = (int)m.ReadU32(obj + ObjTransOff);
+            by = (int)m.ReadU32(obj + ObjTransOff + 4);
+            bz = (int)m.ReadU32(obj + ObjTransOff + 8);
+        }
+        int dx = vx - bx;
+        int dy = vy - by;
+        int dz = vz - bz;
+        if (dx == 0 && dy == 0 && dz == 0) return;
+        m.WriteU32(slot, (uint)((int)m.ReadU32(slot) + dx));
+        m.WriteU32(slot + 4, (uint)((int)m.ReadU32(slot + 4) + dy));
+        m.WriteU32(slot + 8, (uint)((int)m.ReadU32(slot + 8) + dz));
+        m.WriteU32(slot + 12, (uint)((int)m.ReadU32(slot + 12) + dx));
+        m.WriteU32(slot + 16, (uint)((int)m.ReadU32(slot + 16) + dy));
+        m.WriteU32(slot + 20, (uint)((int)m.ReadU32(slot + 20) + dz));
     }
 
     static void LogObjectClass(IMemory m, uint obj)
@@ -3197,6 +3501,63 @@ public static class FramePacing
     }
 
     /// <summary>
+    /// Same dt/34 as <see cref="ScaleExact"/>, but leftovers stay in
+    /// <paramref name="frac"/> instead of rounding to ±1 every present.
+    /// </summary>
+    static int KeepCrashDelta(int from, int to, int teleport, ref double frac)
+    {
+        long d = (long)to - from;
+        if (d > teleport || d < -teleport)
+        {
+            frac = 0;
+            return to;
+        }
+        if (d == 0)
+        {
+            frac = 0;
+            return from;
+        }
+        if (_exactTicks <= 0) return from;
+        double step = d * _exactTicks / RefTicks + frac;
+        int kept = (int)Math.Truncate(step);
+        frac = step - kept;
+        return from + kept;
+    }
+
+    static int KeepCrashAng(int from, int to, ref double frac)
+    {
+        int a = from & 0xFFF;
+        int b = to & 0xFFF;
+        int d = b - a;
+        if (d > 0x800) d -= 0x1000;
+        if (d < -0x800) d += 0x1000;
+        if (d == 0)
+        {
+            frac = 0;
+            return a;
+        }
+        if (_exactTicks <= 0) return a;
+        double step = d * _exactTicks / RefTicks + frac;
+        int kept = (int)Math.Truncate(step);
+        frac = step - kept;
+        return (a + kept) & 0xFFF;
+    }
+
+    static void ClearCrashScaleFrac()
+    {
+        _crashFracTX = 0;
+        _crashFracTY = 0;
+        _crashFracTZ = 0;
+        _crashFracVX = 0;
+        _crashFracVY = 0;
+        _crashFracVZ = 0;
+        _crashFracRX = 0;
+        _crashFracRY = 0;
+        _crashFracRZ = 0;
+        _crashFracSp = 0;
+    }
+
+    /// <summary>
     /// Guest yaw/pitch/roll are 12-bit. Interpolating the raw ints unwraps
     /// past 0x1000 when turning CCW through 0; the next step then sees
     /// from≡to (mod 4096) and d=0 — Crash sticks on that heading. 0x200 is
@@ -3279,9 +3640,11 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Guest just ran a full 34-tick step (StopAtWalls needs a move larger
-    /// than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot.
-    /// Leave anim_frame alone — GOOL waits on draw_stamp/34.
+/// Guest just ran a full 34-tick step (StopAtWalls needs a move larger
+/// than one 2048-unit bitmap cell). Keep dt/34 of pos/vel/rot with a
+/// remainder (Round of a 0.5-cell residual was ±1 world unit every
+/// present — ears vibrate against a wall, hog intro mesh pops).
+/// Leave anim_frame alone — GOOL waits on draw_stamp/34.
     /// </summary>
     static void FinishPacedScale(IMemory m)
     {
@@ -3290,9 +3653,13 @@ public static class FramePacing
         {
             _objScaled = true;
             if (IsLandLockedState(m, _obj))
+            {
+                ClearCrashScaleFrac();
                 return;
+            }
             if (_crashAir)
             {
+                ClearCrashScaleFrac();
                 FinishJumpScale(m);
                 return;
             }
@@ -3301,7 +3668,11 @@ public static class FramePacing
                 RestorePaced(m);
                 return;
             }
-            if (_exactTicks >= RefTicks - 0.01) return;
+            if (_exactTicks >= RefTicks - 0.01)
+            {
+                ClearCrashScaleFrac();
+                return;
+            }
 
             uint o = _obj;
             // Spawn CODE sets pathprog from z then calcpath. Lerping XZ from
@@ -3315,31 +3686,32 @@ public static class FramePacing
                 _hogTrotFracY = 0;
                 _hogTrotFracZ = 0;
                 Array.Clear(_hogMemFrac);
+                ClearCrashScaleFrac();
                 if (_haveTransY)
                     FinishHogJumpY(m);
                 RejectCrateEmbed(m);
                 return;
             }
-            m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
-            m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
+            m.WriteU32(o + ObjTransOff, (uint)KeepCrashDelta(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport, ref _crashFracTX));
+            m.WriteU32(o + ObjTransOff + 8, (uint)KeepCrashDelta(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport, ref _crashFracTZ));
 
             bool hogJumpY = _crashHog && _haveTransY;
             int yTo = (int)m.ReadU32(o + ObjTransOff + 4);
             if (!hogJumpY)
-                m.WriteU32(o + ObjTransOff + 4, (uint)ScaleExact(_oy, yTo, VelTeleport));
-            m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport));
+                m.WriteU32(o + ObjTransOff + 4, (uint)KeepCrashDelta(_oy, yTo, VelTeleport, ref _crashFracTY));
+            m.WriteU32(o + ObjVelXOff, (uint)KeepCrashDelta(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport, ref _crashFracVX));
             int vyTo = (int)m.ReadU32(o + ObjVelYOff);
             if (!hogJumpY)
-                m.WriteU32(o + ObjVelYOff, (uint)ScaleExact(_ovy, vyTo, VelTeleport));
-            m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport));
+                m.WriteU32(o + ObjVelYOff, (uint)KeepCrashDelta(_ovy, vyTo, VelTeleport, ref _crashFracVY));
+            m.WriteU32(o + ObjVelZOff, (uint)KeepCrashDelta(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport, ref _crashFracVZ));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
             if (_crashObj && speedTo <= 4 && speedTo >= -4)
                 m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
             else
-                m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, speedTo, Teleport));
-            m.WriteU32(o + ObjRotOff, (uint)ScaleAng(_orx, (int)m.ReadU32(o + ObjRotOff)));
-            m.WriteU32(o + ObjRotOff + 4, (uint)ScaleAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4)));
-            m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
+                m.WriteU32(o + ObjSpeedOff, (uint)KeepCrashDelta(_ospeed, speedTo, Teleport, ref _crashFracSp));
+            m.WriteU32(o + ObjRotOff, (uint)KeepCrashAng(_orx, (int)m.ReadU32(o + ObjRotOff), ref _crashFracRX));
+            m.WriteU32(o + ObjRotOff + 4, (uint)KeepCrashAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4), ref _crashFracRY));
+            m.WriteU32(o + ObjRotOff + 8, (uint)KeepCrashAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8), ref _crashFracRZ));
             if (_crashHog)
                 FinishWarthogScale(m);
             if (hogJumpY)
