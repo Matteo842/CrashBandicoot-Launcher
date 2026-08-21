@@ -18,6 +18,11 @@ namespace RecompOne.Runtime.Host;
 /// 34 wall ticks (still drawn). wait=1 is next Update, so every present
 /// is FALL_KILL at 30 Hz × fps. Physics on those 30 Hz steps is original
 /// 34 ticks — not 34+scale, and not a second skip (that stacked to ~4 Hz).
+/// HoldCrashStall is walk-only: Update still runs every present, so it
+/// adds back anim_counter until 34 wall ticks. Death already skips extra
+/// Updates. On the 30 Hz step _exactTicks is still the slice (~2 at 400
+/// Hz), so the add-back cancelled the only decrement and playframes never
+/// finished (Death_Spin / Warp_In freeze, world still ticking).
 /// Walk / jump / hog keep trans every display frame.
 /// Default: one original 34-tick GOOL update per 34 wall ticks (still
 /// drawn). That is the turtle skip, at 60 and at uncapped — not an
@@ -56,8 +61,13 @@ namespace RecompOne.Runtime.Host;
 /// so Wait CODE (<c>sleepframe(0)</c> shared with Active) does not Euler.
 /// Bound-before-trans can clear collider; Interpret Pre rewrites it if
 /// Crash is on the AABB so Wait and CarryCollider fire on every lid
-/// (Cortex Power discs included), not only Temple / Jaws. RuiOC torch
-/// flames stay gated even after sprite FLAG_2D.
+/// (Cortex Power discs included), not only Temple / Jaws. Drop plats
+/// (Generator Room / Cortex Power) CODE playframe 0↔1 picks spd(y)
+/// up vs down — Euler flipped the bob every present. Same 30 Hz gate
+/// as Active, not Wait/Spawn. RuiOC torch
+/// flames stay gated even after sprite FLAG_2D. World FLAG_2D (PoRoC
+/// mist) is not HUD — treating it as HUD Euler'd <c>scalex +=</c> into a
+/// giant sprite over the pit and Death_Fall never reached FadeToBlack.
 /// Gated SOLID_TOP skip presents freeze the Bound AABB while Crash still
 /// does grounded 34+scale. He walks on a floor that is not moving, so he
 /// jitters and slides off XZ movers. Spread the interpret's Crash delta
@@ -154,6 +164,7 @@ public static class FramePacing
     const uint SyncStampOff = 0x80u;
 
     const uint GoolUpdateObjectsAddr = 0x8001D5ECu;
+    const uint GoolObjectChangeStateAddr = 0x8001D698u;
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
     const uint GoolObjectTransformAddr = 0x8001DE78u;
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
@@ -167,6 +178,9 @@ public static class FramePacing
     const uint ObjBoundOff = 0x8u;
     const uint LevelUpdateAddr = 0x80025A60u;
     const uint GpuUpdateAddr = 0x80016E5Cu;
+    /// <summary>NTSC-U <c>fade_counter</c> / <c>fade_step</c>. GpuUpdate steps these every present.</summary>
+    const uint FadeCounterAddr = 0x80061A34u;
+    const uint FadeStepAddr = 0x80061A38u;
     const uint NsLookupAddr = 0x80015A98u;
     const uint NsInitAddr = 0x80015B58u;
     const uint NsPteBucketsAddr = 0x8005C530u;
@@ -201,6 +215,10 @@ public static class FramePacing
     const uint StateDeathFall = 22;
     const uint StateDeathFast = 29;
     const uint StateDeathFlat = 31;
+    /// <summary>
+    /// NTSC-U Warp_In is 40 (gooc dump lists Death_Warthog there and Warp_In
+    /// at 41). Spawn/respawn cine. Land-lock either index.
+    /// </summary>
     const uint StateDeathWarthog = 40;
     const uint StateWarpIn = 41;
     /// <summary>WillC process vars. Hog lateral is ComboBounce (spd 1440/480); index is not trusted.</summary>
@@ -296,9 +314,12 @@ public static class FramePacing
     const uint FlagSolidSides = 0x10000u;
     const uint FlagSolidTop = 0x20000u;
     const uint FlagStall = 0x10000000u;
+    const uint GoolCategoryHud = 0x200u;
     const uint GoolCategoryEnemy = 0x300u;
     /// <summary>Platform GOOL (RuiOC, RWaOC, PoPlC, …). Header category 0x600.</summary>
     const uint GoolCategoryPlatform = 0x600u;
+    /// <summary>DispC lives / fruit / Tawna pickup HUD. Not world FLAG_2D (mist, torches).</summary>
+    const uint GoolTypeDisp = 4u;
     /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
     const uint GoolTypeBox = 0x22u;
     /// <summary>RooOC Ripper Roo objects. BIG TNT hops/rocks here, not BoxsC.</summary>
@@ -314,7 +335,7 @@ public static class FramePacing
     const uint GoolTypeRuiO = 42u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
-    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto.</summary>
+    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>
     const uint StatePoPlSpawn = 5;
     const uint StatePoPlWait = 6;
     const uint StatePoPlActive = 7;
@@ -402,6 +423,11 @@ public static class FramePacing
     static double _tickFrac;
     static double _exactTicks = 34;
     static double _stallFrac;
+    static double _fadeAcc;
+    static bool _fadeHold;
+    static uint _fadeStepSaved;
+    static int _deathReenterLog;
+    static int _deathFadeLog;
     static long _simTs;
     static long _irqTs;
     static bool _clockArmed;
@@ -418,6 +444,8 @@ public static class FramePacing
     static bool _saveUiPad;
     /// <summary>GpuUpdates to keep at 30 FPS after the first real DrawOTag.</summary>
     static int _holdLocked;
+    /// <summary>Extra 30 Hz presents while Crash is still in Warp_In after the 30-frame hold.</summary>
+    static int _warpHold;
     /// <summary>Last PsyQ VSync HLE timestamp. Gap &gt; 0.5 ms starts a new GpuUpdate burst.</summary>
     static long _lastVsyncHleTs;
     static bool _armedThisGpu;
@@ -737,6 +765,7 @@ public static class FramePacing
         _levelReady = false;
         _saveUiPad = false;
         _holdLocked = 0;
+        _warpHold = 0;
         _lastVsyncHleTs = 0;
         _armedThisGpu = false;
         _gpuFinished = false;
@@ -822,6 +851,7 @@ public static class FramePacing
         if (_gpuFinished) return;
         _gpuFinished = true;
         _inGpuUpdate = false;
+        RestoreFadeStep(m);
         _vsyncsInGpu = 0;
         _didPresentThisGpu = false;
         _didPreUpdateObjects = false;
@@ -1054,7 +1084,12 @@ public static class FramePacing
         bool once = first && !_crashSpawnUsed;
         _crashSpawnUsed = first;
         if (entered)
+        {
+            _stallFrac = 0;
+            _deathFadeLog = 0;
             PaceLog($"crash death gate st={st}");
+            LogDeathFade(m, obj);
+        }
         return entered || once;
     }
 
@@ -1089,7 +1124,118 @@ public static class FramePacing
             return false;
         }
         _simAcc[_obj] = acc - RefTicks;
+        if (_crashObj)
+            LogDeathFade(m, _obj);
         return true;
+    }
+
+    /// <summary>
+    /// GpuUpdate adds fade_step every present. Death_Fall waits
+    /// <c>FADECONTROL == -1</c> on the 30 Hz Crash interpret. At 400 Hz that
+    /// hits 0 in 8 presents; if DISPLAY_UNK is set it stays 0 and never
+    /// becomes the -1 sentinel. One original step per 34 wall ticks.
+    /// Overlay still draws: fade_step=0 holds the current brightness.
+    /// </summary>
+    static void PaceFade(IMemory m)
+    {
+        RestoreFadeStep(m);
+        if (!IsActive(m)) return;
+        try
+        {
+            _fadeAcc += _exactTicks;
+            if (_fadeAcc >= RefTicks)
+            {
+                _fadeAcc -= RefTicks;
+                LogDeathFade(m, 0);
+                return;
+            }
+            int fc = (int)m.ReadU32(FadeCounterAddr);
+            // -2 → -1 is the done sentinel and does not use fade_step.
+            if (fc is -2 or -1) return;
+            _fadeStepSaved = m.ReadU32(FadeStepAddr);
+            m.WriteU32(FadeStepAddr, 0);
+            _fadeHold = true;
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void RestoreFadeStep(IMemory m)
+    {
+        if (!_fadeHold) return;
+        _fadeHold = false;
+        try { m.WriteU32(FadeStepAddr, _fadeStepSaved); }
+        catch { /* overlay swap */ }
+    }
+
+    static void LogDeathFade(IMemory m, uint obj)
+    {
+        if (_deathFadeLog >= 40) return;
+        try
+        {
+            if (obj == 0)
+            {
+                uint crash = m.ReadU32(CrashPtrAddr);
+                if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
+                if (!IsLandLockedState(m, crash)) return;
+                obj = crash;
+            }
+            _deathFadeLog++;
+            uint st = m.ReadU32(obj + ObjStateOff);
+            int fc = (int)m.ReadU32(FadeCounterAddr);
+            int fs = (int)m.ReadU32(FadeStepAddr);
+            uint sp = m.ReadU32(obj + ObjSpOff);
+            uint wait = 0;
+            if ((sp & 0xFF000000u) == 0x80000000u && sp >= 4)
+                wait = m.ReadU32(sp - 4) >> 24;
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            uint stall = m.ReadU32(obj + ObjAnimCounterOff);
+            int y = (int)m.ReadU32(obj + ObjTransOff + 4);
+            int anim = (int)m.ReadU32(obj + ObjAnimFrameOff) >> 8;
+            PaceLog($"death fade st={st} fc={fc} step={fs} wait={wait} stall={stall} b=0x{b:X} y={y} anim={anim} fe={m.ReadU32(FramesElapsedAddr)}");
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    /// <summary>NTSC-U Warp_In is 40 (gooc dump lists it at 41).</summary>
+    static bool IsWarpInState(uint state) =>
+        state == StateDeathWarthog || state == StateWarpIn;
+
+    /// <summary>
+    /// playframe waits on a stack tag, not GOOL_FLAG_STALL, so ChangeState
+    /// still accepts FALL_KILL during Death_Fall. Kill planes / StopAtZone
+    /// restart the cine from the first playframes every 30 Hz — never
+    /// FadeToBlack. Same-state death reenter is a no-op.
+    /// </summary>
+    public static bool PreChangeState(CpuContext c, IMemory m)
+    {
+        if (!IsActive(m)) return true;
+        try
+        {
+            uint obj = c.A0;
+            uint crash = m.ReadU32(CrashPtrAddr);
+            if (obj != crash || (obj & 0xFF000000u) != 0x80000000u) return true;
+            uint next = c.A1;
+            uint cur = m.ReadU32(obj + ObjStateOff);
+            if (cur != next) return true;
+            if (next < StateDeathFall || next > StateDeathFast) return true;
+            if (_deathReenterLog < 8)
+            {
+                _deathReenterLog++;
+                PaceLog($"skip death reenter st={next}");
+            }
+            c.V0 = GoolSuccess;
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     static void WriteCrashOrObjectTicks(IMemory m)
@@ -1235,6 +1381,7 @@ public static class FramePacing
         GoolSeekAddr => PreGoolSeek(c, m),
         CamFollowAddr or CamUpdateAddr => PreCamFollow(c, m),
         CamDeathAddr => PreCamDeath(c, m),
+        GoolObjectChangeStateAddr => PreChangeState(c, m),
         GoolObjectUpdateAddr => PreGoolObjectUpdate(c, m),
         GoolObjectInterpretAddr => PreGoolInterpret(c, m),
         _ => true,
@@ -1272,6 +1419,8 @@ public static class FramePacing
         {
             if (!IsLandLockedState(m, _obj))
             {
+                if (_crashGateState != uint.MaxValue)
+                    _stallFrac = 0;
                 _crashGateState = uint.MaxValue;
                 if (!IsFirstFrame(m, _obj))
                     _crashSpawnUsed = false;
@@ -1347,7 +1496,10 @@ public static class FramePacing
                 WriteAllTicks(m, RefTicks);
             }
         }
-        if (_crashObj)
+        // Land-lock already runs one Update per 34 wall ticks; that
+        // decrement is the stall clock. Adding back here froze Warp_In
+        // and Death_Spin (playframes never left STALL).
+        if (_crashObj && !IsLandLockedState(m, _obj))
             HoldCrashStall(m, c.A0);
         if (!_crashObj)
             ClampAnimFrame(m, c.A0);
@@ -1478,6 +1630,7 @@ public static class FramePacing
     public static bool PreGpuUpdate(CpuContext c, IMemory m)
     {
         BeginGpuUpdate();
+        PaceFade(m);
         if (_levelReady && !_loggedUnlockGpu)
         {
             _loggedUnlockGpu = true;
@@ -1494,8 +1647,13 @@ public static class FramePacing
         _levelReady = false;
         _saveUiPad = false;
         _holdLocked = 0;
+        _warpHold = 0;
         _loggedUnlockGpu = false;
         ResetWaterClock();
+        _fadeAcc = 0;
+        _fadeHold = false;
+        _deathReenterLog = 0;
+        _deathFadeLog = 0;
         _lastBound.Clear();
         _animAcc.Clear();
         _animHold.Clear();
@@ -1546,6 +1704,7 @@ public static class FramePacing
             if (!Catalog.Levels.AllowsUnlockedFps(id) || _saveUiPad)
             {
                 _holdLocked = 0;
+                _warpHold = 0;
                 return;
             }
 
@@ -1567,6 +1726,18 @@ public static class FramePacing
             _holdLocked--;
             PaceLog($"hold {_holdLocked}");
             if (_holdLocked > 0) return;
+
+            // Warp_In is longer than 30 presents when NS is still paging the
+            // warp anim. Unlock mid-cine land-locks it; wait=1 then never
+            // finishes and Crash stays a spawn streak. Stay at 30 Hz until
+            // Warp_In ends, or 3 more seconds.
+            uint st = m.ReadU32(crash + ObjStateOff);
+            if (IsWarpInState(st) && _warpHold < 90)
+            {
+                _warpHold++;
+                PaceLog($"warp hold {_warpHold} st={st}");
+                return;
+            }
 
             _levelReady = true;
             _clockArmed = false;
@@ -1602,6 +1773,7 @@ public static class FramePacing
         TryHookGfx(GfxTransformSvtxAddr, "func_80018964");
         TryHookGfx(GfxTransformCvtxAddr, "func_80018A40");
         TryHookNamed(GoolObjectInterpretAddr, "func_800201DC", PreGoolInterpret);
+        TryHookNamed(GoolObjectChangeStateAddr, "func_8001D698", PreChangeState);
         try
         {
             HookManager.Commit();
@@ -2150,8 +2322,9 @@ public static class FramePacing
     /// GOOL — one original 30 Hz step, same skip at 60 and uncapped.
     /// RuiOC is cat 0x600 with SOLID_TOP but is not Euler: gate it.
     /// Torch flames are the same exe with <c>do playanim while 1</c>. Sprite
-    /// anims OR FLAG_2D; IsHud must not run first or they Euler at refresh
-    /// and Interpret never returns (CHECK room freeze, FPS overlay stale).
+    /// anims OR FLAG_2D. RuiOC is gated before this. DispC HUD still Euler.
+    /// World FLAG_2D (PoRoC mist) must not count as HUD or <c>scalex +=</c>
+    /// Euler fills the pit (Death_Fall cine never reaches the fade wait).
     /// </summary>
     static bool KeepRealDt(IMemory m, uint obj)
     {
@@ -2187,9 +2360,11 @@ public static class FramePacing
     /// <summary>
     /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
     /// loops). Temple / Jaws every PoPlC (0.985). Other lids: Active and
-    /// Auto (path after Wait, and <c>time()</c>). Wait / Spawn stay Euler
-    /// so Bound can arm the 0.8 s start. First ride is Active; after death
-    /// the disc is already gated — same lerp from the first path step.
+    /// Auto (path after Wait, and <c>time()</c>). Drop plats too: CODE
+    /// playframe 0↔1 picks <c>spd(y, 2m)</c> vs <c>-0.5m</c>, so Euler
+    /// flips the bob every present (Generator Room freeze on step). Wait /
+    /// Spawn stay Euler so Bound can arm the 0.8 s start. First ride is
+    /// Active; after death the disc is already gated.
     /// </summary>
     static bool IsGatedTempleSolid(IMemory m, uint obj, uint type)
     {
@@ -2200,7 +2375,10 @@ public static class FramePacing
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
             if (lid == LidTempleRuins || lid == LidJawsOfDarkness) return true;
             uint state = m.ReadU32(obj + ObjStateOff);
-            return state == StatePoPlActive || state == StatePoPlAuto;
+            // Path Wait/Spawn Euler so Bound arms the 0.8 s start.
+            // Drop (1–4) playframe 0↔1 must not Euler: spd(y) sign follows
+            // that frame (Generator Room / Cortex Power freeze on step).
+            return state != StatePoPlSpawn && state != StatePoPlWait;
         }
         catch
         {
@@ -2258,8 +2436,8 @@ public static class FramePacing
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
     /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
-    /// Temple / Jaws every PoPlC too. Other lids' Auto (<c>time()</c>) as
-    /// well. Wait / Active on those lids stay Euler. Spawn CODE writes
+    /// Temple / Jaws every PoPlC too. Other lids' Auto / Drop / Active
+    /// as well. Wait / Spawn on those lids stay Euler. Spawn CODE writes
     /// SOLID_TOP after the first Pre; drop the sticky bit so those path
     /// plats can Euler. Lizards stay sticky.
     /// </summary>
@@ -3409,12 +3587,18 @@ public static class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// DispC (lives, wumpa, Tawna tokens, pause). Not every FLAG_2D sprite —
+    /// PoRoC mist and RuiOC flames use that bit in the world.
+    /// </summary>
     static bool IsHud(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
         try
         {
-            return (m.ReadU32(obj + ObjStatusBOff) & Flag2D) != 0;
+            if (!TryReadGoolClass(m, obj, out uint type, out uint cat))
+                return false;
+            return type == GoolTypeDisp || cat == GoolCategoryHud;
         }
         catch
         {
@@ -3425,6 +3609,7 @@ public static class FramePacing
     /// <summary>
     /// GoolObjectUpdate decrements anim_counter once per display frame.
     /// Add one back until 34 wall ticks pass so stall lasts 30 Hz, not 300 Hz.
+    /// Death / Warp_In skip extra Updates — do not call this there.
     /// </summary>
     static void HoldCrashStall(IMemory m, uint obj)
     {

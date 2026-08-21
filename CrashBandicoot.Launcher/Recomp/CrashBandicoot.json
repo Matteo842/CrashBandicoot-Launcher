@@ -49,6 +49,7 @@
     { "address": "8001A2E0", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreWorlds" },
     { "address": "8001A2E0", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostWorlds" },
     { "address": "8001D5EC", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreUpdateObjects" },
+    { "address": "8001D698", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreChangeState" },
     { "address": "8001DE78", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreTransform" },
     { "address": "80018964", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreGfxTransformMesh" },
     { "address": "80018964", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostGfxTransformMesh" },
