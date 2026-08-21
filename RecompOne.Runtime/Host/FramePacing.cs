@@ -49,13 +49,15 @@ namespace RecompOne.Runtime.Host;
 /// every platform step and keep dt/34 of whatever trans actually wrote —
 /// not <c>collider==crash</c> at Pre (that was always 0, so carry stayed a
 /// full 34-tick orbit every present and StopAtWalls froze on touch).
-/// Temple Ruins / Jaws PoPlC (type 11, the octagonal slabs) is worse:
+/// Temple Ruins / Jaws PoPlC (type 11, the round path plats) is worse:
 /// only those lids set <c>PlatformRotSpeed = 70deg</c> and then
-/// <c>RotPlatCarryPlayer</c>. The 0.985 pull is per trans call, not per
-/// tick. At 30 Hz that is original; at 400 Hz Crash is in the mesh in ~1 s
-/// and PlotObjWalls hangs. Other lids leave rot speed 0 and Euler works.
-/// Those two lids 30 Hz-gate every type-11 — Wait's 0.8 s collider test
-/// is also per interpret, so Euler never even starts the path.
+/// <c>RotPlatCarryPlayer</c>. NTSC-U <c>LoopPathProg</c> is per interpret,
+/// not <c>spd()</c>. A 30 Hz gate makes Crash (real dt) fall off at 60.
+/// Euler + Pace (dt/34 of path, rot, and Crash carry) is the wall clock.
+/// The 0.985 pull is one original step then dt/34 of that delta — same
+/// as other 0x600 plats. Auto still gates: <c>TimePathProg(time())</c>.
+/// Wait is <c>if (!collider) statetime = frametime</c>. Bound may skip or
+/// clear collider before trans; rewrite it if Crash is on the AABB.
 /// Seesaw <c>PlatOrbitRot</c> is GOOL 8.8 in 0..360.0. Writing a
 /// negative leftover as uint (or wrapping 0-epsilon to 359.99) flips
 /// the gravity quadrant and the slabs rubber-band, then 360. Unwrap
@@ -143,6 +145,8 @@ public static class FramePacing
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
     const uint GoolObjectTransformAddr = 0x8001DE78u;
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
+    /// <summary>GoolObjectInterpret. Trans jal — after Bound, before physics.</summary>
+    const uint GoolObjectInterpretAddr = 0x800201DCu;
     const uint GoolSeekAddr = 0x80024628u;
     const uint GoolObjectCreateAddr = 0x8001C6C8u;
     const uint ObjectBoundsAddr = 0x80060E08u;
@@ -292,8 +296,12 @@ public static class FramePacing
     /// Never Euler — CODE/trans is per interpret (<c>vectransf2</c>, <c>time()</c>).
     /// </summary>
     const uint GoolTypeRuiO = 42u;
-    /// <summary>PoPlC path platforms. Euler everywhere except Temple / Jaws.</summary>
+    /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
+    /// <summary>PoPlC <c>Platform_Path_Auto</c> — <c>TimePathProg(time())</c>.</summary>
+    const uint StatePoPlAuto = 8;
+    /// <summary>0.5 m. Wait/Active carry tests <c>player.y - y &gt; -0.5m</c>.</summary>
+    const int HalfMeter = 0xC800;
     /// <summary>NTSC-U <c>s</c> / <c>t</c> — only lids with PoPlC 70deg + 0.985 carry.</summary>
     const uint LidTempleRuins = 28u;
     const uint LidJawsOfDarkness = 29u;
@@ -450,6 +458,7 @@ public static class FramePacing
     static bool _platChild;
     static bool _platCarry;
     static int _platLog;
+    static int _platColLog;
     static int _objClassLog;
     /// <summary>Jump may OR SOLID_TOP. Remember hoppers from Wait so they stay on the 30 Hz skip.</summary>
     static readonly HashSet<uint> _pathHoppers = new();
@@ -1138,6 +1147,7 @@ public static class FramePacing
         NoteSaveUiWorld(m);
         if (IsActive(m))
         {
+            EnsureGfxHook();
             AdvanceWallClock(m);
             PublishWallStamps(m);
             RefillSpawnBudget();
@@ -1183,6 +1193,7 @@ public static class FramePacing
         GoolSeekAddr => PreGoolSeek(c, m),
         CamFollowAddr or CamUpdateAddr => PreCamFollow(c, m),
         GoolObjectUpdateAddr => PreGoolObjectUpdate(c, m),
+        GoolObjectInterpretAddr => PreGoolInterpret(c, m),
         _ => true,
     };
 
@@ -1295,6 +1306,8 @@ public static class FramePacing
             ClampAnimFrame(m, c.A0);
         if (_haveObj)
             ArmSpawnBurst(m, c.A0);
+        if (_haveObj && !_crashObj)
+            TryFillTemplePlatCollider(m, c.A0);
         return true;
     }
 
@@ -1532,9 +1545,11 @@ public static class FramePacing
     static void EnsureGfxHook()
     {
         if (_gfxHookTried) return;
+        if (Dispatcher.Overlays.Count == 0) return;
         _gfxHookTried = true;
         TryHookGfx(GfxTransformSvtxAddr, "func_80018964");
         TryHookGfx(GfxTransformCvtxAddr, "func_80018A40");
+        TryHookNamed(GoolObjectInterpretAddr, "func_800201DC", PreGoolInterpret);
         try
         {
             HookManager.Commit();
@@ -1584,6 +1599,114 @@ public static class FramePacing
         HookManager.AddPre(mi, PreGfxTransformMesh);
         HookManager.AddPost(mi, PostGfxTransformMesh);
         PaceLog($"hook gfx {mi.DeclaringType?.Name}.{mi.Name}");
+    }
+
+    static void TryHookNamed(uint addr, string name, Func<CpuContext, IMemory, bool> pre)
+    {
+        MethodInfo? mi = null;
+        foreach (var ov in Dispatcher.Overlays.Values)
+        {
+            if (ov.Functions.TryGetValue(addr, out var fn))
+            {
+                mi = fn.Method;
+                break;
+            }
+        }
+        if (mi == null)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[]? types;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException ex) { types = ex.Types ?? Type.EmptyTypes; }
+                catch { continue; }
+                if (types == null) continue;
+                foreach (var t in types)
+                {
+                    if (t is null) continue;
+                    var found = t.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    if (found == null) continue;
+                    mi = found;
+                    break;
+                }
+                if (mi != null) break;
+            }
+        }
+        if (mi == null)
+        {
+            PaceLog($"no fn {name} 0x{addr:X8} overlays={Dispatcher.Overlays.Count}");
+            return;
+        }
+        HookManager.AddPre(mi, pre);
+        PaceLog($"hook {mi.DeclaringType?.Name}.{mi.Name}");
+    }
+
+    /// <summary>
+    /// Bound runs before trans and may skip (anim_stamp) or clear collider.
+    /// Wait is <c>if (!collider) statetime = frametime</c> — rewrite Crash
+    /// if he is on the AABB so 0.8 s can elapse at uncapped.
+    /// </summary>
+    public static bool PreGoolInterpret(CpuContext c, IMemory m)
+    {
+        if (IsActive(m))
+            TryFillTemplePlatCollider(m, c.A0);
+        return true;
+    }
+
+    static void TryFillTemplePlatCollider(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _)) return;
+            if (type != GoolTypePoPl && type != GoolTypeRuiO) return;
+            uint lid = m.ReadU32(Catalog.LevelIdAddr);
+            if (lid != LidTempleRuins && lid != LidJawsOfDarkness) return;
+            uint crash = m.ReadU32(CrashPtrAddr);
+            if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
+            if (!CrashOnSolidTop(m, obj, crash)) return;
+            m.WriteU32(obj + ObjColliderOff, crash);
+            if (_platColLog >= 8) return;
+            _platColLog++;
+            PaceLog($"plat col 0x{obj:X8} type={type} crash=0x{crash:X8}");
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static bool CrashOnSolidTop(IMemory m, uint obj, uint crash)
+    {
+        int py = (int)m.ReadU32(obj + ObjTransOff + 4);
+        int cy = (int)m.ReadU32(crash + ObjTransOff + 4);
+        if (cy - py <= -HalfMeter) return false;
+        return AabbOverlapXz(m, obj, crash);
+    }
+
+    static bool AabbOverlapXz(IMemory m, uint a, uint b)
+    {
+        int ax = (int)m.ReadU32(a + ObjTransOff);
+        int az = (int)m.ReadU32(a + ObjTransOff + 8);
+        int bx = (int)m.ReadU32(b + ObjTransOff);
+        int bz = (int)m.ReadU32(b + ObjTransOff + 8);
+        int a1x = ax + (int)m.ReadU32(a + ObjBoundOff);
+        int a2x = ax + (int)m.ReadU32(a + ObjBoundOff + 12);
+        int a1z = az + (int)m.ReadU32(a + ObjBoundOff + 8);
+        int a2z = az + (int)m.ReadU32(a + ObjBoundOff + 20);
+        int b1x = bx + (int)m.ReadU32(b + ObjBoundOff);
+        int b2x = bx + (int)m.ReadU32(b + ObjBoundOff + 12);
+        int b1z = bz + (int)m.ReadU32(b + ObjBoundOff + 8);
+        int b2z = bz + (int)m.ReadU32(b + ObjBoundOff + 20);
+        int aminX = a1x < a2x ? a1x : a2x;
+        int amaxX = a1x < a2x ? a2x : a1x;
+        int aminZ = a1z < a2z ? a1z : a2z;
+        int amaxZ = a1z < a2z ? a2z : a1z;
+        int bminX = b1x < b2x ? b1x : b2x;
+        int bmaxX = b1x < b2x ? b2x : b1x;
+        int bminZ = b1z < b2z ? b1z : b2z;
+        int bmaxZ = b1z < b2z ? b2z : b1z;
+        return aminX <= bmaxX && amaxX >= bminX && aminZ <= bmaxZ && amaxZ >= bminZ;
     }
 
     /// <summary>
@@ -1905,7 +2028,7 @@ public static class FramePacing
         {
             if (IsHud(m, obj)) return true;
             TryReadGoolClass(m, obj, out uint type, out uint cat);
-            if (IsGatedTempleSolid(m, type)) return false;
+            if (IsGatedTempleSolid(m, obj, type)) return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) != 0
                 && (IsPlatformGoolType(type) || cat == GoolCategoryPlatform))
@@ -1930,19 +2053,20 @@ public static class FramePacing
         type is 11 or 26 or 28 or 33 or 46 or 58;
 
     /// <summary>
-    /// RuiOC always, and PoPlC only on Temple Ruins / Jaws of Darkness.
-    /// Those lids' type-11 trans uses per-interpret 0.985 carry after a
-    /// 0.8 s Wait. Other lids' PoPlC stay Euler so Crash does not fall
-    /// through between 30 Hz AABBs.
+    /// RuiOC always. Temple / Jaws PoPlC Auto only (<c>TimePathProg(time())</c>).
+    /// Wait / Active are Euler + Pace: NTSC-U path is per interpret, and a
+    /// 30 Hz gate leaves Crash (real dt) twice as fast at 60. The 0.985
+    /// carry is one original step then dt/34.
     /// </summary>
-    static bool IsGatedTempleSolid(IMemory m, uint type)
+    static bool IsGatedTempleSolid(IMemory m, uint obj, uint type)
     {
         if (type == GoolTypeRuiO) return true;
         if (type != GoolTypePoPl) return false;
         try
         {
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
-            return lid == LidTempleRuins || lid == LidJawsOfDarkness;
+            if (lid != LidTempleRuins && lid != LidJawsOfDarkness) return false;
+            return m.ReadU32(obj + ObjStateOff) == StatePoPlAuto;
         }
         catch
         {
@@ -2000,9 +2124,10 @@ public static class FramePacing
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
     /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
-    /// Temple / Jaws PoPlC too (0.985 carry per interpret). Other lids'
-    /// PoPlC spawn CODE writes SOLID_TOP after the first Pre; drop the
-    /// sticky bit so those path plats can Euler. Lizards stay sticky.
+    /// Temple / Jaws Auto too (<c>time()</c>). Wait / Active Euler so path
+    /// and carry share Crash's wall dt. Other lids' PoPlC spawn CODE writes
+    /// SOLID_TOP after the first Pre; drop the sticky bit so those path
+    /// plats can Euler. Lizards stay sticky.
     /// </summary>
     static bool IsPathHopper(IMemory m, uint obj)
     {
@@ -2015,7 +2140,7 @@ public static class FramePacing
                 _pathHoppers.Remove(obj);
                 return false;
             }
-            if (IsGatedTempleSolid(m, type))
+            if (IsGatedTempleSolid(m, obj, type))
             {
                 _pathHoppers.Add(obj);
                 return true;
@@ -2080,7 +2205,7 @@ public static class FramePacing
             if (IsPathHopper(m, obj)) return false;
             if (!TryReadGoolClass(m, obj, out uint type, out uint cat))
                 return false;
-            if (IsGatedTempleSolid(m, type)) return false;
+            if (IsGatedTempleSolid(m, obj, type)) return false;
             if (!IsPlatformGoolType(type) && cat != GoolCategoryPlatform)
                 return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
