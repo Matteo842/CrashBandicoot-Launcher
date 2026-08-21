@@ -15,9 +15,11 @@ namespace RecompOne.Runtime.Host;
 /// sees a real bitmap cell. Jump trans hang uses wall ticks; physics XZ
 /// stays 34+scale; Y is hang + wall-dt gravity.
 /// After pit death, Warp_In / Force_Fall / death cine interpret once per
-/// 34 wall ticks (still drawn). wait=1 is next Update, so every present
-/// is FALL_KILL at 30 Hz × fps. Physics on those 30 Hz steps is original
-/// 34 ticks — not 34+scale, and not a second skip (that stacked to ~4 Hz).
+/// 34 wall ticks (still drawn). That acc is not shared with gated solids:
+/// EvictDict in a busy room (Generator Room) dropped Crash so Death_Fall
+/// never left playframe wait=1 / FadeToBlack. wait=1 is next Update, so
+/// every present is FALL_KILL at 30 Hz × fps. Physics on those 30 Hz
+/// steps is original 34 ticks — not 34+scale, and not a second skip.
 /// HoldCrashStall is walk-only: Update still runs every present, so it
 /// adds back anim_counter until 34 wall ticks. Death already skips extra
 /// Updates. On the 30 Hz step _exactTicks is still the slice (~2 at 400
@@ -535,6 +537,12 @@ public static class FramePacing
     static int _waterLog;
     static uint _crashGateState = uint.MaxValue;
     static bool _crashSpawnUsed;
+    /// <summary>
+    /// Land-lock wall acc. Must not live in <c>_simAcc</c>: Generator Room
+    /// fills that dict and EvictDict drops Crash, so Death_Fall never gets
+    /// another 34-tick step (wait=1 / fade stuck, no respawn).
+    /// </summary>
+    static double _crashLandAcc;
     static bool _inCamFollow;
     static int _camOffZ, _camOffX, _camOffY, _camZoom;
     static int _camLog;
@@ -726,6 +734,7 @@ public static class FramePacing
         _crashAir = false;
         _crashGateState = uint.MaxValue;
         _crashSpawnUsed = false;
+        _crashLandAcc = 0;
         _lastBound.Clear();
         _animAcc.Clear();
         _animHold.Clear();
@@ -1099,8 +1108,6 @@ public static class FramePacing
     /// </summary>
     static bool CrashLandShouldUpdate(IMemory m, CpuContext c)
     {
-        if (_simAcc.Count > 96)
-            EvictDict(_simAcc, _obj);
         if (GamePaused(m))
         {
             _objScaled = true;
@@ -1110,20 +1117,18 @@ public static class FramePacing
         }
         if (CrashDeathInitFrame(m, _obj))
         {
-            _simAcc[_obj] = 0;
+            _crashLandAcc = 0;
             return true;
         }
-        _simAcc.TryGetValue(_obj, out double acc);
-        acc += _exactTicks;
-        if (acc < RefTicks)
+        _crashLandAcc += _exactTicks;
+        if (_crashLandAcc < RefTicks)
         {
-            _simAcc[_obj] = acc;
             _objScaled = true;
             DrawGatedObject(c, m, _obj);
             c.V0 = GoolSuccess;
             return false;
         }
-        _simAcc[_obj] = acc - RefTicks;
+        _crashLandAcc -= RefTicks;
         if (_crashObj)
             LogDeathFade(m, _obj);
         return true;
@@ -1422,6 +1427,7 @@ public static class FramePacing
                 if (_crashGateState != uint.MaxValue)
                     _stallFrac = 0;
                 _crashGateState = uint.MaxValue;
+                _crashLandAcc = 0;
                 if (!IsFirstFrame(m, _obj))
                     _crashSpawnUsed = false;
                 _simAcc.Remove(_obj);
@@ -1682,6 +1688,9 @@ public static class FramePacing
         Array.Clear(_hogMemFrac);
         ClearCrashScaleFrac();
         ClearDeathCam();
+        _crashGateState = uint.MaxValue;
+        _crashSpawnUsed = false;
+        _crashLandAcc = 0;
         PaceLog($"NSInit start lid=0x{c.A1:X}");
         return true;
     }
