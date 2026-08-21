@@ -314,9 +314,11 @@ public static class FramePacing
     const uint GoolTypeRuiO = 42u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
-    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait. Active is 7.</summary>
+    /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto.</summary>
     const uint StatePoPlSpawn = 5;
     const uint StatePoPlWait = 6;
+    const uint StatePoPlActive = 7;
+    const uint StatePoPlAuto = 8;
     /// <summary>0.5 m. Wait/Active carry tests <c>player.y - y &gt; -0.5m</c>.</summary>
     const int HalfMeter = 0xC800;
     /// <summary>NTSC-U <c>s</c> / <c>t</c> — only lids with PoPlC 70deg + 0.985 carry.</summary>
@@ -1062,8 +1064,8 @@ public static class FramePacing
     /// </summary>
     static bool CrashLandShouldUpdate(IMemory m, CpuContext c)
     {
-        if (_simAcc.Count > 128)
-            _simAcc.Clear();
+        if (_simAcc.Count > 96)
+            EvictDict(_simAcc, _obj);
         if (GamePaused(m))
         {
             _objScaled = true;
@@ -1293,8 +1295,8 @@ public static class FramePacing
             // in trans are per-call not per-tick — 34+scale cannot fix that.
             // Run one original 34-tick update per 34 wall ticks; still draw.
             // First frame always runs so box_link / stall init is not delayed.
-            if (_simAcc.Count > 128)
-                _simAcc.Clear();
+            if (_simAcc.Count > 96)
+                EvictDict(_simAcc, _obj);
             if (IsFirstFrame(m, _obj))
             {
                 _simAcc[_obj] = 0;
@@ -2184,8 +2186,10 @@ public static class FramePacing
 
     /// <summary>
     /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
-    /// loops). Temple / Jaws every PoPlC: Wait Euler ran CODE every present
-    /// and froze; Active 0.985 embeds Crash. Other lids' PoPlC stay Euler.
+    /// loops). Temple / Jaws every PoPlC (0.985). Other lids: Active and
+    /// Auto (path after Wait, and <c>time()</c>). Wait / Spawn stay Euler
+    /// so Bound can arm the 0.8 s start. First ride is Active; after death
+    /// the disc is already gated — same lerp from the first path step.
     /// </summary>
     static bool IsGatedTempleSolid(IMemory m, uint obj, uint type)
     {
@@ -2194,7 +2198,9 @@ public static class FramePacing
         try
         {
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
-            return lid == LidTempleRuins || lid == LidJawsOfDarkness;
+            if (lid == LidTempleRuins || lid == LidJawsOfDarkness) return true;
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state == StatePoPlActive || state == StatePoPlAuto;
         }
         catch
         {
@@ -2252,7 +2258,8 @@ public static class FramePacing
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
     /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
-    /// Temple / Jaws every PoPlC too. Other lids' PoPlC spawn CODE writes
+    /// Temple / Jaws every PoPlC too. Other lids' Auto (<c>time()</c>) as
+    /// well. Wait / Active on those lids stay Euler. Spawn CODE writes
     /// SOLID_TOP after the first Pre; drop the sticky bit so those path
     /// plats can Euler. Lizards stay sticky.
     /// </summary>
@@ -2409,6 +2416,8 @@ public static class FramePacing
             if ((seq & 0xFF000000u) != 0x80000000u) return;
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
             if ((statusB & FlagInvisible) != 0) return;
+            if (!_gateRot.ContainsKey(obj))
+                CaptureGateRot(m, obj);
             RegisterGatedBound(m, obj, statusB);
             uint a0 = c.A0;
             c.A0 = obj;
@@ -2422,6 +2431,24 @@ public static class FramePacing
     }
 
     /// <summary>
+    /// Drop one stale id. Clear() wiped ride poses in busy rooms — first
+    /// mount had no from→to lerp; after death the dict was smaller and worked.
+    /// </summary>
+    static void EvictDict<T>(Dictionary<uint, T> d, uint keep)
+    {
+        if (d.Count < 96) return;
+        uint drop = 0;
+        foreach (var k in d.Keys)
+        {
+            if (k == keep) continue;
+            drop = k;
+            break;
+        }
+        if (drop != 0)
+            d.Remove(drop);
+    }
+
+    /// <summary>
     /// Poses before/after the last 30 Hz GOOL step. Draw lerps from→to so
     /// skip frames and the GOOL frame share one crate, not a ghost pair.
     /// </summary>
@@ -2429,8 +2456,8 @@ public static class FramePacing
     {
         try
         {
-            if (_gateRot.Count > 128)
-                _gateRot.Clear();
+            if (_gateRot.Count > 96)
+                EvictDict(_gateRot, obj);
             _gateRot[obj] = new GatePose
             {
                 Fx = _orx,
@@ -2969,8 +2996,8 @@ public static class FramePacing
             {
                 uint slot = ObjectBoundsAddr + (uint)i * 28u;
                 if (m.ReadU32(slot + 24) != obj) continue;
-                if (_lastBound.Count > 128)
-                    _lastBound.Clear();
+                if (_lastBound.Count > 96)
+                    EvictDict(_lastBound, obj);
                 _lastBound[obj] = new BoundSnap
                 {
                     X1 = (int)m.ReadU32(slot),
@@ -2991,7 +3018,8 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Temple / Jaws PoPlC and RuiOC slabs. Not 2D flames, not Euler lids.
+    /// Temple / Jaws PoPlC, RuiOC slabs, and Auto path discs (time()).
+    /// Not 2D flames, not Euler Wait/Active on other lids.
     /// </summary>
     static bool IsGatedRideSolid(IMemory m, uint obj)
     {
@@ -4101,7 +4129,7 @@ public static class FramePacing
         try
         {
             if (_platFrac.Count > 96)
-                _platFrac.Clear();
+                EvictDict(_platFrac, o);
             WritePlatVec(m, o + ObjTransOff, PlatSlotTrans, PlatDelta.Linear);
             WritePlatVec(m, o + ObjRotOff, PlatSlotRot, PlatDelta.Ang12);
             WritePlatVec(m, o + ObjScaleOff, PlatSlotScale, PlatDelta.Linear);
