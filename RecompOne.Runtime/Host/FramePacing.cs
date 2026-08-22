@@ -46,6 +46,9 @@ namespace RecompOne.Runtime.Host;
 /// <c>vectransf2</c>, <c>playanim</c> loops, <c>time()</c> spawn. One original
 /// interpret per 34 wall ticks, still drawn — Euler every present froze
 /// the process as soon as the camera saw them (30 FPS is fine).
+/// RWaOC wall mill (Slippery Climb, Stormy Ascent, …) is the same
+/// <c>time()</c> + child <c>vectransf2</c>; SOLID_TOP used to Euler the
+/// slabs at refresh. Seesaw <c>PlatOrbitRot</c> stays Euler.
 /// Sprites in the same executable (torch flame) stay on wall ticks — <c>scalex += 0.1S</c>
 /// plus <c>200&lt;&lt;shrink</c> must not see ticks=34 every present.
 /// Children that <c>vectransf2</c> from a paced parent are not scaled
@@ -345,6 +348,14 @@ public static class FramePacing
     /// Never Euler — CODE/trans is per interpret (<c>vectransf2</c>, <c>time()</c>).
     /// </summary>
     const uint GoolTypeRuiO = 42u;
+    /// <summary>
+    /// RWaOC. Wall mill + slide/pusher gate; seesaw / sensitive / iguana Euler.
+    /// </summary>
+    const uint GoolTypeRWaO = 46u;
+    /// <summary>RWaOC seesaw array. Inclusive start of the Euler state range.</summary>
+    const uint StateRwaOrbitArray = 4;
+    /// <summary>RWaOC iguana die. Inclusive end of the Euler state range.</summary>
+    const uint StateRwaIguanaDie = 9;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
     /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>
@@ -1889,7 +1900,7 @@ public static class FramePacing
     /// <summary>
     /// Bound-before-trans can clear collider when stamps match. Wait is
     /// <c>if (!collider) statetime = frametime</c>; Active CarryCollider
-    /// (and Temple 0.985) need the same pointer. Rewrite after Bound.
+    /// (and Temple 0.985 / RWaOC wall mill) need the same pointer. Rewrite after Bound.
     /// Any lid: Cortex Power discs are the same PoPlC without 70deg rot.
     /// </summary>
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
@@ -1904,7 +1915,8 @@ public static class FramePacing
         if ((obj & 0xFF000000u) != 0x80000000u) return;
         try
         {
-            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypePoPl)
+            if (!TryReadGoolClass(m, obj, out uint type, out _)
+                || (type != GoolTypePoPl && !IsGatedRwaocMover(m, obj, type)))
                 return;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) == 0) return;
@@ -2380,7 +2392,9 @@ public static class FramePacing
 
     /// <summary>
     /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
-    /// loops). Temple / Jaws every PoPlC (0.985). Other lids: Active and
+    /// loops). RWaOC wall mill too (<c>time()</c> on the array, children
+    /// <c>vectransf2</c> + CarryCollider). Seesaws in that exe stay Euler.
+    /// Temple / Jaws every PoPlC (0.985). Other lids: Active and
     /// Auto (path after Wait, and <c>time()</c>). Drop plats too: CODE
     /// playframe 0↔1 picks <c>spd(y, 2m)</c> vs <c>-0.5m</c>, so Euler
     /// flips the bob every present (Generator Room freeze on step). Wait /
@@ -2390,6 +2404,7 @@ public static class FramePacing
     static bool IsGatedTempleSolid(IMemory m, uint obj, uint type)
     {
         if (type == GoolTypeRuiO) return true;
+        if (IsGatedRwaocMover(m, obj, type)) return true;
         if (type != GoolTypePoPl) return false;
         try
         {
@@ -2400,6 +2415,28 @@ public static class FramePacing
             // Drop (1–4) playframe 0↔1 must not Euler: spd(y) sign follows
             // that frame (Generator Room / Cortex Power freeze on step).
             return state != StatePoPlSpawn && state != StatePoPlWait;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// RWaOC wall mill (0–3) is RuiOC orbit. Slide/wiggle/pusher (10–18)
+    /// CODE <c>playframes</c> the mesh in and out of the wall — Euler
+    /// finishes that in one present. Seesaw (4–5), sensitive bob (6),
+    /// iguana (7–9) stay Euler.
+    /// </summary>
+    static bool IsGatedRwaocMover(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypeRWaO) return false;
+        try
+        {
+            uint state = m.ReadU32(obj + ObjStateOff);
+            if (state is >= StateRwaOrbitArray and <= StateRwaIguanaDie)
+                return false;
+            return true;
         }
         catch
         {
@@ -2457,7 +2494,7 @@ public static class FramePacing
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
     /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
-    /// Temple / Jaws every PoPlC too. Other lids' Auto / Drop / Active
+    /// RWaOC wall mill too. Temple / Jaws every PoPlC. Other lids' Auto / Drop / Active
     /// as well. Wait / Spawn on those lids stay Euler. Spawn CODE writes
     /// SOLID_TOP after the first Pre; drop the sticky bit so those path
     /// plats can Euler. Lizards stay sticky.
@@ -3230,7 +3267,7 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Temple / Jaws PoPlC, RuiOC slabs, and Auto path discs (time()).
+    /// Temple / Jaws PoPlC, RuiOC slabs, RWaOC wall mill, and Auto path discs (time()).
     /// Not 2D flames, not Euler Wait/Active on other lids.
     /// </summary>
     static bool IsGatedRideSolid(IMemory m, uint obj)
@@ -3273,6 +3310,40 @@ public static class FramePacing
         catch
         {
             return false;
+        }
+    }
+
+    static bool CrashLeftRide(IMemory m, uint obj, uint crash)
+    {
+        if (!CrashCanRide(m, crash)) return true;
+        if (!CrashAirborne(m, crash)) return false;
+        try
+        {
+            // Jump takeoff. A mill reverse bump can set a fall state with
+            // vy≤0 while Crash is still on the AABB — keep the carry or he
+            // flies off the old way.
+            if ((int)m.ReadU32(crash + ObjVelYOff) > 0)
+                return true;
+        }
+        catch
+        {
+            return true;
+        }
+        return !CrashStandingOnPlat(m, obj, crash);
+    }
+
+    static void DampRideReverseVel(IMemory m, uint crash, long dx, long dz)
+    {
+        if (_rideObj == 0) return;
+        if (_rideRemX * dx + _rideRemZ * dz >= 0) return;
+        try
+        {
+            m.WriteU32(crash + ObjVelXOff, 0);
+            m.WriteU32(crash + ObjVelZOff, 0);
+        }
+        catch
+        {
+            // object freed
         }
     }
 
@@ -3338,7 +3409,7 @@ public static class FramePacing
         }
         try
         {
-            if (!CrashCanRide(m, crash) || CrashAirborne(m, crash))
+            if (CrashLeftRide(m, obj, crash))
             {
                 m.WriteU32(crash + ObjTransOff, (uint)_rideSnapX);
                 m.WriteU32(crash + ObjTransOff + 4, (uint)_rideSnapY);
@@ -3374,6 +3445,7 @@ public static class FramePacing
             }
             // Undo the 30 Hz GOOL write. Skip presents add rem×(acc/34)
             // so extra StopAtWalls cannot eat a frozen-AABB remainder.
+            DampRideReverseVel(m, crash, dx, dz);
             m.WriteU32(crash + ObjTransOff, (uint)_rideSnapX);
             m.WriteU32(crash + ObjTransOff + 4, (uint)_rideSnapY);
             m.WriteU32(crash + ObjTransOff + 8, (uint)_rideSnapZ);
@@ -3444,8 +3516,7 @@ public static class FramePacing
         if (_rideObj == 0) return;
         if (GamePaused(m)) return;
         if (!TryReadCrash(m, out uint crash)
-            || !CrashCanRide(m, crash)
-            || CrashAirborne(m, crash))
+            || CrashLeftRide(m, _rideObj, crash))
         {
             ClearGatedRide();
             return;
