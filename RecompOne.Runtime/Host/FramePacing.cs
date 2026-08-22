@@ -66,7 +66,12 @@ namespace RecompOne.Runtime.Host;
 /// (Cortex Power discs included), not only Temple / Jaws. Drop plats
 /// (Generator Room / Cortex Power) CODE playframe 0↔1 picks spd(y)
 /// up vs down — Euler flipped the bob every present. Same 30 Hz gate
-/// as Active, not Wait/Spawn. RuiOC torch
+/// as Active, not Wait/Spawn. Slippery Climb path ferries are that
+/// Active/Auto gate: <c>LoopPathProg</c> / <c>TimePathProg</c> per
+/// interpret. Euler of those SETs vibrates the mesh at refresh and
+/// CarryCollider fights Crash's 34+scale (1 cm saw). Skip presents
+/// lerp the disc and add the same visual delta to Crash — wall dt,
+/// not an FPS table. RuiOC torch
 /// flames stay gated even after sprite FLAG_2D. World FLAG_2D (PoRoC
 /// mist) is not HUD — treating it as HUD Euler'd <c>scalex +=</c> into a
 /// giant sprite over the pit and Death_Fall never reached FadeToBlack.
@@ -522,8 +527,7 @@ public static class FramePacing
     static int _rideSnapX, _rideSnapY, _rideSnapZ;
     static bool _rideDidSnap;
     static double _rideRemX, _rideRemY, _rideRemZ;
-    static double _rideLeft;
-    static double _rideFracX, _rideFracY, _rideFracZ;
+    static int _rideAppX, _rideAppY, _rideAppZ;
     static int _rideLog;
     /// <summary>Crash already FinishPacedScale this present (object-list order).</summary>
     static bool _crashDidScale;
@@ -1641,6 +1645,9 @@ public static class FramePacing
     public static bool PreGpuUpdate(CpuContext c, IMemory m)
     {
         BeginGpuUpdate();
+        // After the whole object tree: skip-frame plat acc matches the
+        // drawn lerp. FinishPacedScale may have used last present's t.
+        RideAfterCrash(m);
         PaceFade(m);
         if (_levelReady && !_loggedUnlockGpu)
         {
@@ -3276,10 +3283,9 @@ public static class FramePacing
         _rideRemX = 0;
         _rideRemY = 0;
         _rideRemZ = 0;
-        _rideLeft = 0;
-        _rideFracX = 0;
-        _rideFracY = 0;
-        _rideFracZ = 0;
+        _rideAppX = 0;
+        _rideAppY = 0;
+        _rideAppZ = 0;
     }
 
     static void SnapshotGatedCarry(IMemory m, uint obj)
@@ -3303,18 +3309,21 @@ public static class FramePacing
     /// <summary>
     /// Finish the last 30 Hz carry before a new interpret so CarryCollider
     /// sees Crash at the end of the previous step, not still mid-lerp.
+    /// Must snap to Q here: <c>_simAcc</c> is already the next leftover.
     /// </summary>
     static void FlushGatedRide(IMemory m, uint obj)
     {
         if (_rideObj != obj) return;
-        ApplyGatedRideDelta(m, _rideLeft);
+        ApplyRideTarget(m, _rideRemX, _rideRemY, _rideRemZ);
         _rideDidSnap = false;
     }
 
     /// <summary>
-    /// Trans already wrote the full 30 Hz carry (including 0.985). Keep this
-    /// present's dt/34 and save the rest for skip presents. At 30 FPS dt is
-    /// 34 so this is a no-op and CarryCollider stays original.
+    /// Trans already wrote the full 30 Hz carry (including 0.985). Undo it
+    /// and add rem × (acc/34) — the same leftover clock as the drawn lerp
+    /// and skip AABB. Spreading rem over 34 ticks from this present's dt
+    /// put Crash ahead of the floor (leftover t is 0..dt, not dt). At 30
+    /// FPS dt is 34 so this is a no-op and CarryCollider stays original.
     /// </summary>
     static void PaceGatedCarry(IMemory m, uint obj)
     {
@@ -3329,8 +3338,11 @@ public static class FramePacing
         }
         try
         {
-            if (!CrashCanRide(m, crash))
+            if (!CrashCanRide(m, crash) || CrashAirborne(m, crash))
             {
+                m.WriteU32(crash + ObjTransOff, (uint)_rideSnapX);
+                m.WriteU32(crash + ObjTransOff + 4, (uint)_rideSnapY);
+                m.WriteU32(crash + ObjTransOff + 8, (uint)_rideSnapZ);
                 ClearGatedRide();
                 return;
             }
@@ -3360,8 +3372,8 @@ public static class FramePacing
                     ClearGatedRide();
                 return;
             }
-            // Undo the 30 Hz GOOL write. Spread it from Crash's FinishPacedScale
-            // so extra StopAtWalls cannot eat the skip remainder.
+            // Undo the 30 Hz GOOL write. Skip presents add rem×(acc/34)
+            // so extra StopAtWalls cannot eat a frozen-AABB remainder.
             m.WriteU32(crash + ObjTransOff, (uint)_rideSnapX);
             m.WriteU32(crash + ObjTransOff + 4, (uint)_rideSnapY);
             m.WriteU32(crash + ObjTransOff + 8, (uint)_rideSnapZ);
@@ -3369,15 +3381,11 @@ public static class FramePacing
             _rideRemX = dx;
             _rideRemY = dy;
             _rideRemZ = dz;
-            _rideLeft = RefTicks;
-            _rideFracX = 0;
-            _rideFracY = 0;
-            _rideFracZ = 0;
-            if (_crashDidScale)
-                ApplyGatedRideDelta(m, _exactTicks);
-            if (_rideLeft < 0.01)
-                ClearGatedRide();
-            else if (_rideLog < 8)
+            _rideAppX = 0;
+            _rideAppY = 0;
+            _rideAppZ = 0;
+            FollowGatedRideAcc(m);
+            if (_rideLog < 8)
             {
                 _rideLog++;
                 PaceLog($"ride 0x{obj:X8} d={dx},{dz} dt={_exactTicks:0.00}");
@@ -3424,17 +3432,44 @@ public static class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// Original CarryCollider is collider==crash (standing). Spreading that
+    /// through jump states glued Crash to the disc in the air — the tight
+    /// third ferry jump is then impossible at uncapped, and the mesh (acc
+    /// already += dt) buzzes against Crash (still on last present's t).
+    /// Apply after the whole object tree so skip acc matches the drawn lerp.
+    /// </summary>
     static void RideAfterCrash(IMemory m)
     {
         if (_rideObj == 0) return;
         if (GamePaused(m)) return;
-        ApplyGatedRideDelta(m, _exactTicks);
+        if (!TryReadCrash(m, out uint crash)
+            || !CrashCanRide(m, crash)
+            || CrashAirborne(m, crash))
+        {
+            ClearGatedRide();
+            return;
+        }
+        FollowGatedRideAcc(m);
     }
 
-    static void ApplyGatedRideDelta(IMemory m, double dt)
+    /// <summary>
+    /// Same t as <see cref="ApplyGatedDisplayPose"/> / skip AABB.
+    /// </summary>
+    static void FollowGatedRideAcc(IMemory m)
     {
-        if (_rideObj == 0 || _rideLeft <= 0 || dt <= 0)
+        if (_rideObj == 0) return;
+        if (!_simAcc.TryGetValue(_rideObj, out double acc))
             return;
+        double t = acc / RefTicks;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        ApplyRideTarget(m, _rideRemX * t, _rideRemY * t, _rideRemZ * t);
+    }
+
+    static void ApplyRideTarget(IMemory m, double tx, double ty, double tz)
+    {
+        if (_rideObj == 0) return;
         if (!TryReadCrash(m, out uint crash) || !CrashCanRide(m, crash))
         {
             ClearGatedRide();
@@ -3442,30 +3477,18 @@ public static class FramePacing
         }
         try
         {
-            double use = dt;
-            if (use > _rideLeft)
-                use = _rideLeft;
-            double sx = _rideRemX * use / _rideLeft + _rideFracX;
-            double sy = _rideRemY * use / _rideLeft + _rideFracY;
-            double sz = _rideRemZ * use / _rideLeft + _rideFracZ;
-            int ix = (int)Math.Truncate(sx);
-            int iy = (int)Math.Truncate(sy);
-            int iz = (int)Math.Truncate(sz);
-            _rideFracX = sx - ix;
-            _rideFracY = sy - iy;
-            _rideFracZ = sz - iz;
-            _rideRemX -= _rideRemX * use / _rideLeft;
-            _rideRemY -= _rideRemY * use / _rideLeft;
-            _rideRemZ -= _rideRemZ * use / _rideLeft;
-            _rideLeft -= use;
+            int ix = (int)Math.Round(tx) - _rideAppX;
+            int iy = (int)Math.Round(ty) - _rideAppY;
+            int iz = (int)Math.Round(tz) - _rideAppZ;
+            _rideAppX += ix;
+            _rideAppY += iy;
+            _rideAppZ += iz;
             if (ix != 0)
                 m.WriteU32(crash + ObjTransOff, (uint)((int)m.ReadU32(crash + ObjTransOff) + ix));
             if (iy != 0)
                 m.WriteU32(crash + ObjTransOff + 4, (uint)((int)m.ReadU32(crash + ObjTransOff + 4) + iy));
             if (iz != 0)
                 m.WriteU32(crash + ObjTransOff + 8, (uint)((int)m.ReadU32(crash + ObjTransOff + 8) + iz));
-            if (_rideLeft < 0.01)
-                ClearGatedRide();
         }
         catch
         {
