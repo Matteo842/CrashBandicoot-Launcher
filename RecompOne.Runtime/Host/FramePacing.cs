@@ -356,6 +356,7 @@ public static class FramePacing
     const uint StateRwaOrbitArray = 4;
     /// <summary>RWaOC iguana die. Inclusive end of the Euler state range.</summary>
     const uint StateRwaIguanaDie = 9;
+    const uint LidLostCity = 32u, StateRwaSlideSpawn = 16u, StateRwaSlideLast = 18u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
     /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>
@@ -2102,7 +2103,8 @@ public static class FramePacing
             return;
         }
 
-        double sec = (now - _waterTs) / (double)Stopwatch.Frequency;
+        double sec = GamePaused(m) && m.ReadU32(Catalog.LevelIdAddr) == LidLostCity
+            ? 0 : (now - _waterTs) / (double)Stopwatch.Frequency;
         _waterTs = now;
         if (sec < 0) sec = 0;
         if (sec > HitchSeconds) sec = HitchSeconds;
@@ -2434,6 +2436,7 @@ public static class FramePacing
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
+            if (IsLostCitySlide(m, obj, type)) return false;
             if (state is >= StateRwaOrbitArray and <= StateRwaIguanaDie)
                 return false;
             return true;
@@ -2443,6 +2446,10 @@ public static class FramePacing
             return false;
         }
     }
+
+    static bool IsLostCitySlide(IMemory m, uint obj, uint type) =>
+        type == GoolTypeRWaO && m.ReadU32(Catalog.LevelIdAddr) == LidLostCity
+        && m.ReadU32(obj + ObjStateOff) is >= StateRwaSlideSpawn and <= StateRwaSlideLast;
 
     static bool HasSolidPhysics(IMemory m, uint obj)
     {
@@ -4410,9 +4417,12 @@ public static class FramePacing
             uint crash = m.ReadU32(CrashPtrAddr);
             if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
             {
-                _platCarry = true;
-                ReadPlatVec(m, crash + ObjTransOff, PlatSlotCrash);
-                _platFrom[PlatSlotCrashTrot] = (int)m.ReadU32(crash + ObjTrotOff + 4);
+                _platCarry = CrashStandingOnPlat(m, obj, crash) && !CrashLeftRide(m, obj, crash);
+                if (_platCarry)
+                {
+                    ReadPlatVec(m, crash + ObjTransOff, PlatSlotCrash);
+                    _platFrom[PlatSlotCrashTrot] = (int)m.ReadU32(crash + ObjTrotOff + 4);
+                }
             }
         }
         catch
@@ -4451,7 +4461,12 @@ public static class FramePacing
                 uint crash = m.ReadU32(CrashPtrAddr);
                 if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
                 {
-                    WritePlatVec(m, crash + ObjTransOff, PlatSlotCrash, PlatDelta.Linear);
+                    if (TryReadGoolClass(m, o, out uint type, out _) && IsLostCitySlide(m, o, type))
+                        for (int i = 0; i < 3; i++)
+                            m.WriteU32(crash + ObjTransOff + (uint)i * 4u, (uint)(_platFrom[PlatSlotCrash + i]
+                                + (int)m.ReadU32(o + ObjTransOff + (uint)i * 4u) - _platFrom[PlatSlotTrans + i]));
+                    else
+                        WritePlatVec(m, crash + ObjTransOff, PlatSlotCrash, PlatDelta.Linear);
                     WritePlatWord(m, crash + ObjTrotOff + 4, PlatSlotCrashTrot, PlatDelta.Ang12);
                 }
             }
