@@ -1960,6 +1960,9 @@ public static class FramePacing
     {
         int cy = (int)m.ReadU32(crash + ObjTransOff + 4);
         if (cy - py <= -HalfMeter) return false;
+        int platTop = py + Math.Max((int)m.ReadU32(plat + ObjBoundOff + 4), (int)m.ReadU32(plat + ObjBoundOff + 16));
+        int crashBottom = cy + Math.Min((int)m.ReadU32(crash + ObjBoundOff + 4), (int)m.ReadU32(crash + ObjBoundOff + 16));
+        if (crashBottom > platTop + EmbedSlop) return false;
         int cx = (int)m.ReadU32(crash + ObjTransOff);
         int cz = (int)m.ReadU32(crash + ObjTransOff + 8);
         return AabbOverlapXzAt(m, plat, px, pz, crash, cx, cz);
