@@ -1923,7 +1923,7 @@ public static class FramePacing
             if ((b & FlagSolidTop) == 0) return;
             uint crash = m.ReadU32(CrashPtrAddr);
             if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
-            if (!CrashStandingOnPlat(m, obj, crash)) return;
+            if (!CrashStandingOnPlat(m, obj, crash) || CrashLeftRide(m, obj, crash)) return;
             m.WriteU32(obj + ObjColliderOff, crash);
             if (_platColLog >= 8) return;
             _platColLog++;
@@ -3339,13 +3339,14 @@ public static class FramePacing
         return !CrashStandingOnPlat(m, obj, crash);
     }
 
-    static void DampRideReverseVel(IMemory m, uint crash, long dx, long dz)
+    static void DampRideReverseVel(IMemory m, uint obj, uint crash, long dx, long dy, long dz)
     {
-        if (_rideObj == 0) return;
-        if (_rideRemX * dx + _rideRemZ * dz >= 0) return;
+        if (_rideObj != obj) return;
+        if (_rideRemX * dx + _rideRemY * dy + _rideRemZ * dz >= 0) return;
         try
         {
             m.WriteU32(crash + ObjVelXOff, 0);
+            m.WriteU32(crash + ObjVelYOff, 0);
             m.WriteU32(crash + ObjVelZOff, 0);
         }
         catch
@@ -3452,7 +3453,7 @@ public static class FramePacing
             }
             // Undo the 30 Hz GOOL write. Skip presents add rem×(acc/34)
             // so extra StopAtWalls cannot eat a frozen-AABB remainder.
-            DampRideReverseVel(m, crash, dx, dz);
+            DampRideReverseVel(m, obj, crash, dx, dy, dz);
             m.WriteU32(crash + ObjTransOff, (uint)_rideSnapX);
             m.WriteU32(crash + ObjTransOff + 4, (uint)_rideSnapY);
             m.WriteU32(crash + ObjTransOff + 8, (uint)_rideSnapZ);
