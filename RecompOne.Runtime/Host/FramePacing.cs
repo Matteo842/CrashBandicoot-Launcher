@@ -354,8 +354,8 @@ public static class FramePacing
     const uint GoolTypeRWaO = 46u;
     /// <summary>RWaOC seesaw array. Inclusive start of the Euler state range.</summary>
     const uint StateRwaOrbitArray = 4;
-    /// <summary>RWaOC iguana die. Inclusive end of the Euler state range.</summary>
-    const uint StateRwaIguanaDie = 9;
+    /// <summary>RWaOC sensitive bob. Inclusive end of the Euler state range.</summary>
+    const uint StateRwaSensitiveBob = 6;
     const uint LidLostCity = 32u, StateRwaPusherSpawn = 16u, StateRwaPusherLast = 18u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
@@ -2434,8 +2434,8 @@ public static class FramePacing
     /// <summary>
     /// RWaOC wall mill (0–3) is RuiOC orbit. Slide/wiggle/pusher (10–18)
     /// CODE <c>playframes</c> the mesh in and out of the wall — Euler
-    /// finishes that in one present. Seesaw (4–5), sensitive bob (6),
-    /// iguana (7–9) stay Euler.
+    /// finishes that in one present. Seesaw (4–5) and sensitive bob (6)
+    /// stay Euler; iguana (7–9) stays on the enemy wall-time gate.
     /// </summary>
     static bool IsGatedRwaocMover(IMemory m, uint obj, uint type)
     {
@@ -2444,7 +2444,7 @@ public static class FramePacing
         {
             uint state = m.ReadU32(obj + ObjStateOff);
             if (IsLostCityPusher(m, obj, type)) return false;
-            if (state is >= StateRwaOrbitArray and <= StateRwaIguanaDie)
+            if (state is >= StateRwaOrbitArray and <= StateRwaSensitiveBob)
                 return false;
             return true;
         }
