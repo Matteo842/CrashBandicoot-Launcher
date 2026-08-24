@@ -356,7 +356,7 @@ public static class FramePacing
     const uint StateRwaOrbitArray = 4;
     /// <summary>RWaOC iguana die. Inclusive end of the Euler state range.</summary>
     const uint StateRwaIguanaDie = 9;
-    const uint LidLostCity = 32u, StateRwaSlideSpawn = 16u, StateRwaSlideLast = 18u;
+    const uint LidLostCity = 32u, StateRwaPusherSpawn = 16u, StateRwaPusherLast = 18u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
     /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>
@@ -1591,7 +1591,11 @@ public static class FramePacing
         if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
         else if (_platObj && !_platFirst && !_platChild && _haveObj)
+        {
+            if (TryReadGoolClass(m, _obj, out uint type, out _) && IsLostCityPusher(m, _obj, type))
+                CaptureBound(m, _obj);
             PacePlatform(m);
+        }
         else if (!_crashObj && !_solidObj && _haveObj)
         {
             PaceSpriteAnim(m);
@@ -2439,7 +2443,7 @@ public static class FramePacing
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
-            if (IsLostCitySlide(m, obj, type)) return false;
+            if (IsLostCityPusher(m, obj, type)) return false;
             if (state is >= StateRwaOrbitArray and <= StateRwaIguanaDie)
                 return false;
             return true;
@@ -2450,9 +2454,9 @@ public static class FramePacing
         }
     }
 
-    static bool IsLostCitySlide(IMemory m, uint obj, uint type) =>
+    static bool IsLostCityPusher(IMemory m, uint obj, uint type) =>
         type == GoolTypeRWaO && m.ReadU32(Catalog.LevelIdAddr) == LidLostCity
-        && m.ReadU32(obj + ObjStateOff) is >= StateRwaSlideSpawn and <= StateRwaSlideLast;
+        && m.ReadU32(obj + ObjStateOff) is >= StateRwaPusherSpawn and <= StateRwaPusherLast;
 
     static bool HasSolidPhysics(IMemory m, uint obj)
     {
@@ -4218,14 +4222,17 @@ public static class FramePacing
         return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1 && az1 < bz2 && az2 > bz1;
     }
 
-    static bool IsBoxWall(IMemory m, uint obj)
+    static bool IsBoxOrPusherWall(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
         try
         {
-            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeBox)
+            if (!TryReadGoolClass(m, obj, out uint type, out _)
+                || (type != GoolTypeBox && !IsLostCityPusher(m, obj, type)))
                 return false;
-            return (m.ReadU32(obj + ObjStatusBOff) & FlagSolidSides) != 0;
+            uint b = m.ReadU32(obj + ObjStatusBOff);
+            return (b & FlagSolidSides) != 0
+                && (type == GoolTypeBox || (b & FlagCollidable) != 0);
         }
         catch
         {
@@ -4234,8 +4241,8 @@ public static class FramePacing
     }
 
     /// <summary>
-    /// Side-stuck in a BoxC wall. Standing on the lid is not a hit: Y is the
-    /// shallow axis. Scenery / slope AABBs are ignored (not type 0x22).
+    /// Side-stuck in a BoxC wall or Lost City pusher. Standing on the lid is
+    /// not a hit: Y is the shallow axis. Other scenery AABBs are ignored.
     /// </summary>
     static bool CrateWallHit(int x1, int y1, int z1, int x2, int y2, int z2,
         int bx1, int by1, int bz1, int bx2, int by2, int bz2)
@@ -4265,7 +4272,7 @@ public static class FramePacing
 
         foreach (var kv in _lastBound)
         {
-            if (kv.Key == _obj || !IsBoxWall(m, kv.Key)) continue;
+            if (kv.Key == _obj || !IsBoxOrPusherWall(m, kv.Key)) continue;
             BoundSnap s = kv.Value;
             if (CrateWallHit(x1, y1, z1, x2, y2, z2, s.X1, s.Y1, s.Z1, s.X2, s.Y2, s.Z2))
                 return true;
@@ -4278,7 +4285,7 @@ public static class FramePacing
         {
             uint slot = ObjectBoundsAddr + (uint)i * 28u;
             uint other = m.ReadU32(slot + 24);
-            if (other == _obj || !IsBoxWall(m, other)) continue;
+            if (other == _obj || !IsBoxOrPusherWall(m, other)) continue;
             if (CrateWallHit(x1, y1, z1, x2, y2, z2,
                     (int)m.ReadU32(slot), (int)m.ReadU32(slot + 4), (int)m.ReadU32(slot + 8),
                     (int)m.ReadU32(slot + 12), (int)m.ReadU32(slot + 16), (int)m.ReadU32(slot + 20)))
@@ -4314,7 +4321,7 @@ public static class FramePacing
 
         foreach (var kv in _lastBound)
         {
-            if (kv.Key == _obj || !IsBoxWall(m, kv.Key)) continue;
+            if (kv.Key == _obj || !IsBoxOrPusherWall(m, kv.Key)) continue;
             BoundSnap s = kv.Value;
             if (!CrateWallHit(x1, y1, z1, x2, y2, z2, s.X1, s.Y1, s.Z1, s.X2, s.Y2, s.Z2))
                 continue;
@@ -4465,7 +4472,7 @@ public static class FramePacing
                 uint crash = m.ReadU32(CrashPtrAddr);
                 if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
                 {
-                    if (TryReadGoolClass(m, o, out uint type, out _) && IsLostCitySlide(m, o, type))
+                    if (TryReadGoolClass(m, o, out uint type, out _) && IsLostCityPusher(m, o, type))
                         for (int i = 0; i < 3; i++)
                             m.WriteU32(crash + ObjTransOff + (uint)i * 4u, (uint)(_platFrom[PlatSlotCrash + i]
                                 + (int)m.ReadU32(o + ObjTransOff + (uint)i * 4u) - _platFrom[PlatSlotTrans + i]));
