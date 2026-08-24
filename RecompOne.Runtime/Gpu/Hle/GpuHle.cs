@@ -25,7 +25,7 @@ public static class GpuHle
     /// <summary>Force nearest filtering on the present texture (crisp pixels when upscaled).</summary>
     public static bool PresentNearest { get; set; }
 
-    /// <summary>Largest whole-pixel scale that still fits the window (black bars).</summary>
+    /// <summary>Prefer whole-scanline scaling without introducing extra letterboxing.</summary>
     public static bool IntegerScale { get; set; }
 
     /// <summary>

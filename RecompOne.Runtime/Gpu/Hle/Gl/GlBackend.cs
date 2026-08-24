@@ -27,7 +27,7 @@ public sealed class GlBackend : IGpuBackend
 
     uint _vao, _vbo, _presentVao, _presentVbo, _progPrim, _progPrimFast, _progPresent, _progPresent24;
     uint _presentFbo, _presentTex;
-    int _presentW, _presentH;
+    int _presentW, _presentH, _presentNativeH;
     bool _presentNearest;
     bool _gles;
     GlesFramebufferFetchPath _glesFramebufferFetchPath;
@@ -714,6 +714,7 @@ public sealed class GlBackend : IGpuBackend
         int w1x = showWide ? w + src!.Margin * 2 : w;
         int h1x = h;
         float aspect = showWide ? GpuHle.WideAspect : GpuHle.OutputAspect;
+        _presentNativeH = h1x;
 
         int presentScale = GlVram.Scale;
         int fbW = w1x * presentScale;
@@ -879,35 +880,13 @@ public sealed class GlBackend : IGpuBackend
         _gl.ClearColor(0f, 0f, 0f, 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit);
 
-        int targetWidth;
-        int targetHeight;
-        int targetX;
-        int targetY;
-        if (GpuHle.IntegerScale && _presentW > 0 && _presentH > 0)
-        {
-            int scale = (int)MathF.Floor(MathF.Min(
-                surfaceWidth / (float)_presentW, surfaceHeight / (float)_presentH));
-            if (scale >= 1)
-            {
-                targetWidth = _presentW * scale;
-                targetHeight = _presentH * scale;
-                targetX = (surfaceWidth - targetWidth) / 2;
-                targetY = (surfaceHeight - targetHeight) / 2;
-                goto blit;
-            }
-        }
+        var fitted = DisplayLayout.Fit(
+            surfaceWidth, surfaceHeight, aspect, _presentNativeH, GpuHle.IntegerScale);
+        int targetWidth = Math.Clamp((int)MathF.Round(fitted.Width), 1, surfaceWidth);
+        int targetHeight = Math.Clamp((int)MathF.Round(fitted.Height), 1, surfaceHeight);
+        int targetX = (surfaceWidth - targetWidth) / 2;
+        int targetY = (surfaceHeight - targetHeight) / 2;
 
-        targetWidth = surfaceWidth;
-        targetHeight = Math.Max(1, (int)MathF.Round(targetWidth / aspect));
-        if (targetHeight > surfaceHeight)
-        {
-            targetHeight = surfaceHeight;
-            targetWidth = Math.Max(1, (int)MathF.Round(targetHeight * aspect));
-        }
-        targetX = (surfaceWidth - targetWidth) / 2;
-        targetY = (surfaceHeight - targetHeight) / 2;
-
-        blit:
         _gl.Viewport(targetX, targetY, (uint)targetWidth, (uint)targetHeight);
 
         _gl.UseProgram(_progPresent);

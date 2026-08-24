@@ -10,11 +10,12 @@ internal sealed class OutputPanel : IPanel
     public bool IsOpen { get; set; } = true;
 
     static uint _texId;
-    static int _texW, _texH;
+    static int _texW, _texH, _nativeH;
     static float _aspect = 4f / 3f;
 
-    public static void SetTexture(uint id, int w, int h, float aspect = 0f)
-        => (_texId, _texW, _texH, _aspect) = (id, w, h, aspect > 0f ? aspect : 4f / 3f);
+    public static void SetTexture(uint id, int w, int h, float aspect = 0f, int nativeHeight = 0)
+        => (_texId, _texW, _texH, _nativeH, _aspect) =
+            (id, w, h, nativeHeight > 0 ? nativeHeight : h, aspect > 0f ? aspect : 4f / 3f);
 
     public void Draw()
     {
@@ -77,25 +78,15 @@ internal sealed class OutputPanel : IPanel
         if (_texId == 0 || _texW <= 0 || _texH <= 0) return;
 
         var avail = ImGui.GetContentRegionAvail();
-        var imageSize = FitAspect(new Vector2(_aspect, 1f), avail, ConfigManager.View.IntegerScale);
+        var imageSize = FitAspect(avail, ConfigManager.View.IntegerScale);
         var offset = (avail - imageSize) * 0.5f;
         ImGui.SetCursorPos(ImGui.GetCursorPos() + offset);
         ImGui.Image((nint)_texId, imageSize);
     }
 
-    static Vector2 FitAspect(Vector2 src, Vector2 dst, bool integerScale)
+    static Vector2 FitAspect(Vector2 dst, bool integerScale)
     {
-        if (integerScale && _texW > 0 && _texH > 0)
-        {
-            // Largest whole-pixel scale that still fits. If the FB is bigger than the
-            // window (high internal res), fall back to fractional letterbox — never
-            // force 1:1 which overflows and looks like a huge zoom.
-            int i = (int)MathF.Floor(MathF.Min(dst.X / _texW, dst.Y / _texH));
-            if (i >= 1)
-                return new Vector2(_texW * i, _texH * i);
-        }
-
-        float scale = MathF.Min(dst.X / src.X, dst.Y / src.Y);
-        return src * scale;
+        var size = Hle.DisplayLayout.Fit(dst.X, dst.Y, _aspect, _nativeH, integerScale);
+        return new Vector2(size.Width, size.Height);
     }
 }

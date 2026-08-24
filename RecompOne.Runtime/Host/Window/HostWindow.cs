@@ -621,7 +621,8 @@ internal static class HostWindow
                     gpu.DisplayWidth, displayHeight,
                     gpu.Display24Bit,
                     outW: wf.X, outH: wf.Y);
-                if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
+                if (tex != 0)
+                    OutputPanel.SetTexture(tex, tw, th, aspect, displayHeight);
                 gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                 gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
             }
