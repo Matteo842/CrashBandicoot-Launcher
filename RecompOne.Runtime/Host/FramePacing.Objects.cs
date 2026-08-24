@@ -27,6 +27,12 @@ public static partial class FramePacing
         try
         {
             TryReadGoolClass(m, obj, out uint type, out uint cat);
+            // Lost City's later LizaC uses a long authored vertex animation
+            // for its left/right jump. Keep its GOOL on the original 30 Hz
+            // wall-time gate; ClampAnimFrame exempts this exact class so the
+            // sequence can advance beyond frame 32 instead of restarting.
+            if (IsLizaEntity(m, obj, type))
+                return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
             if (IsHud(m, obj)) return true;
             uint b = m.ReadU32(obj + ObjStatusBOff);
@@ -157,6 +163,14 @@ public static partial class FramePacing
         (b & (FlagCollidable | FlagSolidGround | FlagSolidSides | FlagSolidTop))
             == (FlagCollidable | FlagSolidGround | FlagSolidSides);
 
+    static bool IsLizaEntity(IMemory m, uint obj, uint type)
+    {
+        if (type == GoolTypeLiza) return true;
+        uint entity = m.ReadU32(obj + ObjEntityOff);
+        return (entity & 0xFF000000u) == 0x80000000u
+            && m.ReadU8(entity + EntityTypeOff) == GoolTypeLiza;
+    }
+
     /// <summary>
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
@@ -177,6 +191,11 @@ public static partial class FramePacing
                 _pathHoppers.Remove(obj);
                 return false;
             }
+            if (IsLizaEntity(m, obj, type))
+            {
+                _pathHoppers.Add(obj);
+                return true;
+            }
             if (IsGatedTempleSolid(m, obj, type))
             {
                 _pathHoppers.Add(obj);
@@ -188,11 +207,6 @@ public static partial class FramePacing
             {
                 _pathHoppers.Remove(obj);
                 return false;
-            }
-            if (type == GoolTypeLiza)
-            {
-                _pathHoppers.Add(obj);
-                return true;
             }
             if (_pathHoppers.Contains(obj)) return true;
             bool hop = IsLizaWaitFlags(b);

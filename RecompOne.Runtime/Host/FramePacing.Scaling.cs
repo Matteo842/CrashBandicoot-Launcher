@@ -843,6 +843,10 @@ public static partial class FramePacing
         {
             uint type = m.ReadU32(obj);
             if (type is 0 or 2) return;
+            TryReadGoolClass(m, obj, out uint goolType, out _);
+            // LizaC's left/right jump is a valid vertex sequence longer than
+            // 32 frames. Resetting frame 33 to zero loops only its takeoff.
+            if (IsLizaEntity(m, obj, goolType)) return;
             int anim = (int)m.ReadU32(obj + ObjAnimFrameOff);
             // GoolObjectTransform: svtx/sprite[anim_frame >> 8]. Do not wrap
             // by GOOL length — that byte is not valid on every seq during load.
