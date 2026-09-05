@@ -6,27 +6,48 @@ namespace RecompOne.Runtime.Host;
 
 public static partial class FramePacing
 {
-    // The retail beach mesh ends at the authored 4:3 frustum. These additions
-    // complete its exposed scenery in world space; no rendered pixels move.
+    // Some retail scenery ends at the authored 4:3 frustum. These additions
+    // complete its exposed surfaces in world space; no rendered pixels move.
     // Repairs are deliberately asset-specific. A boundary can also be a real
     // cliff, doorway or hole, so extending every mesh boundary would be wrong.
     readonly record struct NativeWideRepair(int Polygon, NativeWideClipVertex A,
         NativeWideClipVertex B, NativeWideClipVertex C);
     readonly record struct NativeWideEdge(Vector3 A, Vector3 B);
     readonly record struct NativeWideEdgeOwner(int Polygon, int Edge, int Count);
-    static List<NativeWideRepair>? _nativeWideBeachGround;
+    static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideGroundRepairs = [];
     static List<NativeWideRepair>? _nativeWideBeachSky;
+    static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideBridgeSkies = [];
 
     static IReadOnlyList<NativeWideRepair> NativeWideSceneRepairs(IMemory m, NativeWideWorld world)
     {
-        if (m.ReadU32(Catalogs.Catalog.LevelIdAddr) != 9) return Array.Empty<NativeWideRepair>();
-        bool ground = world.PolyCount == 2664 && world.VertexCount == 3054
+        uint level = m.ReadU32(Catalogs.Catalog.LevelIdAddr);
+        if (level is 20 or 22 && world.PolyCount == 12 && world.VertexCount == 14
+            && m.ReadU32(world.Header + 0x1C) == 1)
+            return NativeWideBridgeSkyRepairs(m, world);
+        if (level is not (9 or 12 or 18 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
-        bool sky = world.PolyCount == 21 && world.VertexCount == 19
+        bool gate = level == 18 && world.PolyCount == 2620 && world.VertexCount == 3114
+            && m.ReadU32(world.Header) == 46280 && (int)m.ReadU32(world.Header + 4) == -45049
+            && (int)m.ReadU32(world.Header + 8) == -2060;
+        bool fortress = level == 26 && world.PolyCount == 2602 && world.VertexCount == 3024
+            && m.ReadU32(world.Header) == 44642 && (int)m.ReadU32(world.Header + 4) == -43983
+            && (int)m.ReadU32(world.Header + 8) == -1010;
+        bool jungle = level == 12 && world.PolyCount == 1319 && world.VertexCount == 1407
+            && m.ReadU32(world.Header) == 9900 && m.ReadU32(world.Header + 4) == 6303
+            && m.ReadU32(world.Header + 8) == 122966;
+        bool castle = level == 55 && world.PolyCount == 2615 && world.VertexCount == 2424
+            && m.ReadU32(world.Header) == 43251 && m.ReadU32(world.Header + 4) == 4192
+            && m.ReadU32(world.Header + 8) == 0;
+        bool slippery = level == 46 && world.PolyCount == 2094 && world.VertexCount == 1998
+            && m.ReadU32(world.Header) == 97600 && (int)m.ReadU32(world.Header + 4) == -48800
+            && m.ReadU32(world.Header + 8) == 0;
+        bool ground = beach || gate || fortress || jungle || castle || slippery;
+        bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!ground && !sky) return Array.Empty<NativeWideRepair>();
-        var cached = ground ? _nativeWideBeachGround : _nativeWideBeachSky;
+        var cached = ground ? _nativeWideGroundRepairs.GetValueOrDefault(level) : _nativeWideBeachSky;
         if (cached != null) return cached;
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
@@ -63,16 +84,54 @@ public static partial class FramePacing
             }
             uint p0 = m.ReadU32(world.Polygons + (uint)owner.Polygon * 8);
             int material = (int)((p0 >> 8) & 4095);
-            if (material is not (593 or 595) || Math.Min(a.Z, b.Z) < 800 || Math.Max(a.Z, b.Z) > 4000
-                || Math.Min(Math.Abs(a.X), Math.Abs(b.X)) < 2400) continue;
+            if (beach && (material is not (593 or 595) || Math.Min(a.Z, b.Z) < 800 || Math.Max(a.Z, b.Z) > 4000
+                || Math.Min(Math.Abs(a.X), Math.Abs(b.X)) < 2400)) continue;
+            if (gate && (material is not (673 or 675) || Math.Max(a.Y, b.Y) > -4800)) continue;
+            if (fortress && (material is not (645 or 647) || Math.Max(a.Y, b.Y) > -5880)) continue;
+            if (jungle && (material is not (48 or 50 or 60 or 62 or 64 or 78)
+                || Math.Min(a.Z, b.Z) < 1400 || Math.Max(a.Z, b.Z) > 3100)) continue;
+            if (castle && (material is not (20 or 24 or 28) || a.X != -3656 || b.X != -3656)) continue;
+            if (slippery && (a.X != 6400 || b.X != 6400 || a.Z != 0 || b.Z != 0
+                || material is not (265 or 317 or 257 or 261))) continue;
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
             Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
-            AddNativeWideGroundStrip(repairs, owner.Polygon, a, b, c,
+            AddNativeWideSceneryStrip(repairs, owner.Polygon, a, b, c,
                 uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3]);
         }
-        PaceLog($"native-wide beach {(ground ? "ground" : "sky")} repairs={repairs.Count}");
-        if (ground) _nativeWideBeachGround = repairs; else _nativeWideBeachSky = repairs;
+        PaceLog($"native-wide level={level} {(ground ? "ground" : "sky")} repairs={repairs.Count}");
+        if (ground) _nativeWideGroundRepairs[level] = repairs; else _nativeWideBeachSky = repairs;
+        return repairs;
+    }
+
+    static IReadOnlyList<NativeWideRepair> NativeWideBridgeSkyRepairs(IMemory m, NativeWideWorld world)
+    {
+        uint key = m.ReadU32(world.Header + 8);
+        if (_nativeWideBridgeSkies.TryGetValue(key, out var cached)) return cached;
+        var vertices = Enumerable.Range(0, world.VertexCount).Select(i => ReadNativeWideLocal(m, world, i)).ToArray();
+        var repairs = new List<NativeWideRepair>();
+        // The bridges' sky is a textured cylinder segment ending at +/-41°.
+        // Continue its arc at both end columns, keeping its radius and texture
+        // density. Reflection in the radial plane fixes every seam vertex.
+        foreach (var end in new[] { vertices.MinBy(v => v.X), vertices.MaxBy(v => v.X) })
+        {
+            var radial = Vector2.Normalize(new Vector2((float)end.X, (float)end.Z));
+            NativeWideClipVertex Reflect(NativeWideClipVertex v, short u, short texV)
+            {
+                var p = new Vector2((float)v.X, (float)v.Z);
+                var reflected = 2 * Vector2.Dot(p, radial) * radial - p;
+                return v with { X = reflected.X, Z = reflected.Y, U = u, V = texV };
+            }
+            for (int pi = 0; pi < world.PolyCount; pi++)
+            {
+                uint poly = world.Polygons + (uint)pi * 8;
+                NativeWidePolygonVertices(m.ReadU32(poly), m.ReadU32(poly + 4), out int a, out int b, out int c);
+                if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                    out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+                repairs.Add(new(pi, Reflect(vertices[a], u0, v0), Reflect(vertices[b], u1, v1), Reflect(vertices[c], u2, v2)));
+            }
+        }
+        _nativeWideBridgeSkies[key] = repairs;
         return repairs;
     }
 
@@ -88,14 +147,20 @@ public static partial class FramePacing
             (byte)a, (byte)(a >> 8), (byte)(a >> 16), 0, 0);
     }
 
-    static NativeWideClipVertex NativeWideRepairToCamera(NativeWideClipVertex v, NativeWideWorld world, short[] matrix) => v with
+    static NativeWideClipVertex NativeWideRepairToCamera(IMemory m, NativeWideClipVertex v, NativeWideWorld world, short[] matrix)
     {
-        X = Math.Floor((matrix[0] * v.X + matrix[1] * v.Y + matrix[2] * v.Z) / 4096) + world.X,
-        Y = Math.Floor((matrix[3] * v.X + matrix[4] * v.Y + matrix[5] * v.Z) / 4096) + world.Y,
-        Z = Math.Floor((matrix[6] * v.X + matrix[7] * v.Y + matrix[8] * v.Z) / 4096) + world.Z,
-    };
+        var camera = v with
+        {
+            X = Math.Floor((matrix[0] * v.X + matrix[1] * v.Y + matrix[2] * v.Z) / 4096) + world.X,
+            Y = Math.Floor((matrix[3] * v.X + matrix[4] * v.Y + matrix[5] * v.Z) / 4096) + world.Y,
+            Z = Math.Floor((matrix[6] * v.X + matrix[7] * v.Y + matrix[8] * v.Z) / 4096) + world.Z,
+        };
+        int r = (int)Math.Round(v.R), g = (int)Math.Round(v.G), b = (int)Math.Round(v.B);
+        NativeWideShadeVertex(m, world, (int)v.X, (int)v.Y, (int)v.Z, camera.Z, false, ref r, ref g, ref b);
+        return camera with { R = r, G = g, B = b };
+    }
 
-    static void AddNativeWideGroundStrip(List<NativeWideRepair> output, int polygon,
+    static void AddNativeWideSceneryStrip(List<NativeWideRepair> output, int polygon,
         NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c, Vector2 ua, Vector2 ub, Vector2 uc)
     {
         Vector3 pa = Position(a), e = Position(b) - pa, f = Position(c) - pa;
@@ -107,7 +172,10 @@ public static partial class FramePacing
         Vector3 outward = Vector3.Normalize(e * (ef / ee) - f) * 1600;
         float pe = Vector3.Dot(outward, e), pf = Vector3.Dot(outward, f);
         Vector2 uvOut = ue * ((pe * ff - pf * ef) / det) + uf * ((pf * ee - pe * ef) / det);
-        Vector2[] strip = [ua, ub, ub + uvOut, ua + uvOut];
+        // Adjacent bank segments have different slopes. Overlap their ends
+        // behind the authored mesh so their outward skirts cannot open cracks.
+        Vector2 start = ua - ue * 0.25f, end = ub + ue * 0.25f;
+        Vector2[] strip = [start, end, end + uvOut, start + uvOut];
         float uMin = Math.Min(ua.X, Math.Min(ub.X, uc.X)), uMax = Math.Max(ua.X, Math.Max(ub.X, uc.X));
         float vMin = Math.Min(ua.Y, Math.Min(ub.Y, uc.Y)), vMax = Math.Max(ua.Y, Math.Max(ub.Y, uc.Y));
         float tileW = uMax - uMin, tileH = vMax - vMin;

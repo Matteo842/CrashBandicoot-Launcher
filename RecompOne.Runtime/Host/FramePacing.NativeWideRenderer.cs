@@ -23,6 +23,7 @@ public static partial class FramePacing
     static readonly int[] _nativeWideFarColor = new int[3];
     static readonly int[] _nativeWideLighting = new int[8];
     static int _nativeWideFogFar, _nativeWideFogShift;
+    static uint? _nativeWideFogBackground;
     sealed class NativeWideWorld
     {
         public int PolyCount;
@@ -63,6 +64,7 @@ public static partial class FramePacing
     {
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
+        _nativeWideFogBackground = null;
         GpuHle.NativeWideRendererActive = false;
         if (!GpuHle.WideFovActive) return;
         uint zoneEntry = m.ReadU32(CamZoneAddr);
@@ -116,7 +118,9 @@ public static partial class FramePacing
         var backend = GpuHle.Backend;
         if (!GpuHle.WideFovActive || gpu == null || backend is not { Ready: true }) return;
         backend.SetDrawEnv(gpu.CurrentHleDrawEnv);
-        backend.BeginWideDepth(clearSides: !GpuHle.DrawEnvClearsBackground);
+        uint? clearColor = GpuHle.DrawEnvClearsBackground ? null : 0u;
+        if (GpuHle.NativeWideRendererActive && _nativeWideFogBackground is uint fogColor) clearColor = fogColor;
+        backend.BeginWideDepth(clearColor);
         float dx = gpu.DrawOffsetX - _nativeWideDrawX;
         float dy = gpu.DrawOffsetY - _nativeWideDrawY;
         foreach (var triangle in _nativeWidePending)
@@ -178,8 +182,9 @@ public static partial class FramePacing
     {
         FinishNativeWideDraw();
         _nativeWideLogCount = 0;
-        _nativeWideBeachGround = null;
+        _nativeWideGroundRepairs.Clear();
         _nativeWideBeachSky = null;
+        _nativeWideBridgeSkies.Clear();
     }
 
     /// <summary>
@@ -204,6 +209,13 @@ public static partial class FramePacing
         int worldCount = (int)m.ReadU32(zone);
         if (worldCount is <= 0 or > 8) return false;
         for (int i = 0; i < 3; i++) _nativeWideFarColor[i] = (int)Gte.ReadControl(21 + i);
+        // Beyond the bridges' finite sky cylinder, the atmosphere converges to
+        // the game's far colour. The wider view must not expose a black void
+        // underneath an otherwise opaque bank of distance fog.
+        if (_nativeWideShader == NativeWideShader.Fog && m.ReadU32(Catalog.LevelIdAddr) is 20 or 22)
+            _nativeWideFogBackground = (uint)(Math.Clamp(_nativeWideFarColor[0] >> 4, 0, 255)
+                | Math.Clamp(_nativeWideFarColor[1] >> 4, 0, 255) << 8
+                | Math.Clamp(_nativeWideFarColor[2] >> 4, 0, 255) << 16);
         if (_nativeWideShader == NativeWideShader.Ripple)
             for (int i = 0; i < 16; i++) _nativeWideRipple[i] = (int)m.ReadU32(0x1F800048u + (uint)i * 4u);
         if (_nativeWideShader is NativeWideShader.Tint or NativeWideShader.FogTint or NativeWideShader.Lamp)
@@ -227,6 +239,13 @@ public static partial class FramePacing
             uint polygons = m.ReadU32(world + 0x14u);
             uint vertices = m.ReadU32(world + 0x18u);
             uint texinfos = m.ReadU32(world + 0x1Cu);
+            // Cortex's arena includes an empty WGEO placeholder. It must not
+            // invalidate the other, populated meshes in the same zone.
+            if (NativeWideGuestPointer(header) && m.ReadU32(header + 0x0Cu) == 0)
+            {
+                worlds[wi] = new NativeWideWorld();
+                continue;
+            }
             if (!NativeWideGuestPointer(header) || !NativeWideGuestPointer(polygons)
                 || !NativeWideGuestPointer(vertices) || !NativeWideGuestPointer(texinfos))
                 return false;
@@ -313,11 +332,12 @@ public static partial class FramePacing
                 {
                     if (!TryNativeWideMaterial(m, world, repair.Polygon, drawCount, out repairFlags,
                         out _, out _, out _, out _, out _, out _, out _)) continue;
-                    repairFlags.WideMode = WidePrimitiveMode.ScenerySides;
+                    if (repairFlags.WideMode != WidePrimitiveMode.BackdropSides)
+                        repairFlags.WideMode = WidePrimitiveMode.ScenerySides;
                 }
-                repairVertices[0] = NativeWideRepairToCamera(repair.A, world, matrix);
-                repairVertices[1] = NativeWideRepairToCamera(repair.B, world, matrix);
-                repairVertices[2] = NativeWideRepairToCamera(repair.C, world, matrix);
+                repairVertices[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
+                repairVertices[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
+                repairVertices[2] = NativeWideRepairToCamera(m, repair.C, world, matrix);
                 AddNativeWideClippedTriangle(repairVertices, projection, screenX, screenY,
                     gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
                     repairFlags, true, opaque, transparent);
@@ -492,6 +512,14 @@ public static partial class FramePacing
         double ry = (((long)matrix[3] * x + (long)matrix[4] * y + (long)matrix[5] * z) >> 12) + world.Y;
         double rz = (((long)matrix[6] * x + (long)matrix[7] * y + (long)matrix[8] * z) >> 12) + world.Z;
         int r = (byte)v0, g = (byte)(v0 >> 8), b = (byte)(v0 >> 16);
+        NativeWideShadeVertex(m, world, x, y, z, rz, (v1 & 1u) != 0, ref r, ref g, ref b);
+        result = new NativeWideClipVertex(rx, ry, rz, r, g, b, u, v);
+        return true;
+    }
+
+    static void NativeWideShadeVertex(IMemory m, NativeWideWorld world, int x, int y, int z,
+        double rz, bool lightBank, ref int r, ref int g, ref int b)
+    {
         int sz = Math.Clamp((int)rz, 0, 0xFFFF);
         if (_nativeWideShader is NativeWideShader.Tint or NativeWideShader.FogTint)
         {
@@ -509,7 +537,7 @@ public static partial class FramePacing
                 + Math.Abs((int)m.ReadU32(world.Header + 8) + z - _nativeWideLighting[2]);
             int amount = Math.Clamp(distance + (int)((uint)distance >> (_nativeWideLighting[3] & 31))
                 - (int)((uint)distance >> (_nativeWideLighting[4] & 31))
-                + _nativeWideLighting[(v1 & 1u) == 0 ? 5 : 6], 0, 4095);
+                + _nativeWideLighting[lightBank ? 6 : 5], 0, 4095);
             r = NativeWideDepthCue(r, _nativeWideFarColor[0], amount);
             g = NativeWideDepthCue(g, _nativeWideFarColor[1], amount);
             b = NativeWideDepthCue(b, _nativeWideFarColor[2], amount);
@@ -523,8 +551,6 @@ public static partial class FramePacing
             g = NativeWideDepthCue(g, _nativeWideFarColor[1], amount);
             b = NativeWideDepthCue(b, _nativeWideFarColor[2], amount);
         }
-        result = new NativeWideClipVertex(rx, ry, rz, r, g, b, u, v);
-        return true;
     }
 
     // DPCS, sf=12: preserve the GTE's signed IR0 and intermediate saturation.

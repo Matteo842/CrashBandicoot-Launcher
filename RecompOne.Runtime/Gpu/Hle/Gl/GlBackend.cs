@@ -193,7 +193,7 @@ public sealed class GlBackend : IGpuBackend
 
     public void SetDrawEnv(in HleDrawEnv env) => _env = env;
 
-    public void BeginWideDepth(bool clearSides)
+    public unsafe void BeginWideDepth(uint? clearColor)
     {
         Flush();
         var rt = Classify();
@@ -204,10 +204,10 @@ public sealed class GlBackend : IGpuBackend
         // PutDrawEnv already extends the game's background clear across both
         // margins. Preserve that colour (especially the white distance fog).
         // Without a background clear, remove last frame's side geometry here.
-        if (clearSides)
+        if (clearColor is uint color)
         {
             int s = GlVram.Scale;
-            _gl.ClearColor(0f, 0f, 0f, 0f);
+            _gl.ClearColor((color & 255) / 255f, ((color >> 8) & 255) / 255f, ((color >> 16) & 255) / 255f, 0f);
             _gl.Enable(EnableCap.ScissorTest);
             _gl.Scissor(0, 0, (uint)(rt.Margin * s), (uint)rt.TexH);
             _gl.Clear(ClearBufferMask.ColorBufferBit);
@@ -217,8 +217,8 @@ public sealed class GlBackend : IGpuBackend
 
         _gl.Disable(EnableCap.ScissorTest);
         _gl.DepthMask(true);
-        _gl.ClearDepth(1.0);
-        _gl.Clear(ClearBufferMask.DepthBufferBit);
+        float depth = 1f;
+        _gl.ClearBuffer(GLEnum.Depth, 0, &depth);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 

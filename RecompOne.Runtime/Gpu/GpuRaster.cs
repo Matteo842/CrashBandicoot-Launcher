@@ -120,6 +120,7 @@ public sealed partial class Gpu
 
         if (HleOn)
         {
+            if (quad && tex && semi && !gouraud && !raw && HleWideFogQuad(v, clut)) return;
             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
             if (quad) HleTri(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
         }

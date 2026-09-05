@@ -47,9 +47,11 @@ public sealed class GlDisplayRt
         gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
             RenderbufferTarget.Renderbuffer, Depth);
         gl.ClearColor(0f, 0f, 0f, 0f);
-        gl.ClearDepth(1.0);
         gl.Disable(EnableCap.ScissorTest);
-        gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        gl.Clear(ClearBufferMask.ColorBufferBit);
+        gl.DepthMask(true);
+        float depth = 1f;
+        gl.ClearBuffer(GLEnum.Depth, 0, &depth);
     }
 
     public void Destroy(GL gl)

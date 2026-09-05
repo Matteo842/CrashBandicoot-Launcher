@@ -10,7 +10,7 @@ public interface IGpuBackend
 
     // submit
     void SetDrawEnv(in HleDrawEnv env);
-    void BeginWideDepth(bool clearSides);
+    void BeginWideDepth(uint? clearColor);
     void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f);
     void DrawRect(in HleRect r, in PrimFlags f);
     void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f);

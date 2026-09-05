@@ -71,6 +71,56 @@ public sealed partial class Gpu
             PrimOf(tex, semi, raw, clut));
     }
 
+    bool HleWideFogQuad(ReadOnlySpan<Vert> vertices, int clut)
+    {
+        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind == GpuHle.PrimitiveKind.World
+            || Runtime.Mem?.ReadU32(Catalogs.Catalog.LevelIdAddr) is not (20 or 22) || _blendMode != 1)
+            return false;
+        var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
+        int width = _drawAreaRight - _drawAreaLeft + 1;
+        // The bridges' two fog layers are grey, additive, screen-wide FT4
+        // billboards. Identify their geometry as well as the scene/material;
+        // ordinary particles, HUD icons and the world must keep their size.
+        if (a.R != a.G || a.R != a.B || a.R > 128
+            || b.X - a.X < width - 16 || d.X - c.X < width - 16
+            || Math.Abs(b.Y - a.Y) > 32 || Math.Abs(d.Y - c.Y) > 32
+            || Math.Min(c.Y - a.Y, d.Y - b.Y) < 32) return false;
+
+        var backend = GpuHle.Backend!;
+        backend.SetDrawEnv(CurEnv());
+        var flags = PrimOf(true, true, false, clut);
+        void Draw(in Vert p, in Vert q, in Vert r, WidePrimitiveMode mode)
+        {
+            bool sub = p.Subpixel && q.Subpixel && r.Subpixel;
+            flags.WideMode = mode;
+            backend.DrawTri(HV(p, sub, false), HV(q, sub, false), HV(r, sub, false), flags);
+        }
+        Draw(a, b, c, WidePrimitiveMode.CoreOnly);
+        Draw(b, c, d, WidePrimitiveMode.CoreOnly);
+        // Fog is composited at its original position in the ordering table.
+        // It must not inherit an unrelated mesh depth from the XY GTE cache.
+        Draw(a, b, c, WidePrimitiveMode.ScenerySides);
+        Draw(b, c, d, WidePrimitiveMode.ScenerySides);
+
+        bool allSub = a.Subpixel && b.Subpixel && c.Subpixel && d.Subpixel;
+        var ha = HV(a, allSub, false); var hb = HV(b, allSub, false);
+        var hc = HV(c, allSub, false); var hd = HV(d, allSub, false);
+        static HleVertex Continue(HleVertex edge, HleVertex opposite) => opposite with
+        {
+            X = edge.X * 2 - opposite.X,
+            Y = edge.Y * 2 - opposite.Y,
+        };
+        // Add another tile on each side, mirrored at the shared edge. The
+        // existing fog and its texture density remain unchanged in the centre.
+        var leftTop = Continue(ha, hb); var leftBottom = Continue(hc, hd);
+        backend.DrawTri(leftTop, ha, leftBottom, flags);
+        backend.DrawTri(ha, leftBottom, hc, flags);
+        var rightTop = Continue(hb, ha); var rightBottom = Continue(hd, hc);
+        backend.DrawTri(hb, rightTop, hd, flags);
+        backend.DrawTri(rightTop, hd, rightBottom, flags);
+        return true;
+    }
+
     void HleLine(int x0, int y0, int r0, int g0, int b0, int x1, int y1, int r1, int g1, int b1, bool semi, bool gouraud)
     {
         if (Math.Abs(x1 - x0) > 1023 || Math.Abs(y1 - y0) > 511) return;
