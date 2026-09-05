@@ -350,6 +350,7 @@ public static partial class FramePacing
 
     public static bool PreNsInit(CpuContext c, IMemory m)
     {
+        ResetNativeWideRenderer();
         _inNsInit = true;
         _levelReady = false;
         _saveUiPad = false;

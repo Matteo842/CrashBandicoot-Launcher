@@ -92,6 +92,18 @@ public sealed partial class Gpu
                 else if (i == 1) SetTexpageFromWord((uvw >> 16) & 0xFFFF);
             }
         }
+
+        // The authored world list has already passed Crash's face selection.
+        // Learn its actual winding so the independent native-wide pass can reject
+        // backsides without relying on a guessed PSX/GL sign convention.
+        Hle.GpuHle.ObserveWideWorldTriangle(
+            (long)(v[1].X - v[0].X) * (v[2].Y - v[0].Y)
+            - (long)(v[1].Y - v[0].Y) * (v[2].X - v[0].X));
+        if (quad)
+            Hle.GpuHle.ObserveWideWorldTriangle(
+                (long)(v[2].X - v[1].X) * (v[3].Y - v[1].Y)
+                - (long)(v[2].Y - v[1].Y) * (v[3].X - v[1].X));
+
         //dispatch the render event for prims
         if (Event.HasAnyListeners<RenderPrimEvent>())
         {

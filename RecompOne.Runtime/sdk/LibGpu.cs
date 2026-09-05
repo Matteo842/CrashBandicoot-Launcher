@@ -16,15 +16,28 @@ public static class LibGpu
         if (gpu == null) return;
 
         uint addr = c.A0 & 0x1FFFFCu;
-        for (int guard = 0; guard < 0x100000; guard++)
+        try
         {
-            uint header = m.ReadU32(addr);
-            uint count = header >> 24;
-            for (uint i = 0; i < count; i++)
-                gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
-            uint next = header & 0xFFFFFFu;
-            if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
-            addr = next & 0x1FFFFCu;
+            Host.FramePacing.DrawNativeWideWorld();
+            for (int guard = 0; guard < 0x100000; guard++)
+            {
+                uint header = m.ReadU32(addr);
+                uint count = header >> 24;
+                GpuHle.CurrentPrimitiveKind = Host.FramePacing.IsNativeWideWorldPrimitive(addr)
+                    ? GpuHle.PrimitiveKind.World
+                    : GpuHle.PrimitiveKind.Default;
+                for (uint i = 0; i < count; i++)
+                    gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
+                uint next = header & 0xFFFFFFu;
+                if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
+                addr = next & 0x1FFFFCu;
+            }
+        }
+        finally
+        {
+            GpuHle.FinishWideWorldWinding();
+            GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.Default;
+            Host.FramePacing.FinishNativeWideDraw();
         }
 
         // Next RTP batch belongs to a new frame (or pass) — allow cache regen.
@@ -52,6 +65,7 @@ public static class LibGpu
         byte dtd = m.ReadU8(env + 0x16);
         byte dfe = m.ReadU8(env + 0x17);
         byte isbg = m.ReadU8(env + 0x18);
+        GpuHle.DrawEnvClearsBackground = isbg != 0;
         byte r0 = m.ReadU8(env + 0x19), g0 = m.ReadU8(env + 0x1A), b0 = m.ReadU8(env + 0x1B);
 
         gpu.WriteGp0(GetCs(clipX, clipY));

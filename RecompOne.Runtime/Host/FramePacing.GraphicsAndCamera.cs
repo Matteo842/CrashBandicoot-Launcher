@@ -146,10 +146,15 @@ public static partial class FramePacing
     public static bool PreWorlds(CpuContext c, IMemory m)
     {
         CommitWaterDrawCount(m);
+        BeginNativeWideWorldPass(m);
         return true;
     }
 
-    public static void PostWorlds(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
+    public static void PostWorlds(CpuContext c, IMemory m)
+    {
+        EndNativeWideWorldPass(m);
+        RestoreRippleSpeed(m);
+    }
 
     public static bool PreWorldsRipple(CpuContext c, IMemory m)
     {
@@ -157,10 +162,15 @@ public static partial class FramePacing
         if (c.A0 == 0) return true;
         CommitWaterDrawCount(m);
         ZeroRippleSpeed(m);
+        BeginNativeWideWorldPass(m);
         return true;
     }
 
-    public static void PostWorldsRipple(CpuContext c, IMemory m) => RestoreRippleSpeed(m);
+    public static void PostWorldsRipple(CpuContext c, IMemory m)
+    {
+        EndNativeWideWorldPass(m);
+        RestoreRippleSpeed(m);
+    }
 
     static void ZeroRippleSpeed(IMemory m)
     {

@@ -1,5 +1,15 @@
 namespace RecompOne.Runtime.Hle;
 
+public enum WidePrimitiveMode : byte
+{
+    Default,
+    WorldSides,
+    BackdropSides,
+    ScenerySides,
+    CoreOnly,
+    DepthTest,
+}
+
 public struct HleVertex
 {
     public float X, Y; 
@@ -15,6 +25,7 @@ public struct PrimFlags
     public ushort TPage; 
     public ushort Clut; 
     public int OtIndex;
+    public WidePrimitiveMode WideMode;
 
     public readonly int BlendMode => (TPage >> 5) & 3;
 }

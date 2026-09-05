@@ -6,6 +6,10 @@ public sealed partial class Gpu
 {
     static bool HleOn => GpuHle.Active && GpuHle.Backend is { Ready: true };
 
+    public int DrawOffsetX => _drawOffsetX;
+    public int DrawOffsetY => _drawOffsetY;
+    public HleDrawEnv CurrentHleDrawEnv => CurEnv();
+
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
                     | ((_blendMode & 3) << 5) | ((_texDepth & 3) << 7);
 
@@ -27,7 +31,11 @@ public sealed partial class Gpu
 
     PrimFlags PrimOf(bool tex, bool semi, bool raw, int clut, bool gouraud = false) => new()
     {
-        Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud, TPage = (ushort)CurTPage(), Clut = (ushort)clut,
+        Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud,
+        TPage = (ushort)CurTPage(), Clut = (ushort)clut,
+        WideMode = GpuHle.NativeWideRendererActive && GpuHle.CurrentPrimitiveKind == GpuHle.PrimitiveKind.World
+            ? WidePrimitiveMode.CoreOnly
+            : WidePrimitiveMode.Default,
     };
 
     void HleTri(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)
@@ -38,13 +46,21 @@ public sealed partial class Gpu
 
         // All-or-nothing: mixed int/float verts warp UVs every frame (texture flicker).
         bool sub = a.Subpixel && b.Subpixel && c.Subpixel;
-        // Perspective-correct UVs were tried via GTE Z, but intermittent cache hits
-        // made distant textures swim even with all filters off — keep affine (PS1).
-        bool persp = false;
-
+        bool depth = GpuHle.NativeWideRendererActive && a.HasGteZ && b.HasGteZ && c.HasGteZ;
+        var flags = PrimOf(tex, semi, raw, clut, gouraud);
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
-        be.DrawTri(HV(a, sub, persp), HV(b, sub, persp), HV(c, sub, persp), PrimOf(tex, semi, raw, clut, gouraud));
+        if (flags.WideMode == WidePrimitiveMode.Default && depth)
+        {
+            // The original centre relies on the PS1 ordering table, including
+            // authored exceptions to geometric depth. Preserve that ordering.
+            flags.WideMode = WidePrimitiveMode.CoreOnly;
+            be.DrawTri(HV(a, sub, false), HV(b, sub, false), HV(c, sub, false), flags);
+            flags.WideMode = WidePrimitiveMode.DepthTest;
+            be.DrawTri(HV(a, sub, true), HV(b, sub, true), HV(c, sub, true), flags);
+        }
+        else
+            be.DrawTri(HV(a, sub, false), HV(b, sub, false), HV(c, sub, false), flags);
     }
 
     void HleRect(int x, int y, int w, int h, int u, int v, int clut, int r, int g, int b, bool tex, bool semi, bool raw)

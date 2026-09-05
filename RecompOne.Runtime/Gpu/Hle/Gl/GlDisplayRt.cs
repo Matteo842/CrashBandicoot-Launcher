@@ -6,8 +6,9 @@ public sealed class GlDisplayRt
 {
     public int X, Y, W, H;
     public int Margin;
-    public uint Tex, Fbo;
+    public uint Tex, Fbo, Depth;
     public bool Dirty;
+    public bool HasWideWorld;
     public long Stamp;
     public long LastDrawFrame;
 
@@ -39,15 +40,23 @@ public sealed class GlDisplayRt
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, Fbo);
         gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, Tex, 0);
+        Depth = gl.GenRenderbuffer();
+        gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, Depth);
+        gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.DepthComponent24,
+            (uint)TexW, (uint)TexH);
+        gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            RenderbufferTarget.Renderbuffer, Depth);
         gl.ClearColor(0f, 0f, 0f, 0f);
+        gl.ClearDepth(1.0);
         gl.Disable(EnableCap.ScissorTest);
-        gl.Clear(ClearBufferMask.ColorBufferBit);
+        gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
     }
 
     public void Destroy(GL gl)
     {
         if (Fbo != 0) gl.DeleteFramebuffer(Fbo);
         if (Tex != 0) gl.DeleteTexture(Tex);
-        Fbo = Tex = 0;
+        if (Depth != 0) gl.DeleteRenderbuffer(Depth);
+        Fbo = Tex = Depth = 0;
     }
 }

@@ -88,7 +88,11 @@ internal static class GlShaders
 
         void main() {
             vec2 p = (inPos + uVertexOffset + uPosBias) * uFbInv - 1.0;
-            gl_Position = vec4(p, 0.0, 1.0);
+            // Keep the entire near-clipped Crash world inside the usable depth
+            // range. A scale of 256 collapsed Z=near..256 to exactly zero, so
+            // unrelated close polygons became equal and allocation order won.
+            float depth = inInvZ > 0.0 ? 1.0 - clamp(inInvZ * 64.0, 0.0, 1.0) : 0.5;
+            gl_Position = vec4(p, depth * 2.0 - 1.0, 1.0);
 
             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
             vDither = (inTexpage >> 10) & 1;
@@ -142,6 +146,8 @@ internal static class GlShaders
         uniform float uFilterStrength;
         uniform int   uDedither;
         uniform vec2  uPosBias;
+        uniform int   uWideMode;
+        uniform vec2  uWideCore;
 
         const int ditherTbl[16] = int[16](
             -4,  0, -3,  1,
@@ -284,6 +290,10 @@ internal static class GlShaders
         }
 
         void main() {
+            if (uWideMode == 1) {
+                float x1 = gl_FragCoord.x / float(uScale);
+                if (x1 >= uWideCore.x && x1 < uWideCore.y) discard;
+            }
         #ifdef GLES_FRAMEBUFFER_FETCH
             if (uCheckMask != 0 && GLES_DESTINATION_COLOR.a >= 0.5) discard;
         #else

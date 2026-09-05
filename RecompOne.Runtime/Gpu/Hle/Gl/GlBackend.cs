@@ -44,10 +44,11 @@ public sealed class GlBackend : IGpuBackend
     bool _kTransparent;
     bool _kSubtractBatch;
     int _kBlend, _kSetMask, _kCheckMask;
+    WidePrimitiveMode _kWideMode;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
     int _kClipX0, _kClipY0, _kClipX1, _kClipY1;
-    int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv, _uFilterMode, _uFilterStrength, _uDedither;
-    int _ufTexWindow, _ufBlendOpaque, _ufSetMask, _ufCheckMask, _ufPosBias, _ufFbInv, _ufFilterMode, _ufFilterStrength, _ufDedither;
+    int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv, _uFilterMode, _uFilterStrength, _uDedither, _uWideMode, _uWideCore;
+    int _ufTexWindow, _ufBlendOpaque, _ufSetMask, _ufCheckMask, _ufPosBias, _ufFbInv, _ufFilterMode, _ufFilterStrength, _ufDedither, _ufWideMode, _ufWideCore;
     int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
 
     public bool Ready { get; private set; }
@@ -101,6 +102,8 @@ public sealed class GlBackend : IGpuBackend
         _uFilterMode = _gl.GetUniformLocation(_progPrim, "uFilterMode");
         _uFilterStrength = _gl.GetUniformLocation(_progPrim, "uFilterStrength");
         _uDedither = _gl.GetUniformLocation(_progPrim, "uDedither");
+        _uWideMode = _gl.GetUniformLocation(_progPrim, "uWideMode");
+        _uWideCore = _gl.GetUniformLocation(_progPrim, "uWideCore");
 
         _gl.UseProgram(_progPrim);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uVram"), 0);
@@ -125,6 +128,8 @@ public sealed class GlBackend : IGpuBackend
             _ufFilterMode = _gl.GetUniformLocation(_progPrimFast, "uFilterMode");
             _ufFilterStrength = _gl.GetUniformLocation(_progPrimFast, "uFilterStrength");
             _ufDedither = _gl.GetUniformLocation(_progPrimFast, "uDedither");
+            _ufWideMode = _gl.GetUniformLocation(_progPrimFast, "uWideMode");
+            _ufWideCore = _gl.GetUniformLocation(_progPrimFast, "uWideCore");
 
             _gl.UseProgram(_progPrimFast);
             _gl.Uniform1(_gl.GetUniformLocation(_progPrimFast, "uVram"), 0);
@@ -187,6 +192,35 @@ public sealed class GlBackend : IGpuBackend
     }
 
     public void SetDrawEnv(in HleDrawEnv env) => _env = env;
+
+    public void BeginWideDepth(bool clearSides)
+    {
+        Flush();
+        var rt = Classify();
+        if (rt == null || rt.Margin <= 0) return;
+        rt.HasWideWorld = GpuHle.NativeWideRendererActive;
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.Fbo);
+
+        // PutDrawEnv already extends the game's background clear across both
+        // margins. Preserve that colour (especially the white distance fog).
+        // Without a background clear, remove last frame's side geometry here.
+        if (clearSides)
+        {
+            int s = GlVram.Scale;
+            _gl.ClearColor(0f, 0f, 0f, 0f);
+            _gl.Enable(EnableCap.ScissorTest);
+            _gl.Scissor(0, 0, (uint)(rt.Margin * s), (uint)rt.TexH);
+            _gl.Clear(ClearBufferMask.ColorBufferBit);
+            _gl.Scissor((rt.Margin + rt.W) * s, 0, (uint)(rt.Margin * s), (uint)rt.TexH);
+            _gl.Clear(ClearBufferMask.ColorBufferBit);
+        }
+
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.DepthMask(true);
+        _gl.ClearDepth(1.0);
+        _gl.Clear(ClearBufferMask.DepthBufferBit);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
 
     const int FbSlackW = 64;
     const int FbSlackH = 32;
@@ -323,8 +357,11 @@ public sealed class GlBackend : IGpuBackend
         return blendMatches
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
-            && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1;
+            && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1
+            && _kWideMode == _pendingWideMode;
     }
+
+    WidePrimitiveMode _pendingWideMode;
 
     void Begin(in PrimFlags f, int vertsNeeded)
     {
@@ -332,6 +369,7 @@ public sealed class GlBackend : IGpuBackend
         int blend = f.BlendMode;
         bool subtractBatch = transparent && blend == 2;
         var target = Classify();
+        _pendingWideMode = f.WideMode;
         if (_count > 0 && (target != _kTarget || !DesiredMatches(transparent, blend))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
         CheckTextureFeedback(f);
@@ -339,6 +377,7 @@ public sealed class GlBackend : IGpuBackend
         _kTarget = target;
         _kSubtractBatch = subtractBatch;
         _kTransparent = transparent; _kBlend = blend;
+        _kWideMode = f.WideMode;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
@@ -475,6 +514,8 @@ public sealed class GlBackend : IGpuBackend
         int uFilterMode = fast ? _ufFilterMode : _uFilterMode;
         int uFilterStrength = fast ? _ufFilterStrength : _uFilterStrength;
         int uDedither = fast ? _ufDedither : _uDedither;
+        int uWideMode = fast ? _ufWideMode : _uWideMode;
+        int uWideCore = fast ? _ufWideCore : _uWideCore;
 
         _gl.UseProgram(program);
         _gl.BindVertexArray(_vao);
@@ -487,11 +528,16 @@ public sealed class GlBackend : IGpuBackend
         {
             _gl.Uniform2(uPosBias, (float)(rt.Margin - rt.X), (float)(-rt.Y));
             _gl.Uniform2(uFbInv, 2f / rt.Wide1x, 2f / rt.H);
+            _gl.Uniform1(uWideMode, _kWideMode is WidePrimitiveMode.WorldSides
+                or WidePrimitiveMode.BackdropSides or WidePrimitiveMode.ScenerySides or WidePrimitiveMode.DepthTest ? 1 : 0);
+            _gl.Uniform2(uWideCore, (float)rt.Margin, (float)(rt.Margin + rt.W));
         }
         else
         {
             _gl.Uniform2(uPosBias, 0f, 0f);
             _gl.Uniform2(uFbInv, 2f / VramShadow.Width, 2f / VramShadow.Height);
+            _gl.Uniform1(uWideMode, 0);
+            _gl.Uniform2(uWideCore, 0f, 0f);
         }
         _gl.Uniform4(uTexWindow, _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY);
         _gl.Uniform1(uSetMask, _kSetMask == 1 ? 1f : 0f);
@@ -533,7 +579,22 @@ public sealed class GlBackend : IGpuBackend
             Barrier();
         }
 
-        _gl.Disable(EnableCap.DepthTest);
+        bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.DepthTest;
+        if (depthTest)
+        {
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Less);
+            // Crash marks a primitive semi-transparent when only selected STP
+            // texels blend. The opaque texels still form solid world surfaces,
+            // so the native-wide world pass must establish depth for the whole
+            // triangle. Object translucency keeps the conventional no-write path.
+            _gl.DepthMask(_kWideMode == WidePrimitiveMode.WorldSides || !_kTransparent);
+        }
+        else
+        {
+            _gl.Disable(EnableCap.DepthTest);
+            _gl.DepthMask(false);
+        }
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.ScissorTest);
         int s = GlVram.Scale;
@@ -546,7 +607,16 @@ public sealed class GlBackend : IGpuBackend
         {
             int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
             int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
-            if (rt.Margin > 0 && _kClipX0 <= rt.X && _kClipX1 >= rt.X + rt.W - 1) { cx0 = 0; cx1 = rt.Wide1x - 1; }
+            if (_kWideMode == WidePrimitiveMode.CoreOnly && rt.Margin > 0)
+            {
+                cx0 = rt.Margin;
+                cx1 = rt.Margin + rt.W - 1;
+            }
+            else if (rt.Margin > 0 && _kClipX0 <= rt.X && _kClipX1 >= rt.X + rt.W - 1)
+            {
+                cx0 = 0;
+                cx1 = rt.Wide1x - 1;
+            }
             _gl.Scissor(cx0 * s, cy0 * s, (uint)Math.Max(0, (cx1 - cx0 + 1) * s), (uint)Math.Max(0, (cy1 - cy0 + 1) * s));
         }
 
@@ -647,6 +717,7 @@ public sealed class GlBackend : IGpuBackend
         }
 
         _gl.Disable(EnableCap.ScissorTest);
+        _gl.DepthMask(true);
         if (rt != null) { rt.Dirty = true; rt.LastDrawFrame = _frame; }
         _count = 0;
     }
@@ -710,7 +781,7 @@ public sealed class GlBackend : IGpuBackend
 
         // Only show side margins while FOV expand is filling them. Otherwise present the
         // 4:3 core alone (clean black pillars) — avoids flickering stale gutter pixels.
-        bool showWide = src is { Margin: > 0 } && GpuHle.WideFovActive;
+        bool showWide = src is { Margin: > 0, HasWideWorld: true } && GpuHle.WideFovActive;
         int w1x = showWide ? w + src!.Margin * 2 : w;
         int h1x = h;
         float aspect = showWide ? GpuHle.WideAspect : GpuHle.OutputAspect;

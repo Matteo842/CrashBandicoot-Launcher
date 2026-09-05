@@ -181,10 +181,6 @@ public static class Gte
 
         uint div = Divide(H, SZ[3]);
         long xTerm = (long)div * IR1;
-        // Widescreen hack: expand horizontal projection (16:9 / 4:3 = 4/3) into side
-        // margins (gameplay only). On Crash 1 this stretches pre-rendered backgrounds.
-        if (Hle.GpuHle.WideFovActive)
-            xTerm = xTerm * 4 / 3;
         long sx = CheckMac0(xTerm + OFX); MAC0 = (int)sx;
         long sy = CheckMac0((long)div * IR2 + OFY); MAC0 = (int)sy;
         int nx = SatX((int)(sx >> 16));

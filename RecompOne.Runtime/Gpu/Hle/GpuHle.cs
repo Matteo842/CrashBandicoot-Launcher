@@ -4,8 +4,43 @@ namespace RecompOne.Runtime.Hle;
 
 public static class GpuHle
 {
+    public enum PrimitiveKind : byte { Default, World }
+
     public static bool Active { get; set; }
     public static IGpuBackend? Backend { get; set; }
+    public static PrimitiveKind CurrentPrimitiveKind { get; set; }
+
+    static int _wideWorldPositive;
+    static int _wideWorldNegative;
+
+    /// <summary>
+    /// Screen-space winding emitted by Crash's own world renderer. The native-wide
+    /// side pass uses this instead of assuming an orientation for WGE0 polygons.
+    /// </summary>
+    public static int WideWorldFrontSign { get; private set; } = 1;
+    public static int WideWorldPositiveSamples { get; private set; }
+    public static int WideWorldNegativeSamples { get; private set; }
+
+    public static void ObserveWideWorldTriangle(long signedArea)
+    {
+        if (!WideFovActive || CurrentPrimitiveKind != PrimitiveKind.World || signedArea == 0) return;
+        if (signedArea > 0) _wideWorldPositive++;
+        else _wideWorldNegative++;
+    }
+
+    public static void FinishWideWorldWinding()
+    {
+        int positive = _wideWorldPositive;
+        int negative = _wideWorldNegative;
+        _wideWorldPositive = 0;
+        _wideWorldNegative = 0;
+        if (positive + negative < 8) return;
+
+        WideWorldPositiveSamples = positive;
+        WideWorldNegativeSamples = negative;
+        if (positive != negative)
+            WideWorldFrontSign = positive > negative ? 1 : -1;
+    }
 
     public static float WideAspect { get; set; }
     public static float OutputAspect { get; set; } = 4f / 3f;
@@ -35,6 +70,14 @@ public static class GpuHle
     public static bool WideFovActive { get; private set; }
 
     /// <summary>
+    /// True only while the level-specific native-wide world renderer is active.
+    /// The generic widescreen target must not make unrelated levels use its
+    /// core-only world clipping or experimental depth buffer.
+    /// </summary>
+    public static bool NativeWideRendererActive { get; set; }
+    public static bool DrawEnvClearsBackground { get; set; }
+
+    /// <summary>
     /// Texture filters are off on title/menu/map and cinema — CLUT UI / FMV-adjacent
     /// scenes break into a tile grid under bilinear.
     /// </summary>
@@ -56,6 +99,8 @@ public static class GpuHle
 
         // Gameplay only — menus/map/cinema keep clean 4:3 with black pillars.
         WideFovActive = WideAspect > 0f && !uiOrCinema;
+        if (!WideFovActive)
+            NativeWideRendererActive = false;
 
         // Filters stay off on UI/cinema (tile-grid artifacts). Dedither/dejitter stay on.
         TextureFiltersActive = TextureFilter > 0 && !uiOrCinema;
