@@ -24,6 +24,7 @@ Scenery additions are cached by level, world origin and mesh counts. A level can
 | --- | --- |
 | N. Sanity Beach (9) | Initial ground extended; later camera positions and the exposed horizon still need visual refinement. |
 | Jungle Rollers (12) | Initial upper right trunk completed, including its clipped top and the join to the bank. Opening movement, TNT death and respawn exercised. The suspected colourful texture defect near the first low stone wall was traced to original foreground totem polygons 34/35; the sampled texture is intact. Continue inspecting exposed silhouettes and later cameras. |
+| Hog Wild (17) | The opening voids beside Crash and the hog are completed with outer banks, roof contours and canopy. A turf join fills behind the right root while retaining its narrow original shape. Intro, mounting, departure, first wall jump, a later death and respawn exercised. |
 | The Great Gate (18), Native Fortress (26) | Initial ground and outer trunk surfaces extended. Continue testing while climbing through subsequent zones. |
 | Upstream (15) | Selected outer banks extended without changing the water width. Some foliage boundaries still need completion. |
 | Up the Creek (24) | Initial banks, supporting bank faces and cut trunk contours extended together. The next left trunk and the bank behind the right totem now cover the cuts exposed when leaving the log; that bank spans two WGEO meshes. Movement through the first two lilies, the next plant death and respawns exercised. The water keeps its authored width. A further upper-right trunk cut appears while advancing past the lilies; later river zones and foliage still require completion and a full traversal. |
@@ -113,3 +114,27 @@ Local comparison images, scripts used for longer exploratory runs and reports ar
 - Standard same-OT centre checks passed during log departure/death at callback 701 and the lily/plant route at 650, both with actual process exit 0. The script reached the first two lilies before dying at the following plant. It still exposes a further upper-right trunk cut around callback 480; do not mark the river traversal complete.
 - Jungle Rollers: RAM picking and VRAM texture inspection traced the colourful right-side slice to original totem polygons 34/35, materials 16/18. Texture corruption was not confirmed; no masking geometry or texture substitution was added.
 - Final initial-view regressions for levels 24, 12 and 15 passed with zero changed centre pixels and actual process exit 0 (`artifacts/wide-session/continuation-final-results.json`). The Windows launcher build succeeded without warnings; version remains 1.8.1.
+
+## Hog Wild — final reported visual concern, 2026-09-07
+
+The user reported testing all levels and identified Hog Wild's starting view as the remaining concern. That screenshot was reproduced during the opening animation, around callback 200. The empty side regions were the ends of the authored scenery, rather than missing visibility-list entries.
+
+The repair is restricted to level 17 and WGEO origin `(8383, 7163, 122966)`, with 1,232 polygons and 1,382 vertices. Selected turf and bank-support boundaries continue outward, upward and toward the rear camera corner. Roof and canopy contours continue sideways. The turf corners around the right root are joined with their existing grass material and vertex colours; the root and foliage retain their original silhouettes. The resulting 1,160 added triangles use the existing side-only depth path and add no collision geometry.
+
+- The opening same-OT native/retail check at callback 201 passed with zero changed centre pixels and process exit 0.
+- An isolated A/B replay with just the Hog Wild additions enabled/disabled changed 83,366 side pixels and zero centre pixels. Repeating the enabled replay changed zero pixels. Evidence: `artifacts/wide-session/hog-same-frame/ab-result.json` and `prima-dopo.png`.
+- The scripted run checked mounting, the first wall jump, the following section, death and respawn through callback 1000. Its final native/retail comparison passed with zero changed centre pixels and process exit 0. This verifies the reported opening and its immediate transitions; it is not an autonomous full-level completion.
+- A separate death-fade comparison at callback 481 also passed with zero changed centre pixels and process exit 0 (`artifacts/wide-session/hog-final-fade/result.json`). The Windows launcher was rebuilt successfully with zero warnings and the same runtime DLL as the verification tool; version remains 1.8.1.
+
+Reproduce the opening and movement with the existing boundary overlay:
+
+```powershell
+tools/CrashBandicoot.WideCheck/bin/Release/net10.0/CrashBandicoot.WideCheck.exe `
+  --disc "D:/path/to/game.cue" --game "D:/path/to/game.recomp.dll" `
+  --level 17 --fps 60 --frame 1000 `
+  --input tools/CrashBandicoot.WideCheck/scenarios/hog-opening.json `
+  --snapshots 200,240,280,320,340,360,400,440,480,520,600,700,800,1000 `
+  --boundaries --output artifacts/wide-check-hog-opening
+```
+
+Callbacks depend on runtime timing. The initial hog ride starts automatically; the script supplies jump pulses and intentionally permits a later death/respawn. Captures and reports for this run are in the ignored `artifacts/wide-session/hog-final-route/` directory.

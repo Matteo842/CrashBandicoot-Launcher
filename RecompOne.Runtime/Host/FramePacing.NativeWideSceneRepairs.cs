@@ -25,7 +25,7 @@ public static partial class FramePacing
         if (level is 20 or 22 && world.PolyCount == 12 && world.VertexCount == 14
             && m.ReadU32(world.Header + 0x1C) == 1)
             return NativeWideBridgeSkyRepairs(m, world);
-        if (level is not (9 or 12 or 15 or 18 or 24 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (level is not (9 or 12 or 15 or 17 or 18 or 24 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -53,7 +53,10 @@ public static partial class FramePacing
         bool creekNext = level == 24 && world.PolyCount == 1380 && world.VertexCount == 1509
             && m.ReadU32(world.Header) == 8197 && m.ReadU32(world.Header + 4) == 6468
             && m.ReadU32(world.Header + 8) == 114910;
-        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext;
+        bool hog = level == 17 && world.PolyCount == 1232 && world.VertexCount == 1382
+            && m.ReadU32(world.Header) == 8383 && m.ReadU32(world.Header + 4) == 7163
+            && m.ReadU32(world.Header + 8) == 122966;
+        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -185,11 +188,44 @@ public static partial class FramePacing
                 if (!bank) continue;
                 direction = Vector3.UnitX;
             }
+            if (hog)
+            {
+                // The starting banks stop underneath the foreground foliage.
+                // Continue their outer slope and rear corner together. The
+                // positive Z component covers the low corner nearest the camera.
+                bool bank = material is (8 or 10 or 44 or 46 or 48 or 50 or 336)
+                    && Math.Min(Math.Abs(a.X), Math.Abs(b.X)) >= 1100
+                    && Math.Min(a.Z, b.Z) >= 0 && Math.Max(a.Z, b.Z) <= 3032;
+                bool roofLeft = material is (224 or 230) && Math.Max(a.X, b.X) <= -3000;
+                bool roofRight = material is (224 or 226) && Math.Min(a.X, b.X) >= 4200;
+                bool canopy = material == 70 && Math.Min(Math.Abs(a.X), Math.Abs(b.X)) >= 1480;
+                if ((!bank && !roofLeft && !roofRight && !canopy) || Math.Sign(a.X) != Math.Sign(b.X)) continue;
+                // A turf join below the root replaces this inward-facing edge.
+                if (owner.Polygon == 530 && a.Z == b.Z) continue;
+                direction = new Vector3(Math.Sign(a.X), 0.5f, 0.4f);
+                distance = 2400;
+                if (roofLeft || roofRight || canopy) direction = Math.Sign(a.X) * Vector3.UnitX;
+            }
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
             Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
             AddNativeWideSceneryStrip(repairs, owner.Polygon, a, b, c,
                 uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3], direction, endDirection, distance);
+        }
+        if (hog)
+        {
+            // Grass ends around the narrow root. Join the two turf corners
+            // below it; extending the root itself would create a wooden wall.
+            var a = ReadNativeWideLocal(m, world, 672);
+            var b = ReadNativeWideLocal(m, world, 678);
+            var c = ReadNativeWideLocal(m, world, 673);
+            if (TryNativeWideMaterial(m, world, 530, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2))
+            {
+                repairs.Add(new(530, a with { U = u0, V = v0 }, b with { U = u2, V = v2 }, c with { U = u1, V = v1 }));
+                AddNativeWideSceneryStrip(repairs, 530, a, b, c, new(u0, v0), new(u2, v2), new(u1, v1),
+                    new Vector3(1, 0.5f, 0.4f), distance: 2400);
+            }
         }
         PaceLog($"native-wide level={level} {(scenery ? "scenery" : "sky")} repairs={repairs.Count}");
         if (scenery) _nativeWideSceneryRepairs[key] = repairs; else _nativeWideBeachSky = repairs;
