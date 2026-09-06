@@ -16,10 +16,11 @@ using StbImageWriteSharp;
 // Uses the player's own disc/recompiled assembly and a separate config/save root.
 // Replays one ordering table, so animation and timing cannot invalidate the comparison.
 var options = new Dictionary<string, string>();
+string[] valueOptions = ["--disc", "--game", "--level", "--frame", "--fps", "--input", "--snapshots", "--output"];
 for (int i = 0; i < args.Length; i++)
 {
-    if (args[i] == "--walk") { options[args[i]] = "true"; continue; }
-    if (!args[i].StartsWith("--") || i + 1 == args.Length)
+    if (args[i] is "--walk" or "--boundaries") { options[args[i]] = "true"; continue; }
+    if (!valueOptions.Contains(args[i]) || i + 1 == args.Length || args[i + 1].StartsWith("--"))
         return Usage();
     options[args[i]] = args[++i];
 }
@@ -30,6 +31,52 @@ if (!File.Exists(disc) || !File.Exists(game)) return Usage();
 if (!uint.TryParse(options.GetValueOrDefault("--level", "9"), out uint level)
     || !int.TryParse(options.GetValueOrDefault("--frame", "600"), out int targetFrame) || targetFrame < 1
     || !int.TryParse(options.GetValueOrDefault("--fps", "0"), out int fps)) return Usage();
+var snapshots = new Queue<int>();
+if (options.TryGetValue("--snapshots", out string? snapshotArg))
+{
+    var requested = new SortedSet<int>();
+    foreach (string value in snapshotArg.Split(','))
+    {
+        if (!int.TryParse(value, out int frame) || frame < 1 || frame > targetFrame) return Usage();
+        requested.Add(frame);
+    }
+    snapshots = new Queue<int>(requested);
+}
+var inputs = new List<(int From, int To, ushort Buttons)>();
+if (options.TryGetValue("--input", out string? inputArg))
+{
+    if (options.ContainsKey("--walk")) return Usage();
+    var buttons = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Up"] = Controller.Up, ["Down"] = Controller.Down,
+        ["Left"] = Controller.Left, ["Right"] = Controller.Right,
+        ["Cross"] = Controller.Cross, ["Square"] = Controller.Square,
+        ["Circle"] = Controller.Circle, ["Triangle"] = Controller.Triangle,
+        ["Start"] = Controller.Start, ["Select"] = Controller.Select,
+    };
+    try
+    {
+        var ranges = JsonSerializer.Deserialize<InputRange[]>(File.ReadAllText(Path.GetFullPath(inputArg)),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (ranges == null) return Usage();
+        foreach (var range in ranges)
+        {
+            if (range == null || range.From < 0 || range.To <= range.From || range.Buttons == null) return Usage();
+            ushort mask = 0;
+            foreach (string button in range.Buttons)
+            {
+                if (button == null || !buttons.TryGetValue(button, out ushort value)) return Usage();
+                mask |= value;
+            }
+            inputs.Add((range.From, range.To, mask));
+        }
+    }
+    catch (Exception e) when (e is IOException or JsonException or ArgumentException or UnauthorizedAccessException)
+    {
+        Console.Error.WriteLine($"Cannot read input script: {e.Message}");
+        return Usage();
+    }
+}
 string output = Path.GetFullPath(options.GetValueOrDefault("--output", "artifacts/wide-check"));
 string state = Path.Combine(output, "state");
 Directory.CreateDirectory(state);
@@ -47,7 +94,9 @@ ConfigManager.SaveGame();
 ConfigManager.SaveView([]);
 
 bool booted = false, compared = false;
+int comparisonExitCode = 3;
 int frames = 0;
+var capturedSnapshots = new List<object>();
 uint drawEnvAddress = 0;
 using var timeout = new Timer(_ =>
 {
@@ -64,6 +113,14 @@ Event.AddListener<VSyncEvent>(_ => frames++);
 Event.AddListener<DrawEnvEvent>(e => drawEnvAddress = e.Context.A0);
 Event.AddListener<PadReadEvent>(e =>
 {
+    if (e.Port == 0 && options.ContainsKey("--input"))
+    {
+        ushort mask = 0;
+        foreach (var range in inputs)
+            if (frames >= range.From && frames < range.To) mask |= range.Buttons;
+        e.Buttons = (ushort)~mask;
+        return;
+    }
     if (!options.ContainsKey("--walk") || e.Port != 0 || frames < 320) return;
     ushort pressed = frames < 1200 ? Controller.Up : (ushort)0;
     if (frames % 90 < 30) pressed |= Controller.Square;
@@ -74,13 +131,32 @@ using var compare = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
     (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((original, c, m) =>
     {
         original(c, m);
-        if (compared || frames < targetFrame) return;
-        compared = true;
+        if (compared || (frames < targetFrame && (!snapshots.TryPeek(out int next) || frames < next))) return;
         var backend = (GlBackend)GpuHle.Backend!;
         var env = Runtime.Gpu!.CurrentHleDrawEnv;
         int width = env.ClipX1 - env.ClipX0 + 1, height = env.ClipY1 - env.ClipY0 + 1;
         backend.PresentDisplay(env.ClipX0, env.ClipY0, width, height);
+        // Earlier snapshots only read the framebuffer. Replay the OT once, at
+        // the final sample, so the comparison cannot affect later gameplay.
+        while (snapshots.TryPeek(out int requested) && frames >= requested)
+        {
+            snapshots.Dequeue();
+            string file = $"native-{requested:D6}.png";
+            var snapshot = Capture(backend, Path.Combine(output, file));
+            if (options.ContainsKey("--boundaries"))
+                SceneBoundaries.Write(m, Path.Combine(output, $"boundaries-{requested:D6}.svg"), file,
+                    snapshot.W / (double)snapshot.H * height, width, height, env.ClipX0, env.ClipY0);
+            capturedSnapshots.Add(new { requestedFrame = requested, frame = frames, file,
+                level = m.ReadU32(RecompOne.Runtime.Catalogs.Catalog.LevelIdAddr), width = snapshot.W, height = snapshot.H });
+            File.WriteAllText(Path.Combine(output, "snapshots.json"), JsonSerializer.Serialize(capturedSnapshots,
+                new JsonSerializerOptions { WriteIndented = true }));
+        }
+        if (frames < targetFrame) return;
+        compared = true;
         var native = Capture(backend, Path.Combine(output, "native.png"));
+        if (options.ContainsKey("--boundaries"))
+            SceneBoundaries.Write(m, Path.Combine(output, "boundaries.svg"), "native.png",
+                native.W / (double)native.H * height, width, height, env.ClipX0, env.ClipY0);
 
         // Restore the original draw state as well as the background. The death
         // fade changes draw mode (including dithering) at the end of its OT.
@@ -109,23 +185,39 @@ using var compare = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
                 }
         var result = new
         {
-            level, frame = frames, fps = ConfigManager.View.FrameRate, wide,
+            level, actualLevel = m.ReadU32(RecompOne.Runtime.Catalogs.Catalog.LevelIdAddr),
+            frame = frames, fps = ConfigManager.View.FrameRate, wide,
             nativeWidth = native.W, originalWidth = reference.W, height = reference.H,
             changedPixels, maxChannelDifference, passed = wide && changedPixels == 0,
         };
         string json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(Path.Combine(output, "result.json"), json);
         Console.WriteLine(json);
-        Environment.Exit(result.passed ? 0 : 1);
+        comparisonExitCode = result.passed ? 0 : 1;
+        timeout.Change(Timeout.Infinite, Timeout.Infinite);
+        // Unwind the game and detour before disposing native GL/audio state.
+        // Environment.Exit inside the draw hook can fast-fail during teardown.
+        throw new ComparisonFinishedException();
     }));
 
 var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(game);
-assembly.GetType("Recompiled.Entry")!.GetMethod("Run")!.Invoke(null, [new PSMemory(), disc]);
-return 3;
+try
+{
+    assembly.GetType("Recompiled.Entry")!.GetMethod("Run")!.Invoke(null, [new PSMemory(), disc]);
+}
+catch (TargetInvocationException e) when (e.InnerException is ComparisonFinishedException)
+{
+    // Expected completion of the isolated verification session.
+}
+finally
+{
+    Runtime.Shutdown();
+}
+return comparisonExitCode;
 
 static int Usage()
 {
-    Console.Error.WriteLine("WideCheck --disc <game.cue> --game <game.recomp.dll> [--level 9] [--frame 600] [--fps 0] [--walk] [--output <folder>]");
+    Console.Error.WriteLine("WideCheck --disc <game.cue> --game <game.recomp.dll> [--level 9] [--frame 600] [--fps 0] [--walk | --input <script.json>] [--snapshots 400,500,600] [--boundaries] [--output <folder>]");
     return 2;
 }
 
@@ -148,3 +240,6 @@ static (int W, int H, int[] Pixels) Capture(GlBackend backend, string path)
     new ImageWriter().WritePng(rgba, width, height, ColorComponents.RedGreenBlueAlpha, stream);
     return (width, height, pixels);
 }
+
+sealed record InputRange(int From, int To, string[] Buttons);
+sealed class ComparisonFinishedException : Exception { }

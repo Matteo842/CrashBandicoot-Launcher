@@ -24,7 +24,7 @@ public static partial class FramePacing
         if (level is 20 or 22 && world.PolyCount == 12 && world.VertexCount == 14
             && m.ReadU32(world.Header + 0x1C) == 1)
             return NativeWideBridgeSkyRepairs(m, world);
-        if (level is not (9 or 12 or 15 or 18 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (level is not (9 or 12 or 15 or 18 or 24 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -46,7 +46,10 @@ public static partial class FramePacing
         bool upstream = level == 15 && world.PolyCount == 517 && world.VertexCount == 536
             && m.ReadU32(world.Header) == 8197 && m.ReadU32(world.Header + 4) == 7651
             && m.ReadU32(world.Header + 8) == 100003;
-        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream;
+        bool creek = level == 24 && world.PolyCount == 1208 && world.VertexCount == 1276
+            && m.ReadU32(world.Header) == 8197 && m.ReadU32(world.Header + 4) == 6592
+            && m.ReadU32(world.Header + 8) == 122966;
+        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -88,6 +91,8 @@ public static partial class FramePacing
             uint p0 = m.ReadU32(world.Polygons + (uint)owner.Polygon * 8);
             int material = (int)((p0 >> 8) & 4095);
             Vector3? direction = null;
+            Vector3? endDirection = null;
+            float distance = 1600;
             if (beach && (material is not (593 or 595) || Math.Min(a.Z, b.Z) < 800 || Math.Max(a.Z, b.Z) > 4000
                 || Math.Min(Math.Abs(a.X), Math.Abs(b.X)) < 2400)) continue;
             if (gate || fortress)
@@ -114,7 +119,16 @@ public static partial class FramePacing
                     && Math.Max(a.Z, b.Z) <= -3952;
                 if (!bank && !leftTrunk && !rightTrunk) continue;
                 if (leftTrunk) direction = -Vector3.UnitX;
-                if (rightTrunk) direction = Vector3.Normalize(new Vector3(208, 0, 512));
+                if (rightTrunk)
+                {
+                    // The cut also clips the top of this trunk. Fan its upper
+                    // contour upward while keeping the root at the bank. The
+                    // offset depends on position, so adjoining edges still meet.
+                    var axis = Vector3.Normalize(new Vector3(208, 0, 512));
+                    distance = 3200;
+                    direction = axis + Vector3.UnitY * (float)Math.Max(0, a.Y + 2504) / 6400;
+                    endDirection = axis + Vector3.UnitY * (float)Math.Max(0, b.Y + 2504) / 6400;
+                }
             }
             if (castle && (material is not (20 or 24 or 28) || a.X != -3656 || b.X != -3656)) continue;
             if (slippery && (a.Z != 0 || b.Z != 0 || !(
@@ -129,11 +143,29 @@ public static partial class FramePacing
                 if (!bank || Math.Sign(a.X) != Math.Sign(b.X)) continue;
                 direction = Math.Sign(a.X) * Vector3.UnitX;
             }
+            if (creek)
+            {
+                // The opening river banks end through both turf and trunk
+                // surfaces. Continue their shared cut in one direction so the
+                // turf stays attached to its supporting bank and tree roots.
+                bool bank = material is (40 or 54 or 56 or 62 or 68 or 311 or 315 or 321)
+                    && Math.Min(Math.Abs(a.X), Math.Abs(b.X)) >= 1900
+                    && Math.Min(a.Z, b.Z) >= -400 && Math.Max(a.Z, b.Z) <= 3100;
+                bool leftTrunk = material is (16 or 18 or 28 or 517 or 519 or 521 or 523 or 525 or 529)
+                    && Math.Max(a.X, b.X) <= -1900
+                    && Math.Min(a.Z, b.Z) >= -550 && Math.Max(a.Z, b.Z) <= 1800;
+                bool rightTrunk = material is (657 or 663 or 665) && Math.Min(a.X, b.X) >= 2800
+                    && Math.Min(a.Z, b.Z) >= -460 && Math.Max(a.Z, b.Z) <= 650;
+                bool bankFace = material is (509 or 317) && Math.Min(Math.Abs(a.X), Math.Abs(b.X)) >= 1800
+                    && Math.Min(a.Z, b.Z) >= 2200 && Math.Max(a.Z, b.Z) <= 3040;
+                if ((!bank && !leftTrunk && !rightTrunk && !bankFace) || Math.Sign(a.X) != Math.Sign(b.X)) continue;
+                direction = Math.Sign(a.X) * Vector3.UnitX;
+            }
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
             Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
             AddNativeWideSceneryStrip(repairs, owner.Polygon, a, b, c,
-                uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3], direction);
+                uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3], direction, endDirection, distance);
         }
         PaceLog($"native-wide level={level} {(scenery ? "scenery" : "sky")} repairs={repairs.Count}");
         if (scenery) _nativeWideSceneryRepairs[level] = repairs; else _nativeWideBeachSky = repairs;
@@ -198,7 +230,7 @@ public static partial class FramePacing
 
     static void AddNativeWideSceneryStrip(List<NativeWideRepair> output, int polygon,
         NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c, Vector2 ua, Vector2 ub, Vector2 uc,
-        Vector3? direction = null)
+        Vector3? direction = null, Vector3? endDirection = null, float distance = 1600)
     {
         Vector3 pa = Position(a), e = Position(b) - pa, f = Position(c) - pa;
         float ee = Vector3.Dot(e, e), ef = Vector3.Dot(e, f), ff = Vector3.Dot(f, f);
@@ -206,18 +238,19 @@ public static partial class FramePacing
         Vector2 ue = ub - ua, uf = uc - ua;
         float uvDet = ue.X * uf.Y - ue.Y * uf.X;
         if (ee < 1 || det < 1 || Math.Abs(uvDet) < 1) return;
-        Vector3 outward = Vector3.Normalize(e * (ef / ee) - f) * 1600;
+        Vector3 outward = Vector3.Normalize(e * (ef / ee) - f) * distance;
         float pe = Vector3.Dot(outward, e), pf = Vector3.Dot(outward, f);
         Vector2 uvOut = ue * ((pe * ff - pf * ef) / det) + uf * ((pf * ee - pe * ef) / det);
         if (direction is Vector3 axis)
         {
-            // All segments of a cut trunk share an extrusion direction, so
-            // their new boundary vertices coincide despite different slopes.
+            // Adjacent cut edges share their endpoint offsets, so their new
+            // boundary vertices coincide despite different surface slopes.
             // Keep the original edge scale and texels per perpendicular unit.
-            outward = axis * 1600;
+            outward = axis * distance;
             float alongEdge = Vector3.Dot(outward, e) / ee;
-            uvOut = ue * alongEdge + uvOut * ((outward - e * alongEdge).Length() / 1600);
+            uvOut = ue * alongEdge + uvOut * ((outward - e * alongEdge).Length() / distance);
         }
+        Vector3 outwardEnd = endDirection is Vector3 endAxis ? endAxis * distance : outward;
         float stripDet = ue.X * uvOut.Y - ue.Y * uvOut.X;
         if (Math.Abs(stripDet) < 0.001f) return;
         // Adjacent bank segments have different slopes. Overlap their ends
@@ -246,7 +279,7 @@ public static partial class FramePacing
                 Vector2 delta = uv - ua;
                 float s = (delta.X * uvOut.Y - delta.Y * uvOut.X) / stripDet;
                 float t = (ue.X * delta.Y - ue.Y * delta.X) / stripDet;
-                Vector3 p = pa + e * s + outward * t;
+                Vector3 p = pa + e * s + (outward + (outwardEnd - outward) * s) * t;
                 float along = Math.Clamp(s, 0, 1);
                 float u = uv.X - (uMin + ix * tileW), v = uv.Y - (vMin + iy * tileH);
                 if ((ix & 1) != 0) u = tileW - u;
