@@ -14,7 +14,7 @@ public static partial class FramePacing
         NativeWideClipVertex B, NativeWideClipVertex C);
     readonly record struct NativeWideEdge(Vector3 A, Vector3 B);
     readonly record struct NativeWideEdgeOwner(int Polygon, int Edge, int Count);
-    static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideGroundRepairs = [];
+    static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideSceneryRepairs = [];
     static List<NativeWideRepair>? _nativeWideBeachSky;
     static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideBridgeSkies = [];
 
@@ -24,7 +24,7 @@ public static partial class FramePacing
         if (level is 20 or 22 && world.PolyCount == 12 && world.VertexCount == 14
             && m.ReadU32(world.Header + 0x1C) == 1)
             return NativeWideBridgeSkyRepairs(m, world);
-        if (level is not (9 or 12 or 18 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (level is not (9 or 12 or 15 or 18 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -43,11 +43,14 @@ public static partial class FramePacing
         bool slippery = level == 46 && world.PolyCount == 2094 && world.VertexCount == 1998
             && m.ReadU32(world.Header) == 97600 && (int)m.ReadU32(world.Header + 4) == -48800
             && m.ReadU32(world.Header + 8) == 0;
-        bool ground = beach || gate || fortress || jungle || castle || slippery;
+        bool upstream = level == 15 && world.PolyCount == 517 && world.VertexCount == 536
+            && m.ReadU32(world.Header) == 8197 && m.ReadU32(world.Header + 4) == 7651
+            && m.ReadU32(world.Header + 8) == 100003;
+        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
-        if (!ground && !sky) return Array.Empty<NativeWideRepair>();
-        var cached = ground ? _nativeWideGroundRepairs.GetValueOrDefault(level) : _nativeWideBeachSky;
+        if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
+        var cached = scenery ? _nativeWideSceneryRepairs.GetValueOrDefault(level) : _nativeWideBeachSky;
         if (cached != null) return cached;
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
@@ -84,23 +87,56 @@ public static partial class FramePacing
             }
             uint p0 = m.ReadU32(world.Polygons + (uint)owner.Polygon * 8);
             int material = (int)((p0 >> 8) & 4095);
+            Vector3? direction = null;
             if (beach && (material is not (593 or 595) || Math.Min(a.Z, b.Z) < 800 || Math.Max(a.Z, b.Z) > 4000
                 || Math.Min(Math.Abs(a.X), Math.Abs(b.X)) < 2400)) continue;
-            if (gate && (material is not (673 or 675) || Math.Max(a.Y, b.Y) > -4800)) continue;
-            if (fortress && (material is not (645 or 647) || Math.Max(a.Y, b.Y) > -5880)) continue;
-            if (jungle && (material is not (48 or 50 or 60 or 62 or 64 or 78)
-                || Math.Min(a.Z, b.Z) < 1400 || Math.Max(a.Z, b.Z) > 3100)) continue;
+            if (gate || fortress)
+            {
+                bool bank = gate ? material is (673 or 675) && Math.Max(a.Y, b.Y) <= -4800
+                    : material is (645 or 647) && Math.Max(a.Y, b.Y) <= -5880;
+                bool leftTrunk = gate
+                    ? material is (603 or 615 or 619 or 627 or 631 or 633) && Math.Max(a.X, b.X) <= -3800 && Math.Min(a.Z, b.Z) >= 2200
+                    : material is (579 or 591 or 595 or 601 or 605 or 607) && Math.Max(a.X, b.X) <= -2200 && Math.Min(a.Z, b.Z) >= 1150;
+                bool rightTrunk = gate
+                    ? material is (583 or 585 or 587 or 589 or 591) && Math.Min(a.X, b.X) >= 1480 && Math.Min(a.Z, b.Z) >= 2980
+                    : material is (559 or 561 or 563 or 565 or 567) && Math.Min(a.X, b.X) >= 3112 && Math.Min(a.Z, b.Z) >= 1930;
+                if (!bank && !leftTrunk && !rightTrunk) continue;
+                if (leftTrunk) direction = -Vector3.UnitX;
+                if (rightTrunk) direction = Vector3.UnitX;
+            }
+            if (jungle)
+            {
+                bool bank = material is (48 or 50 or 60 or 62 or 64 or 78)
+                    && Math.Min(a.Z, b.Z) >= 1400 && Math.Max(a.Z, b.Z) <= 3100;
+                bool leftTrunk = material is (82 or 84 or 86 or 92) && Math.Max(a.X, b.X) <= -2800
+                    && Math.Min(a.Z, b.Z) >= 500 && Math.Max(a.Z, b.Z) <= 1800;
+                bool rightTrunk = material is (82 or 84) && Math.Min(a.X, b.X) >= 7200
+                    && Math.Max(a.Z, b.Z) <= -3952;
+                if (!bank && !leftTrunk && !rightTrunk) continue;
+                if (leftTrunk) direction = -Vector3.UnitX;
+                if (rightTrunk) direction = Vector3.Normalize(new Vector3(208, 0, 512));
+            }
             if (castle && (material is not (20 or 24 or 28) || a.X != -3656 || b.X != -3656)) continue;
-            if (slippery && (a.X != 6400 || b.X != 6400 || a.Z != 0 || b.Z != 0
-                || material is not (265 or 317 or 257 or 261))) continue;
+            if (slippery && (a.Z != 0 || b.Z != 0 || !(
+                a.X == 6400 && b.X == 6400 && material is (265 or 317 or 257 or 261)
+                || Math.Min(a.X, b.X) >= 6400 && material == 287))) continue;
+            if (upstream)
+            {
+                // Continue only the outer, static banks. Water triangles have
+                // separate animated materials and must retain the river width.
+                bool bank = material is (0 or 2) && Math.Min(Math.Abs(a.X), Math.Abs(b.X)) >= 2500
+                    && Math.Min(a.Z, b.Z) >= -4200 && Math.Max(a.Z, b.Z) <= -2400;
+                if (!bank || Math.Sign(a.X) != Math.Sign(b.X)) continue;
+                direction = Math.Sign(a.X) * Vector3.UnitX;
+            }
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
             Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
             AddNativeWideSceneryStrip(repairs, owner.Polygon, a, b, c,
-                uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3]);
+                uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3], direction);
         }
-        PaceLog($"native-wide level={level} {(ground ? "ground" : "sky")} repairs={repairs.Count}");
-        if (ground) _nativeWideGroundRepairs[level] = repairs; else _nativeWideBeachSky = repairs;
+        PaceLog($"native-wide level={level} {(scenery ? "scenery" : "sky")} repairs={repairs.Count}");
+        if (scenery) _nativeWideSceneryRepairs[level] = repairs; else _nativeWideBeachSky = repairs;
         return repairs;
     }
 
@@ -161,7 +197,8 @@ public static partial class FramePacing
     }
 
     static void AddNativeWideSceneryStrip(List<NativeWideRepair> output, int polygon,
-        NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c, Vector2 ua, Vector2 ub, Vector2 uc)
+        NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c, Vector2 ua, Vector2 ub, Vector2 uc,
+        Vector3? direction = null)
     {
         Vector3 pa = Position(a), e = Position(b) - pa, f = Position(c) - pa;
         float ee = Vector3.Dot(e, e), ef = Vector3.Dot(e, f), ff = Vector3.Dot(f, f);
@@ -172,9 +209,21 @@ public static partial class FramePacing
         Vector3 outward = Vector3.Normalize(e * (ef / ee) - f) * 1600;
         float pe = Vector3.Dot(outward, e), pf = Vector3.Dot(outward, f);
         Vector2 uvOut = ue * ((pe * ff - pf * ef) / det) + uf * ((pf * ee - pe * ef) / det);
+        if (direction is Vector3 axis)
+        {
+            // All segments of a cut trunk share an extrusion direction, so
+            // their new boundary vertices coincide despite different slopes.
+            // Keep the original edge scale and texels per perpendicular unit.
+            outward = axis * 1600;
+            float alongEdge = Vector3.Dot(outward, e) / ee;
+            uvOut = ue * alongEdge + uvOut * ((outward - e * alongEdge).Length() / 1600);
+        }
+        float stripDet = ue.X * uvOut.Y - ue.Y * uvOut.X;
+        if (Math.Abs(stripDet) < 0.001f) return;
         // Adjacent bank segments have different slopes. Overlap their ends
-        // behind the authored mesh so their outward skirts cannot open cracks.
-        Vector2 start = ua - ue * 0.25f, end = ub + ue * 0.25f;
+        // with depth bias at coplanar seams so their skirts cannot open cracks.
+        float overlap = direction.HasValue ? 0 : 0.25f;
+        Vector2 start = ua - ue * overlap, end = ub + ue * overlap;
         Vector2[] strip = [start, end, end + uvOut, start + uvOut];
         float uMin = Math.Min(ua.X, Math.Min(ub.X, uc.X)), uMax = Math.Max(ua.X, Math.Max(ub.X, uc.X));
         float vMin = Math.Min(ua.Y, Math.Min(ub.Y, uc.Y)), vMax = Math.Max(ua.Y, Math.Max(ub.Y, uc.Y));
@@ -195,10 +244,10 @@ public static partial class FramePacing
             NativeWideClipVertex Vertex(Vector2 uv)
             {
                 Vector2 delta = uv - ua;
-                float s = (delta.X * uf.Y - delta.Y * uf.X) / uvDet;
-                float t = (ue.X * delta.Y - ue.Y * delta.X) / uvDet;
-                Vector3 p = pa + e * s + f * t;
-                float along = Math.Clamp(Vector3.Dot(p - pa, e) / ee, 0, 1);
+                float s = (delta.X * uvOut.Y - delta.Y * uvOut.X) / stripDet;
+                float t = (ue.X * delta.Y - ue.Y * delta.X) / stripDet;
+                Vector3 p = pa + e * s + outward * t;
+                float along = Math.Clamp(s, 0, 1);
                 float u = uv.X - (uMin + ix * tileW), v = uv.Y - (vMin + iy * tileH);
                 if ((ix & 1) != 0) u = tileW - u;
                 if ((iy & 1) != 0) v = tileH - v;

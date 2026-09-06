@@ -182,7 +182,7 @@ public static partial class FramePacing
     {
         FinishNativeWideDraw();
         _nativeWideLogCount = 0;
-        _nativeWideGroundRepairs.Clear();
+        _nativeWideSceneryRepairs.Clear();
         _nativeWideBeachSky = null;
         _nativeWideBridgeSkies.Clear();
     }
@@ -333,7 +333,7 @@ public static partial class FramePacing
                     if (!TryNativeWideMaterial(m, world, repair.Polygon, drawCount, out repairFlags,
                         out _, out _, out _, out _, out _, out _, out _)) continue;
                     if (repairFlags.WideMode != WidePrimitiveMode.BackdropSides)
-                        repairFlags.WideMode = WidePrimitiveMode.ScenerySides;
+                        repairFlags.WideMode = WidePrimitiveMode.WorldExtensionSides;
                 }
                 repairVertices[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
                 repairVertices[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
@@ -362,7 +362,7 @@ public static partial class FramePacing
         _nativeWideDrawY = gpu.DrawOffsetY;
         _nativeWidePending.AddRange(opaque.Where(t => t.Flags.WideMode == WidePrimitiveMode.BackdropSides));
         _nativeWidePending.AddRange(transparent.Where(t => t.Flags.WideMode == WidePrimitiveMode.BackdropSides));
-        _nativeWidePending.AddRange(opaque.Concat(transparent).Where(t => t.Flags.WideMode == WidePrimitiveMode.ScenerySides).OrderByDescending(t => t.Depth));
+        _nativeWidePending.AddRange(opaque.Concat(transparent).Where(t => t.Flags.WideMode == WidePrimitiveMode.WorldExtensionSides).OrderByDescending(t => t.Depth));
         _nativeWidePending.AddRange(opaque.Where(t => t.Flags.WideMode == WidePrimitiveMode.WorldSides));
         _nativeWidePending.AddRange(transparent.Where(t => t.Flags.WideMode == WidePrimitiveMode.WorldSides));
 

@@ -5,9 +5,10 @@ public enum WidePrimitiveMode : byte
     Default,
     WorldSides,
     BackdropSides,
-    ScenerySides,
+    OverlaySides,
     CoreOnly,
     DepthTest,
+    WorldExtensionSides,
 }
 
 public struct HleVertex

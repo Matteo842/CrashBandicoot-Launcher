@@ -529,7 +529,8 @@ public sealed class GlBackend : IGpuBackend
             _gl.Uniform2(uPosBias, (float)(rt.Margin - rt.X), (float)(-rt.Y));
             _gl.Uniform2(uFbInv, 2f / rt.Wide1x, 2f / rt.H);
             _gl.Uniform1(uWideMode, _kWideMode is WidePrimitiveMode.WorldSides
-                or WidePrimitiveMode.BackdropSides or WidePrimitiveMode.ScenerySides or WidePrimitiveMode.DepthTest ? 1 : 0);
+                or WidePrimitiveMode.BackdropSides or WidePrimitiveMode.OverlaySides
+                or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.DepthTest ? 1 : 0);
             _gl.Uniform2(uWideCore, (float)rt.Margin, (float)(rt.Margin + rt.W));
         }
         else
@@ -579,7 +580,18 @@ public sealed class GlBackend : IGpuBackend
             Barrier();
         }
 
-        bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.DepthTest;
+        bool extension = _kWideMode == WidePrimitiveMode.WorldExtensionSides;
+        bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides
+            or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.DepthTest;
+        if (extension)
+        {
+            // Extensions participate in real depth, including against the
+            // retail mesh's black backing planes. Only coplanar overlaps yield
+            // to the original surface, avoiding flicker at the shared seam.
+            _gl.Enable(EnableCap.PolygonOffsetFill);
+            _gl.PolygonOffset(1f, 1f);
+        }
+        else _gl.Disable(EnableCap.PolygonOffsetFill);
         if (depthTest)
         {
             _gl.Enable(EnableCap.DepthTest);
@@ -588,7 +600,7 @@ public sealed class GlBackend : IGpuBackend
             // texels blend. The opaque texels still form solid world surfaces,
             // so the native-wide world pass must establish depth for the whole
             // triangle. Object translucency keeps the conventional no-write path.
-            _gl.DepthMask(_kWideMode == WidePrimitiveMode.WorldSides || !_kTransparent);
+            _gl.DepthMask(_kWideMode == WidePrimitiveMode.WorldSides || extension || !_kTransparent);
         }
         else
         {

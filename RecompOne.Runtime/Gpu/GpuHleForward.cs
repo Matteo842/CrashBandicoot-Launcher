@@ -71,6 +71,36 @@ public sealed partial class Gpu
             PrimOf(tex, semi, raw, clut));
     }
 
+    bool HleWideScreenQuad(ReadOnlySpan<Vert> vertices, bool semi)
+    {
+        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind == GpuHle.PrimitiveKind.World)
+            return false;
+        var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
+        // Full-screen flat overlays include the subtractive death fade. Keep
+        // them at their original OT position, without borrowing scene depth.
+        if (a.X != c.X || b.X != d.X || a.Y != b.Y || c.Y != d.Y
+            || a.X > _drawAreaLeft || b.X < _drawAreaRight + 1
+            || a.Y > _drawAreaTop || c.Y < _drawAreaBottom + 1) return false;
+        var backend = GpuHle.Backend!;
+        backend.SetDrawEnv(CurEnv());
+        var flags = PrimOf(false, semi, false, 0);
+        flags.WideMode = WidePrimitiveMode.CoreOnly;
+        bool subA = a.Subpixel && b.Subpixel && c.Subpixel;
+        bool subB = b.Subpixel && c.Subpixel && d.Subpixel;
+        backend.DrawTri(HV(a, subA, false), HV(b, subA, false), HV(c, subA, false), flags);
+        backend.DrawTri(HV(b, subB, false), HV(c, subB, false), HV(d, subB, false), flags);
+
+        int margin = GpuHle.WideMargin(_drawAreaRight - _drawAreaLeft + 1);
+        var ha = HV(a, false, false); var hb = HV(b, false, false);
+        var hc = HV(c, false, false); var hd = HV(d, false, false);
+        ha.X = hc.X = _drawAreaLeft - margin;
+        hb.X = hd.X = _drawAreaRight + 1 + margin;
+        flags.WideMode = WidePrimitiveMode.OverlaySides;
+        backend.DrawTri(ha, hb, hc, flags);
+        backend.DrawTri(hb, hc, hd, flags);
+        return true;
+    }
+
     bool HleWideFogQuad(ReadOnlySpan<Vert> vertices, int clut)
     {
         if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind == GpuHle.PrimitiveKind.World
@@ -99,8 +129,8 @@ public sealed partial class Gpu
         Draw(b, c, d, WidePrimitiveMode.CoreOnly);
         // Fog is composited at its original position in the ordering table.
         // It must not inherit an unrelated mesh depth from the XY GTE cache.
-        Draw(a, b, c, WidePrimitiveMode.ScenerySides);
-        Draw(b, c, d, WidePrimitiveMode.ScenerySides);
+        Draw(a, b, c, WidePrimitiveMode.OverlaySides);
+        Draw(b, c, d, WidePrimitiveMode.OverlaySides);
 
         bool allSub = a.Subpixel && b.Subpixel && c.Subpixel && d.Subpixel;
         var ha = HV(a, allSub, false); var hb = HV(b, allSub, false);
