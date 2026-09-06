@@ -1,0 +1,7 @@
+[
+  { "from": 320, "to": 550, "buttons": ["Up"] },
+  { "from": 355, "to": 375, "buttons": ["Square"] },
+  { "from": 385, "to": 425, "buttons": ["Cross"] },
+  { "from": 440, "to": 480, "buttons": ["Cross"] },
+  { "from": 500, "to": 540, "buttons": ["Cross"] }
+]

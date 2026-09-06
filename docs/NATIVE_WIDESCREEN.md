@@ -18,13 +18,15 @@ Some exposed edges are genuinely the end of the retail mesh. Simply widening the
 
 `FramePacing.NativeWideSceneRepairs.cs` contains narrowly selected additions for known assets. Mesh counts and world origins identify the asset; materials and boundary coordinates select the exposed surface. New surfaces exist in world space and retain texture density. They are not collision geometry. Never apply the same operation indiscriminately to every boundary: cliffs, rivers and doorways must stay open.
 
+Scenery additions are cached by level, world origin and mesh counts. A level can have several repaired WGEO meshes loaded together; reusing one level-wide list would apply the first mesh's triangles and material indices to the other meshes.
+
 | Scene | Current result and remaining work |
 | --- | --- |
 | N. Sanity Beach (9) | Initial ground extended; later camera positions and the exposed horizon still need visual refinement. |
-| Jungle Rollers (12) | Initial upper right trunk completed, including its clipped top and the join to the bank. Opening movement, TNT death and respawn exercised. A later right edge near the first low stone wall still exposes a texture/mesh defect, also reproduced with the preceding repair implementation. |
+| Jungle Rollers (12) | Initial upper right trunk completed, including its clipped top and the join to the bank. Opening movement, TNT death and respawn exercised. The suspected colourful texture defect near the first low stone wall was traced to original foreground totem polygons 34/35; the sampled texture is intact. Continue inspecting exposed silhouettes and later cameras. |
 | The Great Gate (18), Native Fortress (26) | Initial ground and outer trunk surfaces extended. Continue testing while climbing through subsequent zones. |
 | Upstream (15) | Selected outer banks extended without changing the water width. Some foliage boundaries still need completion. |
-| Up the Creek (24) | Initial banks, supporting bank faces and cut trunk contours extended together. Initial view and movement off the first log, deaths and respawns checked. The water keeps its authored width. Later river zones and foliage still require a full traversal. |
+| Up the Creek (24) | Initial banks, supporting bank faces and cut trunk contours extended together. The next left trunk and the bank behind the right totem now cover the cuts exposed when leaving the log; that bank spans two WGEO meshes. Movement through the first two lilies, the next plant death and respawns exercised. The water keeps its authored width. A further upper-right trunk cut appears while advancing past the lilies; later river zones and foliage still require completion and a full traversal. |
 | Road to Nowhere (20), The High Road (22) | Sky, fog layers and background cover the wider view. Death fade also covers the side bands. |
 | Cortex (31) | Empty WGEO placeholder is skipped instead of disabling the whole scene's wide pass. Full fight needs playtesting. |
 | Slippery Climb (46) | Initial right wall extended with the level's lighting. Rain coverage is a separate task. |
@@ -82,12 +84,32 @@ tools/CrashBandicoot.WideCheck/bin/Release/net10.0/CrashBandicoot.WideCheck.exe 
 
 These scripts exercise a short section, not a full level, and movement can differ with runtime timing. The final `result.json` includes `actualLevel` as well as the requested `level`; a game-over screen or a draw without a wide world does not pass the wide check. Successful comparisons unwind the game and shut down audio/GL before returning exit 0, avoiding the native teardown crash previously caused by exiting inside the draw hook.
 
+`scenarios/creek-lilies.json` times the spin and jumps to leave Up the Creek's first log and cross the first two lilies. The exploratory run continued into the next plant and its death animation; this is a camera/respawn exercise, not a complete or guaranteed successful route. Capture the movement and the final fade with:
+
+```powershell
+tools/CrashBandicoot.WideCheck/bin/Release/net10.0/CrashBandicoot.WideCheck.exe `
+  --disc "D:/path/to/game.cue" --game "D:/path/to/game.recomp.dll" `
+  --level 24 --fps 60 --frame 650 `
+  --input tools/CrashBandicoot.WideCheck/scenarios/creek-lilies.json `
+  --snapshots 400,440,480,500,520,550,600,650 --boundaries `
+  --output artifacts/wide-check-creek-lilies
+```
+
 ## Verification — 2026-09-06 continuation
 
 - Initial same-OT comparisons: levels 9, 12, 15, 18, 20, 22, 24, 26, 31, 46 and 55 all had zero changed centre RGB pixels.
 - Motion comparisons: Up the Creek at callback 700, the Road to Nowhere death fade at 700, and Jungle Rollers at 1600 also had zero changed centre RGB pixels. Earlier motion captures include deaths, respawns and changing camera positions.
 - The initial Up the Creek completion covers the bank support faces as well as the grass and trunks. Jungle Rollers uses matching offsets at shared cut endpoints, with extra coverage at the top of the distant right trunk while retaining its root height.
-- A baseline build of the preceding repair source also exhibits the later Jungle Rollers right-edge texture defect near the low stone wall. It remains a separate follow-up; the initial corner fix does not certify that later view.
+- A baseline build of the preceding repair source also exhibited the suspected later Jungle Rollers right-edge texture defect near the low stone wall. The 2026-09-07 investigation below traces that slice to the original foreground totem; the initial corner fix does not certify the whole route.
 - The Windows launcher and verification tool are built locally. Full level traversal, the remaining scenes in the table, transparent object overlaps and Android validation remain outstanding.
 
 Local comparison images, scripts used for longer exploratory runs and reports are under the ignored `artifacts/wide-session/` directory. Do not commit these game-derived captures or the temporary baseline build.
+
+## Verification — 2026-09-07 continuation
+
+- Up the Creek: completed the next left trunk's cut (materials 90/92/102) and the right outer bank (54/56), plus turf in the adjacent mesh at origin `(8197, 6468, 114910)` (8/10). These selections exclude the water and the totem itself.
+- The two loaded creek meshes now hold separate cached additions: 1,364 and 105 triangles. Removing only the new selections in an isolated diagnostic restores the first mesh's preceding 1,229-triangle list and leaves the second empty.
+- A controlled side-pass replay at the same camera compared these additions enabled/disabled. Repeating the enabled replay changed zero pixels; the additions changed 5,048 side pixels and zero centre pixels. This diagnostic rebuilds the side pass with post-draw shader state, so use it to compare the additions, not as a replacement for the standard native-vs-retail centre check. Evidence: `artifacts/wide-session/creek-same-frame-v3/ab-result.json` and `prima-dopo.png`.
+- Standard same-OT centre checks passed during log departure/death at callback 701 and the lily/plant route at 650, both with actual process exit 0. The script reached the first two lilies before dying at the following plant. It still exposes a further upper-right trunk cut around callback 480; do not mark the river traversal complete.
+- Jungle Rollers: RAM picking and VRAM texture inspection traced the colourful right-side slice to original totem polygons 34/35, materials 16/18. Texture corruption was not confirmed; no masking geometry or texture substitution was added.
+- Final initial-view regressions for levels 24, 12 and 15 passed with zero changed centre pixels and actual process exit 0 (`artifacts/wide-session/continuation-final-results.json`). The Windows launcher build succeeded without warnings; version remains 1.8.1.

@@ -14,7 +14,8 @@ public static partial class FramePacing
         NativeWideClipVertex B, NativeWideClipVertex C);
     readonly record struct NativeWideEdge(Vector3 A, Vector3 B);
     readonly record struct NativeWideEdgeOwner(int Polygon, int Edge, int Count);
-    static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideSceneryRepairs = [];
+    readonly record struct NativeWideSceneryKey(uint Level, uint X, uint Y, uint Z, int Polygons, int Vertices);
+    static readonly Dictionary<NativeWideSceneryKey, List<NativeWideRepair>> _nativeWideSceneryRepairs = [];
     static List<NativeWideRepair>? _nativeWideBeachSky;
     static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideBridgeSkies = [];
 
@@ -49,11 +50,18 @@ public static partial class FramePacing
         bool creek = level == 24 && world.PolyCount == 1208 && world.VertexCount == 1276
             && m.ReadU32(world.Header) == 8197 && m.ReadU32(world.Header + 4) == 6592
             && m.ReadU32(world.Header + 8) == 122966;
-        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek;
+        bool creekNext = level == 24 && world.PolyCount == 1380 && world.VertexCount == 1509
+            && m.ReadU32(world.Header) == 8197 && m.ReadU32(world.Header + 4) == 6468
+            && m.ReadU32(world.Header + 8) == 114910;
+        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
-        var cached = scenery ? _nativeWideSceneryRepairs.GetValueOrDefault(level) : _nativeWideBeachSky;
+        // Several loaded meshes can need different additions in the same level.
+        // Identify the asset, not its transient RAM address or the level alone.
+        var key = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
+            m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
+        var cached = scenery ? _nativeWideSceneryRepairs.GetValueOrDefault(key) : _nativeWideBeachSky;
         if (cached != null) return cached;
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
@@ -158,8 +166,24 @@ public static partial class FramePacing
                     && Math.Min(a.Z, b.Z) >= -460 && Math.Max(a.Z, b.Z) <= 650;
                 bool bankFace = material is (509 or 317) && Math.Min(Math.Abs(a.X), Math.Abs(b.X)) >= 1800
                     && Math.Min(a.Z, b.Z) >= 2200 && Math.Max(a.Z, b.Z) <= 3040;
-                if ((!bank && !leftTrunk && !rightTrunk && !bankFace) || Math.Sign(a.X) != Math.Sign(b.X)) continue;
+                // Beyond the log, the next trunk and the bank behind the right
+                // totem reveal a second cut. Continue only their outer contour.
+                bool laterLeftTrunk = material is (90 or 92 or 102) && Math.Max(a.X, b.X) <= -2300
+                    && Math.Min(a.Z, b.Z) >= -2800 && Math.Max(a.Z, b.Z) <= -2200;
+                bool laterRightBank = material is (54 or 56) && Math.Min(a.X, b.X) >= 3200
+                    && Math.Min(a.Z, b.Z) >= -4168 && Math.Max(a.Z, b.Z) <= -2896;
+                if ((!bank && !leftTrunk && !rightTrunk && !bankFace && !laterLeftTrunk && !laterRightBank)
+                    || Math.Sign(a.X) != Math.Sign(b.X)) continue;
                 direction = Math.Sign(a.X) * Vector3.UnitX;
+            }
+            if (creekNext)
+            {
+                // The far side of the same opening spans the adjacent WGEO.
+                // Its turf continues behind the totem, leaving the river open.
+                bool bank = material is (8 or 10) && Math.Min(a.X, b.X) >= 4200
+                    && Math.Min(a.Z, b.Z) >= 2688 && Math.Max(a.Z, b.Z) <= 3888;
+                if (!bank) continue;
+                direction = Vector3.UnitX;
             }
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
@@ -168,7 +192,7 @@ public static partial class FramePacing
                 uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3], direction, endDirection, distance);
         }
         PaceLog($"native-wide level={level} {(scenery ? "scenery" : "sky")} repairs={repairs.Count}");
-        if (scenery) _nativeWideSceneryRepairs[level] = repairs; else _nativeWideBeachSky = repairs;
+        if (scenery) _nativeWideSceneryRepairs[key] = repairs; else _nativeWideBeachSky = repairs;
         return repairs;
     }
 
