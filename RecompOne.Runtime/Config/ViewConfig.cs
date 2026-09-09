@@ -162,8 +162,8 @@ public class ViewConfig
     }
 
     /// <summary>
-    /// Widescreen hack (gameplay only): GTE FOV expand + wide present. Off on menus/map/cinema.
-    /// On Crash 1 this stretches pre-rendered 4:3 backgrounds — no extra scenery to reveal.
+    /// Native 16:9 gameplay: renders additional scenery at the original projection scale.
+    /// Menus, the map, and cutscenes retain their 4:3 presentation.
     /// </summary>
     public bool Widescreen
     {

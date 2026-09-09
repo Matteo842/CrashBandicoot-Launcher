@@ -68,7 +68,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     string _status = "";
     string _statusKind = "";
     string _discPath = "";
-    string _version = "v1.8.1";
+    string _version = "v1.9";
     bool _disposed;
     readonly LauncherGamepad _pad = new();
 
@@ -1391,11 +1391,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         list.Controls.Add(_fullscreen);
         y += checkGap;
 
-        _widescreen = MakeCheck("Widescreen 16:9");
+        _widescreen = MakeCheck("Native widescreen (16:9)");
         _widescreen.Location = new Point(12, y);
         list.Controls.Add(_widescreen);
         y += 52;
-        AddHint("Widescreen hack (gameplay only) — stretches the 4:3 frame. Off on menus, map, and cutscenes.");
+        AddHint("Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.");
 
         AddLabel("Frame rate");
         _frameRate = MakeCombo(new Point(controlX, y), [

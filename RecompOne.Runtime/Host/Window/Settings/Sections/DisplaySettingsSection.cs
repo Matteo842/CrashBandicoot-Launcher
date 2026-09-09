@@ -41,13 +41,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
 
         bool widescreen = ConfigManager.View.Widescreen;
-        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
+        if (ImGui.Checkbox("Native widescreen (16:9)", ref widescreen))
         {
             ConfigManager.View.Widescreen = widescreen;
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Hack: stretches 4:3 (gameplay only)");
+        ImGui.TextDisabled("Native 16:9 gameplay with a wider view.");
+        ImGui.TextDisabled("Menus, map, and cutscenes stay 4:3.");
 
         bool integer = ConfigManager.View.IntegerScale;
         if (ImGui.Checkbox("Integer scaling", ref integer))

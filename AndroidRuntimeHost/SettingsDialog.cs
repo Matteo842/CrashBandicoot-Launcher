@@ -53,9 +53,9 @@ static class SettingsDialog
         card.AddView(Hint(activity,
             "Hides the status and navigation bars completely during gameplay.", bodyFont));
 
-        var widescreen = AddSwitch(activity, card, "Widescreen 16:9", view.Widescreen, bodyBold);
+        var widescreen = AddSwitch(activity, card, "Native widescreen (16:9)", view.Widescreen, bodyBold);
         card.AddView(Hint(activity,
-            "Hack active during gameplay only; menus, map, and cutscenes stay 4:3.", bodyFont));
+            "Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.", bodyFont));
 
         var frameRate = AddChoice(activity, card, "Frame rate",
             ViewConfig.FrameRateLabels, ViewConfig.FrameRateToIndex(view.FrameRate), bodyFont, bodyBold);

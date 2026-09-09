@@ -34,13 +34,14 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
         ImGui.Spacing();
 
         bool widescreen = ConfigManager.View.Widescreen;
-        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
+        if (ImGui.Checkbox("Native widescreen (16:9)", ref widescreen))
         {
             ConfigManager.View.Widescreen = widescreen;
             HostWindow.ApplyWidescreen(widescreen);
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Hack: stretches 4:3 (gameplay only)");
+        ImGuiEx.TextDisabled("Native 16:9 gameplay with a wider view.");
+        ImGuiEx.TextDisabled("Menus, map, and cutscenes stay 4:3.");
 
         bool dedither = ConfigManager.View.Dedither;
         if (ImGui.Checkbox("Dedither", ref dedither))

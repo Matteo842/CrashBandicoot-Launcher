@@ -286,11 +286,11 @@ sealed partial class DevMenuOverlay : FrameLayout
     void BuildDisplay()
     {
         var view = ConfigManager.View;
-        Toggle("Widescreen (16:9)", view.Widescreen, value =>
+        Toggle("Native widescreen (16:9)", view.Widescreen, value =>
         {
             view.Widescreen = value;
             AndroidGraphics.ApplyLive();
-        }, "Hack: stretches 4:3 (gameplay only).");
+        }, "Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.");
         Choice("Frame rate", ViewConfig.FrameRateLabels,
             ViewConfig.FrameRateToIndex(view.FrameRate),
             index =>
@@ -336,11 +336,11 @@ sealed partial class DevMenuOverlay : FrameLayout
             }, primary: true);
         }
         Divider();
-        Toggle("Widescreen (16:9)", view.Widescreen, value =>
+        Toggle("Native widescreen (16:9)", view.Widescreen, value =>
         {
             view.Widescreen = value;
             AndroidGraphics.ApplyLive();
-        }, "Hack: stretches 4:3 (gameplay only).");
+        }, "Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.");
         Toggle("Dedither", view.Dedither, value =>
         {
             view.Dedither = value;
