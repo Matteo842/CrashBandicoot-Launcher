@@ -27,8 +27,8 @@ static class StorageFileBrowser
         "(?im)^\\s*FILE\\s+\"([^\"]+)\"\\s+(?:BINARY|MOTOROLA)\\s*$",
         RegexOptions.Compiled);
 
-    public static void ShowDisc(Activity activity, Action<string, string> onCueAndBin)
-        => Show(activity, "Select the .cue or .bin", DiscFilter, path =>
+    public static void ShowDisc(Activity activity, Action<string, string?> onCueAndBin)
+        => Show(activity, "Select the .chd, .cue or .bin", DiscFilter, path =>
         {
             if (!TryPairDisc(path, out var cue, out var bin, out var error))
             {
@@ -49,6 +49,7 @@ static class StorageFileBrowser
 
     static bool DiscFilter(string name) =>
         name.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ||
+        name.EndsWith(".chd", StringComparison.OrdinalIgnoreCase) ||
         name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase);
 
     static bool ZipFilter(string name) =>
@@ -234,13 +235,22 @@ static class StorageFileBrowser
         }
     }
 
-    public static bool TryPairDisc(string selectedPath, out string cuePath, out string binPath, out string error)
+    public static bool TryPairDisc(string selectedPath, out string cuePath, out string? binPath, out string error)
     {
         cuePath = "";
         binPath = "";
         error = "";
         var dir = IOPath.GetDirectoryName(selectedPath) ?? "";
         var name = IOPath.GetFileName(selectedPath);
+
+        if (name.EndsWith(".chd", StringComparison.OrdinalIgnoreCase))
+        {
+            cuePath = selectedPath;
+            binPath = null;
+            if (File.Exists(selectedPath)) return true;
+            error = "The selected CHD is not readable.";
+            return false;
+        }
 
         if (name.EndsWith(".cue", StringComparison.OrdinalIgnoreCase))
         {
@@ -303,7 +313,7 @@ static class StorageFileBrowser
             return false;
         }
 
-        error = "Pick the .cue (or the .bin next to it).";
+        error = "Pick the .chd, or the .cue next to its .bin.";
         return false;
     }
 

@@ -54,6 +54,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AndroidAsset Include="..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" />
     <AndroidResource Include="..\icon.png" Link="Resources\drawable\app_icon.png" />
     <AndroidAsset Include="..\CrashBandicoot.Launcher\Ui\fonts\Bungee-Regular.ttf"
                   Link="Fonts\Bungee-Regular.ttf" />

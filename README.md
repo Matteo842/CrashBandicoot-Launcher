@@ -20,7 +20,7 @@ Built on [RecompOne](https://github.com/BlackLabelHQ/RecompOne) (static PS1 reco
 
 A small host application that:
 
-1. Asks you for your own dumped disc (`.cue` + `.bin`).
+1. Asks you for your own dumped disc (`.chd` or `.cue` + `.bin`).
 2. On first run, **recompiles and compiles on your PC** into a `game/` folder next to the exe (it is not uploaded anywhere by this app).
 3. Afterwards, starts from that prepared game folder.
 
@@ -30,7 +30,7 @@ Think of it as a **convenience shell around tools**, not a redistribution of *Cr
 
 | Not this | Meaning |
 |----------|---------|
-| Not the game | We do not ship retail assets, ISOs, or `.bin`/`.cue` files |
+| Not the game | We do not ship retail assets, ISOs, or `.bin`/`.cue`/`.chd` files |
 | Not a piracy kit | You need a dump of a disc **you own** |
 | Not an official port | No Sony / Activision involvement |
 | Not “download and play without a disc” | The disc image is still required at runtime |
@@ -45,14 +45,14 @@ If someone offers you this project **bundled with a ROM/ISO**, that is not from 
 ### Windows
 
 - Windows 10/11 x64  
-- A **legal** dump of *Crash Bandicoot* NTSC-U (`SCUS_949.00` / SCUS-94900) as `.cue` + matching `.bin` in the same folder  
+- A **legal** dump of *Crash Bandicoot* NTSC-U (`SCUS_949.00` / SCUS-94900) as a standalone `.chd`, or `.cue` + matching `.bin` in the same folder
 - Audio uses **OpenAL Soft** bundled with the release (`soft_oal.dll`) — no separate OpenAL install required  
 
 ### Linux
 
 - x64 Linux with **OpenGL 4.3+** (Mesa / NVIDIA / AMD — a real GPU or working VM 3D accel)  
 - Audio uses **OpenAL Soft** bundled with the release (`libopenal.so`) — no `libopenal1` / system OpenAL install required  
-- Same legal `.cue` + `.bin` dump as above  
+- Same legal `.chd` or `.cue` + `.bin` dump as above
 
 On Linux there is **no graphical launcher menu** yet — use the CLI (`--prepare` / `--run`). The game opens in a standalone Silk/GLFW window. The painted WinForms UI remains Windows-only.
 
@@ -73,7 +73,7 @@ We only aim to support that specific NTSC-U version for now.
 
 1. Download the **release** `.exe` from this GitHub repo (not a random reupload).  
 2. Run `CrashBandicoot.exe`.  
-3. **Select disc** → choose your `.cue`.  
+3. **Select disc** → choose your `.chd` or `.cue`.
 4. **Start Game**.  
    - First time: local prepare into `game\` next to the exe (can take a bit).  
    - Next times: reuses that prepared game folder.  
@@ -92,7 +92,21 @@ CrashBandicoot.exe --run "D:\path\to\your\game.cue"
 ./CrashBandicoot --run /path/to/your/game.cue
 ```
 
-If `settings.json` already has a valid `CdPath`, `--run` / `--smoke` can omit the cue path.
+All CLI commands also accept a `.chd` path. If `settings.json` already has a valid `CdPath`, `--run` / `--smoke` can omit the disc path.
+
+### CHD discs
+
+Windows, Linux, and the unified Android app read CHD directly during preparation and gameplay; no BIN extraction or external converter is needed to play. The supported layout is a standalone CD image with one `MODE2/2352` track, matching the NTSC-U Crash disc. Other regions, multi-track layouts, DVD/GD-ROM images, and CHDs requiring a parent are not supported.
+
+To create a CHD from your existing dump, use [MAME's chdman](https://docs.mamedev.org/tools/chdman.html):
+
+```text
+chdman createcd -i "Crash Bandicoot.cue" -o "Crash Bandicoot.chd"
+```
+
+Keep the CUE beside its matching BIN while converting. Select the resulting CHD in the launcher; the CHD must remain available each time you play. Selecting a converted disc may create a separate prepared-game cache.
+
+CHD decoding uses [CHDSharp](https://github.com/purelogiccode/CHDSharp) 1.4.3. Original developers: Peterson Fernandes (@purelogiccode) and Gordon Jefferyes (@gjefferyes). See [third-party notices](THIRD-PARTY-NOTICES.txt) for its license and codec notices.
 
 ---
 

@@ -377,7 +377,7 @@ public sealed class MainActivity : Activity
             OpenDiscBrowserOrExplain();
         else
             _launcher?.ShowDisc(false, "File access required",
-                "Storage permission is needed to read the .cue/.bin dump.");
+                "Storage permission is needed to read the .chd or .cue/.bin dump.");
     }
 
     protected override void OnDestroy()
@@ -421,34 +421,36 @@ public sealed class MainActivity : Activity
         var prefs = GetPreferences(FileCreationMode.Private);
         var cue = prefs.GetString(DiscCuePathPreference, null);
         var bin = prefs.GetString(DiscBinPathPreference, null);
-        if (!string.IsNullOrWhiteSpace(cue) && !string.IsNullOrWhiteSpace(bin) &&
-            File.Exists(cue) && File.Exists(bin))
+        if (!string.IsNullOrWhiteSpace(cue) && File.Exists(cue) &&
+            (cue.EndsWith(".chd", StringComparison.OrdinalIgnoreCase) || File.Exists(bin)))
             ApplyDiscFiles(cue, bin);
     }
 
-    void ApplyDiscFiles(string cuePath, string binPath)
+    void ApplyDiscFiles(string cuePath, string? binPath)
     {
         try
         {
-            if (!File.Exists(cuePath) || !File.Exists(binPath))
+            bool isChd = cuePath.EndsWith(".chd", StringComparison.OrdinalIgnoreCase);
+            if (isChd) binPath = null;
+            if (!File.Exists(cuePath) || (!isChd && !File.Exists(binPath)))
             {
                 _launcher?.ShowDisc(false, "Disc files not readable",
-                    "Enable All files access, then pick the .cue next to its .bin.");
+                    "Enable All files access, then pick the .chd or the .cue next to its .bin.");
                 return;
             }
 
-            var size = new FileInfo(binPath).Length;
-            if (size < 80L * 1024 * 1024)
+            var size = new FileInfo(binPath ?? cuePath).Length;
+            if (!isChd && size < 80L * 1024 * 1024)
             {
                 _launcher?.ShowDisc(false, "Cannot read the .bin",
                     $"The file is {size / (1024 * 1024)} MB. If this is 0, the app still cannot access the dump.");
                 return;
             }
 
-            var cueText = File.ReadAllText(cuePath);
+            var cueText = isChd ? "" : File.ReadAllText(cuePath);
             _disc = new DiscDocuments(
                 Path.GetFileName(cuePath), cuePath, cueText,
-                Path.GetFileName(binPath), binPath, size);
+                binPath == null ? "" : Path.GetFileName(binPath), binPath, size);
             _usingLocalDiscCopy = false;
             GetPreferences(FileCreationMode.Private).Edit()!
                 .PutString(DiscCuePathPreference, cuePath)!
@@ -490,7 +492,7 @@ public sealed class MainActivity : Activity
         _launcher?.ShowDisc(
             ready: true,
             "Disc files ready",
-            $"{_disc.CueName}  •  {_disc.BinName} ({sizeMb:0} MB)\nFull SCUS-94900 validation runs at launch.");
+            $"{_disc.CueName}{(_disc.BinPath == null ? "" : "  •  " + _disc.BinName)} ({sizeMb:0} MB)\nFull SCUS-94900 validation runs at launch.");
     }
 
     async Task StartGameAsync()
@@ -759,6 +761,6 @@ public sealed class MainActivity : Activity
         string CuePath,
         string CueText,
         string BinName,
-        string BinPath,
+        string? BinPath,
         long BinSize);
 }

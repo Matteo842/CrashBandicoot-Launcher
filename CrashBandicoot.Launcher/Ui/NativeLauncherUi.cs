@@ -27,6 +27,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     static readonly Dictionary<string, string> FocusLabels = new(StringComparer.OrdinalIgnoreCase)
     {
         ["cue"] = "Problem with the .cue",
+        ["chd"] = "Problem with the .chd",
         ["bin"] = "Problem with the .bin",
         ["pair"] = ".cue + .bin pair",
         ["game"] = "Wrong game / region",
@@ -988,7 +989,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             g.FillPath(br, path);
             g.DrawPath(pen, path);
         }
-        TextRenderer.DrawText(g, "Select disc (.cue)", _fontChip, _chipRect, NativeTheme.Sand,
+        TextRenderer.DrawText(g, "Select disc", _fontChip, _chipRect, NativeTheme.Sand,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
         // Status + path
@@ -1061,7 +1062,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         prepCard.Controls.Add(barBg);
         prepCard.Controls.Add(new Label
         {
-            Text = "First prepare writes into the game folder next to the exe. Your .cue + .bin must still be present to play.",
+            Text = "First prepare writes into the game folder next to the exe. Your .chd or .cue + .bin must still be present to play.",
             ForeColor = Color.FromArgb(140, NativeTheme.Sand),
             Font = NativeTheme.MakeNunito(13),
             Location = new Point(36, 156),
@@ -1257,7 +1258,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         card.Controls.Add(BodyLabel(
             "Unofficial fan project — not affiliated with Sony, Activision, or Naughty Dog.\n\n" +
             "Unofficial tools for a disc you own. First prepare writes a game folder next to the exe — later Starts reuse that.\n\n" +
-            "Prepared files never replace your dump: you still need a valid NTSC-U .cue + .bin (SCUS-94900) every time you play.",
+            "Prepared files never replace your dump: you still need a valid NTSC-U .chd or .cue + .bin (SCUS-94900) every time you play.",
             new Point(36, 110), 520, 170));
         var back = MakeGhostBtn("Back");
         back.Location = new Point(36, 295);
@@ -1885,7 +1886,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         var problem = data.TryGetProperty("message", out var m) ? m.GetString()
             : data.TryGetProperty("problem", out var p) ? p.GetString() : "Something went wrong.";
         var fix = data.TryGetProperty("fix", out var f) ? f.GetString()
-            : "Select a valid Crash Bandicoot .cue that sits next to its .bin.";
+            : "Select a valid Crash Bandicoot .chd or a .cue next to its .bin.";
         var focus = data.TryGetProperty("focus", out var fo) ? fo.GetString() ?? "other" : "other";
         FocusLabels.TryGetValue(focus, out var focusLabel);
         focusLabel ??= FocusLabels["other"];
@@ -1907,7 +1908,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         var paths = new List<string>();
         if (data.TryGetProperty("cuePath", out var cp) && cp.GetString() is { Length: > 0 } cue)
-            paths.Add(".cue  " + cue);
+            paths.Add(Path.GetExtension(cue) + "  " + cue);
         if (data.TryGetProperty("binPath", out var bp) && bp.GetString() is { Length: > 0 } bin)
             paths.Add(".bin  " + bin);
         if (paths.Count > 0)
@@ -1923,7 +1924,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             });
         }
 
-        var pick = MakePrimaryBtn("Select disc (.cue)");
+        var pick = MakePrimaryBtn("Select disc");
         pick.Size = new Size(180, 42);
         pick.Location = new Point(36, 310);
         pick.Click += (_, _) =>

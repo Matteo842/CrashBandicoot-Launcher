@@ -181,7 +181,7 @@ public sealed class LauncherHost : Form
         }
         else if (!string.IsNullOrWhiteSpace(cue) && !File.Exists(cue))
         {
-            status = "Configured disc path is missing. Select your .cue again.";
+            status = "Configured disc path is missing. Select your .cue or .chd again.";
             kind = "error";
             ClearConfiguredDisc();
             discName = "";
@@ -254,7 +254,7 @@ public sealed class LauncherHost : Form
 
     void PickDisc()
     {
-        var pick = Dialog.FileOpen("cue");
+        var pick = Dialog.FileOpen("cue,chd");
         if (!pick.IsOk || string.IsNullOrWhiteSpace(pick.Path)) return;
 
         var path = Path.GetFullPath(pick.Path);
@@ -289,7 +289,7 @@ public sealed class LauncherHost : Form
                     PostError(
                         "No disc selected",
                         "Start needs a valid Crash Bandicoot dump.",
-                        "Click Select disc (.cue) and choose the .cue that sits next to its .bin.",
+                        "Click Select disc and choose your .chd or the .cue next to its .bin.",
                         "pair");
                     PushState();
                     return;
@@ -363,7 +363,7 @@ public sealed class LauncherHost : Form
         catch (Exception ex)
         {
             Post(new { type = "prepareDone" });
-            PostError("Something went wrong", Unwrap(ex), "Try selecting your .cue again, then Start.", "other");
+            PostError("Something went wrong", Unwrap(ex), "Try selecting your .cue or .chd again, then Start.", "other");
             PushState();
         }
     }
@@ -697,5 +697,5 @@ public sealed class LauncherHost : Form
         });
 
     void PostError(string message) =>
-        PostError("Error", message, "Try again, or select your .cue + .bin dump.", "other");
+        PostError("Error", message, "Try again, or select your .chd or .cue + .bin dump.", "other");
 }

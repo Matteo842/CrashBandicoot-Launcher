@@ -35,11 +35,11 @@ static class AndroidStorageAccess
             var dialog = new AlertDialog.Builder(activity)
                 .SetTitle("File access")
                 .SetMessage(
-                    "This app needs All files access to read your Crash Bandicoot .cue/.bin dump, " +
+                    "This app needs All files access to read your Crash Bandicoot .chd or .cue/.bin dump, " +
                     "the same permission other emulators use. Android's folder picker does not " +
                     "give access to those files on this phone.\n\n" +
                     "On the next screen, enable All files access for Crash Bandicoot Launcher, " +
-                    "then return here and pick the .cue.")
+                    "then return here and pick the .chd or .cue.")
                 .SetPositiveButton("Continue", (_, _) =>
                 {
                     willLeaveForSettings();

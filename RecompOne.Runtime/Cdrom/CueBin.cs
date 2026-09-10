@@ -1,6 +1,6 @@
 namespace RecompOne.Runtime.Cdrom;
 
-public sealed class CueBin : IDisposable
+public sealed class CueBin : IDiscImage
 {
     private record Track(string BinPath, int Number, string Mode, int SectorSize, int DataOffset, long FileOffset);
 
@@ -49,6 +49,15 @@ public sealed class CueBin : IDisposable
     }
 
     public byte[] ReadSector(int lba) => ReadSectorData(lba, 2048);
+
+    public long DataTrackBytes
+    {
+        get
+        {
+            var track = DataTrack();
+            return Math.Max(0, GetStream(track.BinPath).Length - track.FileOffset);
+        }
+    }
 
     public byte[] ReadSectorData(int lba, int size)
     {

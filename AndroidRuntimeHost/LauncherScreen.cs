@@ -58,7 +58,7 @@ sealed class LauncherScreen : View
     int _focusIndex;
     float _unit = 1f;
     float _footerTop;
-    string _status = "Grant file access, then pick the .cue next to its .bin";
+    string _status = "Grant file access, then pick a .chd or .cue + .bin";
     string _statusKind = "";
     string _discLine = "(none)";
 
@@ -455,7 +455,7 @@ sealed class LauncherScreen : View
         canvas.DrawRoundRect(_chipBounds, 17f * FooterUiScale * _unit,
             17f * FooterUiScale * _unit, _paint);
         _paint.SetStyle(Paint.Style.Fill);
-        DrawCenteredText(canvas, "Select disc (.cue)", _bodyBoldFont,
+        DrawCenteredText(canvas, "Select disc", _bodyBoldFont,
             15f * FooterUiScale * _unit,
             _sand, _chipBounds.CenterX(), _chipBounds.CenterY());
 
@@ -743,7 +743,7 @@ sealed class LauncherScreen : View
         {
             Text = "Unofficial fan project — not affiliated with Sony, Activision, or Naughty Dog.\n\n" +
                    "Unofficial tools for a disc you own. The first prepare writes game files into app storage; later Starts reuse them.\n\n" +
-                   "Prepared files never replace your dump: you still need a valid NTSC-U .cue + .bin (SCUS-94900) every time you play.",
+                   "Prepared files never replace your dump: you still need a valid NTSC-U .chd or .cue + .bin (SCUS-94900) every time you play.",
             TextSize = 12,
         };
         body.SetTypeface(_bodyFont, TypefaceStyle.Normal);

@@ -4,11 +4,16 @@ public sealed class CueFs : IDisposable
 {
     private record Entry(int Lba, uint Size, bool IsDir, string Name);
 
-    private readonly CueBin _bin;
+    private readonly IDiscImage _bin;
 
-    private CueFs(CueBin bin) => _bin = bin;
+    private CueFs(IDiscImage bin) => _bin = bin;
 
-    public static CueFs Open(string cuePath) => new(CueBin.Open(cuePath));
+    public static CueFs Open(string cuePath) => new(
+        Path.GetExtension(cuePath).Equals(".chd", StringComparison.OrdinalIgnoreCase)
+            ? ChdDisc.Open(cuePath)
+            : CueBin.Open(cuePath));
+
+    public long DataTrackBytes => _bin.DataTrackBytes;
 
     public byte[] ReadFile(string path)
     {
@@ -17,7 +22,7 @@ public sealed class CueFs : IDisposable
         return ReadFileWithoutOverlay(path);
     }
 
-    /// <summary>ISO file bytes from the real .bin only (ignores <see cref="DiscOverlay"/>).</summary>
+    /// <summary>ISO file bytes from the real disc only (ignores <see cref="DiscOverlay"/>).</summary>
     public byte[] ReadFileWithoutOverlay(string path)
     {
         var entry = LocateEntry(path)

@@ -105,7 +105,7 @@ internal sealed class DiscPickerPopup : IPanel
             else if (currentPath.Length > 0 && Directory.Exists(currentPath))
                 defaultDir = Path.GetFullPath(currentPath);
 
-            var result = Dialog.FileOpen("cue", defaultDir);
+            var result = Dialog.FileOpen("cue,chd", defaultDir);
             if (result.IsOk && !string.IsNullOrWhiteSpace(result.Path))
             {
                 SetPathBuf(result.Path);

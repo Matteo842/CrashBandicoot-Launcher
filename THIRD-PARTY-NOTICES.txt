@@ -1,0 +1,131 @@
+CHDSharp 1.4.3
+https://github.com/purelogiccode/CHDSharp
+Original developers: Peterson Fernandes (@purelogiccode) and Gordon Jefferyes (@gjefferyes).
+
+MIT License
+
+Copyright (c) 2026 Peterson Fernandes and Gordon Jefferyes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+ATTRIBUTION REQUIREMENT:
+Any use of this software, whether in commercial or open source projects,
+must include the following attribution in a visible location (such as
+documentation, about dialog, or credits page):
+- Original developers: Peterson Fernandes (@purelogiccode) and
+  Gordon Jefferyes (@gjefferyes)
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+COMBINED-WORK / THIRD-PARTY LICENSE NOTICE
+================================================================================
+
+CHDSharp is a combined work. The project code above is distributed under the
+MIT License. Several compression codecs are vendored in-repo (pure C#, no
+native dependencies) and retain their own licenses, listed below. Each
+vendored component's license terms apply to that component and must be
+preserved in copies and distributions.
+
+--------------------------------------------------------------------------------
+### VendoredZLib  ->  zlib license  (permissive, BSD-style)
+Pure C# zlib (deflate/inflate) implementation.
+- Managed C#/.NET code: Copyright (c) 2022-2024 Magnus Montin.
+- Original zlib: Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler.
+- Source: https://github.com/dotnet/runtime (ported from https://zlib.net/)
+
+  This software is provided 'as-is', without any express or implied warranty.
+  In no event will the authors be held liable for any damages arising from the
+  use of this software. Permission is granted to anyone to use this software
+  for any purpose, including commercial applications, and to alter it and
+  redistribute it freely, subject to the following restrictions:
+    1. The origin of this software must not be misrepresented; you must not
+       claim that you wrote the original software. If you use this software in
+       a product, an acknowledgment in the product documentation would be
+       appreciated but is not required.
+    2. Altered source versions must be plainly marked as such, and must not be
+       misrepresented as being the original software.
+    3. This notice may not be removed or altered from any source distribution.
+
+--------------------------------------------------------------------------------
+### VendoredLZMA  ->  Public Domain
+C# port of the LZMA SDK.
+- Copyright (c) 1999-2023 Igor Pavlov. Released into the public domain.
+- Source: https://www.7-zip.org/sdk.html
+  (The LZMA SDK is placed by its author in the public domain; you may use it
+  freely, including to develop closed-source software.)
+
+--------------------------------------------------------------------------------
+### VendoredFlac  ->  GNU Lesser General Public License v2.1 (LGPL-2.1)
+Pure C# FLAC encoder/decoder, derived from CUETools.Flake and libFLAC.
+- CUETools.Flake: Copyright (c) 2009-2023 Grigory Chudov.
+- Based on the Flake encoder (http://flake-enc.sourceforge.net/):
+  Copyright (c) 2006-2009 Justin Ruggles.
+- libFLAC encoder port: based on libFLAC 1.4.3 (BSD/GPL dual license,
+  used here under its BSD terms).
+
+  The VendoredFlac component is licensed under the GNU Lesser General Public
+  License v2.1 or (at your option) any later version. The full text of the
+  LGPL 2.1 is available at:
+  https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+  LGPL 2.1 summary of obligations for this component:
+  - You may use, redistribute, and/or modify VendoredFlac under the LGPL.
+  - Modified versions of VendoredFlac must remain under the LGPL and carry the
+    LGPL notice.
+  - If you distribute a binary that statically links VendoredFlac into another
+    work (as CHDSharp does), the LGPL permits this provided the recipient can
+    relink or reverse-engineer to relink with a modified VendoredFlac. Because
+    CHDSharp is distributed with complete corresponding source, recipients may
+    rebuild the assembly with a modified VendoredFlac to satisfy this.
+  - The complete corresponding source for VendoredFlac is included in this
+    repository under the VendoredFlac/ directory.
+
+--------------------------------------------------------------------------------
+### VendoredZSTD  ->  MIT License  (based on Facebook zstd, BSD-3-Clause)
+Pure C# port of the zstd 1.5.5 source tree (the version MAME 0.288 bundles),
+carried as the ZstdSharp 0.7.6 source tree.
+- ZstdSharp (C# port): Copyright (c) 2021 Oleg Stepanischev. MIT License.
+  Source: https://github.com/oleg-st/ZstdSharp
+- Underlying Facebook zstd: Copyright (c) Meta Platforms, Inc. and affiliates.
+  BSD-3-Clause. Source: https://github.com/facebook/zstd
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+================================================================================
+ACKNOWLEDGMENTS (non-license references)
+================================================================================
+- MAME (https://www.mamedev.org/) - CHD format specification and the chdman
+  reference implementation (used as a format reference; no MAME code is bundled).
+- libchdr 0.3.0 (Romain Tisseraud, BSD-3-Clause) - C reference library used as
+  a format reference.
+- RomVault/CHDSharp (Gordon Jefferyes) - original C# CHDSharp implementation
+  from which this project is forked.

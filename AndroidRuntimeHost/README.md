@@ -6,8 +6,8 @@ all live in this .NET-for-Android project and are packaged into one APK.
 
 Current path:
 
-1. select a folder containing a legal single-file SCUS-94900 CUE/BIN dump;
-2. copy it to app-private storage through Android's document provider;
+1. grant file access and select a legal SCUS-94900 CHD or CUE/BIN dump;
+2. keep the selected disc accessible in storage (CHD is read directly, without BIN extraction);
 3. validate, recompile, and compile the generated game assembly on device;
 4. load that assembly through the existing runtime;
 5. show the software PS1 VRAM in an Android `ImageView`;

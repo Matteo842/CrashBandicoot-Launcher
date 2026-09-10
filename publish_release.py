@@ -56,6 +56,7 @@ PLATFORM_RID = {
 FORBIDDEN_GLOBS = (
     "*.bin",
     "*.cue",
+    "*.chd",
     "*.iso",
     "game.recomp.dll",
     "main.cs",

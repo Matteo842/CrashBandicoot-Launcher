@@ -14,7 +14,7 @@ public sealed record DiscValidation(
     string Title = "",
     string Problem = "",
     string Fix = "",
-    string Focus = ""); // "cue" | "bin" | "pair" | "game" | "other"
+    string Focus = ""); // "cue" | "bin" | "chd" | "pair" | "game" | "other"
 
 public static class DiscValidator
 {
@@ -39,59 +39,69 @@ public static class DiscValidator
     public static DiscValidation Validate(string cuePath)
     {
         cuePath = Path.GetFullPath(cuePath);
+        bool isChd = cuePath.EndsWith(".chd", StringComparison.OrdinalIgnoreCase);
         if (!File.Exists(cuePath))
         {
             return Fail(cuePath, null, "cue",
                 "Disc file not found",
-                "The selected .cue path does not exist on disk.",
-                "Use Select disc and pick your Crash Bandicoot .cue again.");
+                "The selected disc path does not exist on disk.",
+                "Use Select disc and pick your Crash Bandicoot .cue or .chd again.");
         }
 
-        if (!cuePath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase))
+        if (!isChd && !cuePath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase))
         {
             return Fail(cuePath, null, "cue",
                 "Wrong file type",
-                "You selected something that is not a .cue sheet.",
-                "Pick the .cue file (the small text sheet), not the .bin alone.");
+                "The selected file is not a supported disc format.",
+                "Pick a .chd file, or the .cue sheet next to its matching .bin.");
         }
 
-        string binPath;
-        try
+        string? binPath = null;
+        if (!isChd)
         {
-            var sheet = ParseCueSheet(cuePath);
-            if (!sheet.Ok)
-                return sheet.Failure!;
-
-            binPath = sheet.BinPath!;
-            if (!File.Exists(binPath))
+            try
             {
-                return Fail(cuePath, binPath, "bin",
-                    "Missing .bin image",
-                    "The .cue is readable, but the disc image it points to is missing.",
-                    "Put the matching .bin in the same folder as the .cue (same names as inside the cue sheet). A prepared game folder does not replace your dump.");
-            }
+                var sheet = ParseCueSheet(cuePath);
+                if (!sheet.Ok)
+                    return sheet.Failure!;
 
-            var binLen = new FileInfo(binPath).Length;
-            if (binLen < MinBinBytes)
-            {
-                return Fail(cuePath, binPath, "bin",
-                    ".bin looks incomplete",
-                    $"The disc image is only {binLen / (1024 * 1024)} MB. A full PS1 Crash dump is hundreds of MB.",
-                    "Re-dump the disc (or restore the full .bin). Do not use an empty / tiny placeholder file.");
+                binPath = sheet.BinPath!;
+                if (!File.Exists(binPath))
+                {
+                    return Fail(cuePath, binPath, "bin",
+                        "Missing .bin image",
+                        "The .cue is readable, but the disc image it points to is missing.",
+                        "Put the matching .bin in the same folder as the .cue (same names as inside the cue sheet). A prepared game folder does not replace your dump.");
+                }
+
+                var binLen = new FileInfo(binPath).Length;
+                if (binLen < MinBinBytes)
+                {
+                    return Fail(cuePath, binPath, "bin",
+                        ".bin looks incomplete",
+                        $"The disc image is only {binLen / (1024 * 1024)} MB. A full PS1 Crash dump is hundreds of MB.",
+                        "Re-dump the disc (or restore the full .bin). Do not use an empty / tiny placeholder file.");
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            return Fail(cuePath, null, "cue",
-                "Cannot read .cue",
-                ex.Message,
-                "Open the .cue in a text editor: it should list FILE \"something.bin\" BINARY, TRACK, and INDEX lines.");
+            catch (Exception ex)
+            {
+                return Fail(cuePath, null, "cue",
+                    "Cannot read .cue",
+                    ex.Message,
+                    "Open the .cue in a text editor: it should list FILE \"something.bin\" BINARY, TRACK, and INDEX lines.");
+            }
         }
 
         string contentKey;
         try
         {
             using var fs = CueFs.Open(cuePath);
+
+            // CHD file size is compressed; check the decoded data track instead.
+            if (isChd && fs.DataTrackBytes < MinBinBytes)
+                return Fail(cuePath, null, "chd", "CHD looks incomplete",
+                    "The uncompressed data track is too small for a full Crash Bandicoot disc.",
+                    "Create a complete CHD from your original NTSC-U disc dump.");
 
             var pvd = fs.ReadSector(16);
             if (pvd.Length < 6 ||
@@ -100,8 +110,8 @@ public static class DiscValidator
             {
                 return Fail(cuePath, binPath, "bin",
                     "Not a disc image",
-                    "The .bin does not look like a PlayStation / ISO9660 image (bad volume descriptor).",
-                    "Make sure the .bin is a real PS1 dump paired with this .cue — not a renamed random file.");
+                    "The disc does not look like a PlayStation / ISO9660 image (bad volume descriptor).",
+                    "Use a complete PS1 disc dump, as .chd or a matching .cue + .bin pair.");
             }
 
             string cnf;
@@ -137,7 +147,7 @@ public static class DiscValidator
                 return Fail(cuePath, binPath, "bin",
                     "Boot file missing on disc",
                     $"The image claims Crash, but {ExpectedBoot} was not found in the filesystem.",
-                    "The .bin may be corrupt or incomplete. Re-dump the disc.");
+                    "The disc image may be corrupt or incomplete. Re-dump the disc.");
             }
 
             byte[] boot;
@@ -153,7 +163,7 @@ public static class DiscValidator
                     return Fail(cuePath, binPath, "bin",
                         "Boot file unreadable",
                         $"Could not read {ExpectedBoot} from the disc image.",
-                        "The .bin may be corrupt. Re-dump the disc.");
+                        "The disc image may be corrupt. Re-dump the disc.");
                 }
                 boot = fs.ReadFile(alt);
             }
@@ -164,17 +174,19 @@ public static class DiscValidator
                 return Fail(cuePath, binPath, "bin",
                     "Invalid boot executable",
                     "The boot file is not a PS-X EXE.",
-                    "The .bin contents look wrong or corrupt. Re-dump the disc.");
+                    "The disc image contents look wrong or corrupt. Re-dump the disc.");
             }
 
-            contentKey = ContentKey(binPath, pvd, boot, bootSize);
+            contentKey = ContentKey(binPath ?? cuePath, pvd, boot, bootSize);
         }
         catch (Exception ex)
         {
-            return Fail(cuePath, binPath, "bin",
+            return Fail(cuePath, binPath, isChd ? "chd" : "bin",
                 "Cannot open disc image",
                 ex.Message,
-                "Check that the .bin next to the .cue is complete and not locked by another program.");
+                isChd
+                    ? "Use a complete, standalone CHD created from your Crash Bandicoot NTSC-U dump. Check that the file is readable."
+                    : "Check that the .bin next to the .cue is complete and not locked by another program.");
         }
 
         var fingerprint = FingerprintDisc(cuePath, binPath, contentKey);
@@ -184,7 +196,7 @@ public static class DiscValidator
             "Disc ready",
             "Valid Crash Bandicoot NTSC-U dump.",
             "You can press Start Game.",
-            "pair");
+            isChd ? "chd" : "pair");
     }
 
     public static DiscValidation EnsureDiscPresentForLaunch(string cuePath, string expectedFingerprint)
@@ -197,16 +209,16 @@ public static class DiscValidator
             return Fail(cuePath, v.BinPath, "pair",
                 "Disc changed",
                 "The dump on disk no longer matches the prepared game.",
-                "Select your Crash Bandicoot .cue again (with the matching .bin in the same folder).");
+                "Select your Crash Bandicoot .chd or .cue again (with its matching .bin for CUE).");
         }
 
         return v;
     }
 
-    public static string FingerprintDisc(string cuePath, string binPath, string contentKey)
+    public static string FingerprintDisc(string cuePath, string? binPath, string contentKey)
     {
         var cueInfo = new FileInfo(cuePath);
-        var binInfo = new FileInfo(binPath);
+        var binInfo = new FileInfo(binPath ?? cuePath);
         var payload =
             $"{contentKey}|{binInfo.Length}|{ExpectedGameId}|postpass-v2|{cueInfo.Length}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
@@ -374,6 +386,8 @@ public static class DiscValidator
         string cue, string? bin, string focus,
         string title, string problem, string fix)
     {
+        if (cue.EndsWith(".chd", StringComparison.OrdinalIgnoreCase) && focus is "cue" or "bin" or "pair")
+            focus = "chd";
         var msg = string.IsNullOrWhiteSpace(problem) ? title : $"{title}: {problem}";
         return new DiscValidation(false, cue, bin, "", msg, title, problem, fix, focus);
     }

@@ -133,12 +133,12 @@ internal static class Program
 #else
         Console.WriteLine("  (no args)              show this help (graphical launcher is Windows-only)");
 #endif
-        Console.WriteLine("  --prepare <file.cue>   prepare game folder without UI");
-        Console.WriteLine("  --run <file.cue>       prepare (if needed) and play (no UI)");
-        Console.WriteLine("  --smoke <file.cue>     load prepared game briefly (debug)");
+        Console.WriteLine("  --prepare <file.cue|file.chd>   prepare game folder without UI");
+        Console.WriteLine("  --run <file.cue|file.chd>       prepare (if needed) and play (no UI)");
+        Console.WriteLine("  --smoke <file.cue|file.chd>     load prepared game briefly (debug)");
         Console.WriteLine("  --help                 show this help");
         Console.WriteLine();
-        Console.WriteLine("If <file.cue> is omitted for --run/--smoke, uses CdPath from settings.json when set.");
+        Console.WriteLine("If <file.cue|file.chd> is omitted for --run/--smoke, uses CdPath from settings.json when set.");
     }
 
     /// <summary>
@@ -154,7 +154,7 @@ internal static class Program
             cue = Path.GetFullPath(args[1]);
             if (!File.Exists(cue))
             {
-                error = $"cue not found: {cue}";
+                error = $"disc not found: {cue}";
                 return false;
             }
             return true;
@@ -176,7 +176,7 @@ internal static class Program
             // fall through
         }
 
-        error = "missing <file.cue> (and no valid CdPath in settings.json)";
+        error = "missing <file.cue|file.chd> (and no valid CdPath in settings.json)";
         return false;
     }
 }
