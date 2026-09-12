@@ -71,9 +71,28 @@ public sealed partial class Gpu
             PrimOf(tex, semi, raw, clut));
     }
 
+    /// <summary>
+    /// DispC HUD primitives follow the 16:9 edges instead of staying pinned to
+    /// the 4:3 frame. Elements the game parks just off the 4:3 edge (the
+    /// token strip before it slides in) move outward by the same margin, so
+    /// they stay hidden. HUD never borrows scene depth or the side clip.
+    /// </summary>
+    bool TryNativeWideHudShift(float minX, float maxX, out int shift)
+    {
+        shift = 0;
+        if (!HleOn || !GpuHle.NativeWideRendererActive
+            || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Hud) return false;
+        int width = _drawAreaRight - _drawAreaLeft + 1;
+        int margin = GpuHle.WideMargin(width);
+        if (margin <= 0) return false;
+        shift = Host.FramePacing.NativeWideHudShift(GpuHle.CurrentHudRange,
+            (minX + maxX) * 0.5f, _drawAreaLeft, width, margin);
+        return true;
+    }
+
     bool HleWideScreenQuad(ReadOnlySpan<Vert> vertices, bool semi)
     {
-        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind == GpuHle.PrimitiveKind.World)
+        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default)
             return false;
         var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
         // Full-screen flat overlays include the subtractive death fade. Keep
@@ -103,7 +122,7 @@ public sealed partial class Gpu
 
     bool HleWideFogQuad(ReadOnlySpan<Vert> vertices, int clut)
     {
-        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind == GpuHle.PrimitiveKind.World
+        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default
             || Runtime.Mem?.ReadU32(Catalogs.Catalog.LevelIdAddr) is not (20 or 22) || _blendMode != 1)
             return false;
         var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];

@@ -281,12 +281,15 @@ public static partial class FramePacing
     public static bool PreTransform(CpuContext c, IMemory m)
     {
         EnsureGfxHook();
+        NoteNativeWideHudTransform(m, c.A0);
         if (IsActive(m))
         {
             ClampAnimFrame(m, c.A0);
             HoldAnimPose(m, c.A0);
         }
         ApplyGatedDisplayPose(m, c.A0);
+        // Display lerp may have moved a flying icon; the shift follows that pose.
+        NoteNativeWideHudAnchor(m, c.A0);
         // Crash look is patched in PreGfxTransformMesh on the real SVTX
         // pointer (A0). PreTransform is too early and a second patch here
         // made PreGfx skip the buffer Gfx actually reads.
@@ -334,6 +337,9 @@ public static partial class FramePacing
     public static bool PreGpuUpdate(CpuContext c, IMemory m)
     {
         BeginGpuUpdate();
+        // The last HUD object's range must end before GpuUpdate allocates its
+        // own primitives (fade quads) into the same prims buffer.
+        CloseNativeWideHudRange(m);
         // After the whole object tree: skip-frame plat acc matches the
         // drawn lerp. FinishPacedScale may have used last present's t.
         RideAfterCrash(m);

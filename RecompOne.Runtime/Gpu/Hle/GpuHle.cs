@@ -4,11 +4,17 @@ namespace RecompOne.Runtime.Hle;
 
 public static class GpuHle
 {
-    public enum PrimitiveKind : byte { Default, World }
+    public enum PrimitiveKind : byte { Default, World, Hud }
 
     public static bool Active { get; set; }
     public static IGpuBackend? Backend { get; set; }
     public static PrimitiveKind CurrentPrimitiveKind { get; set; }
+
+    /// <summary>
+    /// HUD object owning the primitive currently being decoded (see
+    /// <see cref="Host.FramePacing.NativeWideHudRangeOf"/>), or -1.
+    /// </summary>
+    public static int CurrentHudRange { get; set; } = -1;
 
     static int _wideWorldPositive;
     static int _wideWorldNegative;

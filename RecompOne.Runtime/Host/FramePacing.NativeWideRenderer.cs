@@ -66,7 +66,11 @@ public static partial class FramePacing
         _nativeWidePending.Clear();
         _nativeWideFogBackground = null;
         GpuHle.NativeWideRendererActive = false;
-        if (!GpuHle.WideFovActive) return;
+        if (!GpuHle.WideFovActive)
+        {
+            ResetNativeWideRenderer();
+            return;
+        }
         uint zoneEntry = m.ReadU32(CamZoneAddr);
         uint zone = NativeWideGuestPointer(zoneEntry) ? EntryItem(m, zoneEntry, 0) : 0;
         uint level = m.ReadU32(Catalog.LevelIdAddr);
@@ -175,12 +179,14 @@ public static partial class FramePacing
         _nativeWideWorldRanges.Clear();
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
+        ClearNativeWideHudRanges();
         GpuHle.NativeWideRendererActive = false;
     }
 
     static void ResetNativeWideRenderer()
     {
         FinishNativeWideDraw();
+        ResetNativeWideHud();
         _nativeWideLogCount = 0;
         _nativeWideSceneryRepairs.Clear();
         _nativeWideBeachSky = null;

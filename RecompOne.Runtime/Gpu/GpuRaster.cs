@@ -118,6 +118,25 @@ public sealed partial class Gpu
             for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
         }
 
+        if (Hle.GpuHle.CurrentPrimitiveKind == Hle.GpuHle.PrimitiveKind.Hud)
+        {
+            int minX = v[0].X, maxX = v[0].X;
+            for (int i = 1; i < n; i++)
+            {
+                minX = Math.Min(minX, v[i].X);
+                maxX = Math.Max(maxX, v[i].X);
+            }
+            if (TryNativeWideHudShift(minX, maxX, out int shift))
+                for (int i = 0; i < n; i++)
+                {
+                    v[i].X += shift;
+                    // Screen-space sprites: no scene depth, no GTE subpixel.
+                    v[i].Subpixel = false;
+                    v[i].HasGteZ = false;
+                    v[i].GteZ = 0f;
+                }
+        }
+
         if (HleOn)
         {
             if (quad && !tex && !gouraud && HleWideScreenQuad(v, semi)) return;
@@ -237,6 +256,9 @@ public sealed partial class Gpu
             if (e.Skip) return;
             x = e.X[0]; w = e.X[1] - e.X[0];
         }
+        if (Hle.GpuHle.CurrentPrimitiveKind == Hle.GpuHle.PrimitiveKind.Hud
+            && TryNativeWideHudShift(x, x + w, out int hudShift))
+            x += hudShift;
         if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
 
         for (int dy = 0; dy < h; dy++)

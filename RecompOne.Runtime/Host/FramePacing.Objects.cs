@@ -17,9 +17,12 @@ public static partial class FramePacing
     /// GOOL — one original 30 Hz step, same skip at 60 and uncapped.
     /// RuiOC is cat 0x600 with SOLID_TOP but is not Euler: gate it.
     /// Torch flames are the same exe with <c>do playanim while 1</c>. Sprite
-    /// anims OR FLAG_2D. RuiOC is gated before this. DispC HUD still Euler.
-    /// World FLAG_2D (PoRoC mist) must not count as HUD or <c>scalex +=</c>
-    /// Euler fills the pit (Death_Fall cine never reaches the fade wait).
+    /// anims OR FLAG_2D. RuiOC is gated before this. DispC HUD and flying
+    /// FruiC icons are per-trans (<c>animframe += 1</c>, Tawna slide) so they
+    /// gate like enemies — Euler every present makes the wumpa hitch and the
+    /// token wobble. Pause still Euler so the menu can run. World FLAG_2D
+    /// (PoRoC mist) must not count as HUD or <c>scalex +=</c> Euler fills the
+    /// pit (Death_Fall cine never reaches the fade wait).
     /// </summary>
     static bool KeepRealDt(IMemory m, uint obj)
     {
@@ -34,7 +37,7 @@ public static partial class FramePacing
             if (IsLizaEntity(m, obj, type))
                 return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
-            if (IsHud(m, obj)) return true;
+            if (IsHud(m, obj)) return GamePaused(m);
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) != 0
                 && (IsPlatformGoolType(type) || cat == GoolCategoryPlatform))
@@ -46,7 +49,9 @@ public static partial class FramePacing
             if (HasSolidPhysics(m, obj) || IsJunocButterfly(m, obj)) return false;
             if ((b & FlagTrackPathRot) != 0) return true;
             if (type == GoolTypeJunO && !IsJunocButterfly(m, obj)) return true;
-            if (type == 3u) return true; // FruiC
+            // World fruit keeps Euler spd/gravity. FLAG_2D is the icon flying
+            // to a counter — same per-trans anim as DispC.
+            if (type == GoolTypeFrui) return (b & Flag2D) == 0;
             return false;
         }
         catch

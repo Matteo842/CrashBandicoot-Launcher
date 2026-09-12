@@ -15,6 +15,7 @@ using StbImageWriteSharp;
 
 // Uses the player's own disc/recompiled assembly and a separate config/save root.
 // Replays one ordering table, so animation and timing cannot invalidate the comparison.
+if (args is ["--hud-checks"]) return HudChecks.Run();
 var options = new Dictionary<string, string>();
 string[] valueOptions = ["--disc", "--game", "--level", "--frame", "--fps", "--input", "--snapshots", "--output"];
 for (int i = 0; i < args.Length; i++)
@@ -96,6 +97,7 @@ ConfigManager.SaveView([]);
 bool booted = false, compared = false;
 int comparisonExitCode = 3;
 int frames = 0;
+var hudBounds = new List<(float Left, float Top, float Right, float Bottom)>();
 var capturedSnapshots = new List<object>();
 uint drawEnvAddress = 0;
 using var timeout = new Timer(_ =>
@@ -110,6 +112,19 @@ using var boot = new Hook(typeof(FramePacing).GetMethod(nameof(FramePacing.PreNs
         return original(c, m);
     }));
 Event.AddListener<VSyncEvent>(_ => frames++);
+Event.AddListener<RenderPrimEvent>(e =>
+{
+    if (frames < targetFrame || compared || e.Skip || GpuHle.CurrentHudRange < 0) return;
+    int left = e.X.Take(e.Count).Min(), right = e.X.Take(e.Count).Max();
+    int top = e.Y.Take(e.Count).Min(), bottom = e.Y.Take(e.Count).Max();
+    int width = e.DrawRight - e.DrawLeft + 1;
+    int shift = FramePacing.NativeWideHudShift(GpuHle.CurrentHudRange, (left + right) * 0.5f,
+        e.DrawLeft, width, GpuHle.WideMargin(width));
+    // HUD relocation intentionally changes the centre. Compare the world
+    // outside the old and new sprite bounds, retaining the raw difference too.
+    hudBounds.Add((left - 1, top - 1, right + 1, bottom + 1));
+    hudBounds.Add((left + shift - 1, top - 1, right + shift + 1, bottom + 1));
+});
 Event.AddListener<DrawEnvEvent>(e => drawEnvAddress = e.Context.A0);
 Event.AddListener<PadReadEvent>(e =>
 {
@@ -130,6 +145,7 @@ Event.AddListener<PadReadEvent>(e =>
 using var compare = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
     (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((original, c, m) =>
     {
+        hudBounds.Clear();
         original(c, m);
         if (compared || (frames < targetFrame && (!snapshots.TryPeek(out int next) || frames < next))) return;
         var backend = (GlBackend)GpuHle.Backend!;
@@ -172,13 +188,29 @@ using var compare = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
 
         bool wide = native.W > reference.W && native.H == reference.H;
         int changedPixels = 0, maxChannelDifference = 0;
+        int hudChangedPixels = 0, excludedHudPixels = 0;
         int margin = (native.W - reference.W) / 2;
         if (wide)
             for (int y = 0; y < reference.H; y++)
                 for (int x = 0; x < reference.W; x++)
                 {
                     int a = native.Pixels[y * native.W + x + margin], b = reference.Pixels[y * reference.W + x];
-                    if (((a ^ b) & 0xFFFFFF) != 0) changedPixels++;
+                    bool changed = ((a ^ b) & 0xFFFFFF) != 0;
+                    if (changed) changedPixels++;
+                    float gx = env.ClipX0 + (x + 0.5f) * width / reference.W;
+                    float gy = env.ClipY0 + (y + 0.5f) * height / reference.H;
+                    bool hud = false;
+                    foreach (var bounds in hudBounds)
+                        if (gx >= bounds.Left && gx <= bounds.Right && gy >= bounds.Top && gy <= bounds.Bottom)
+                        {
+                            hud = true;
+                            break;
+                        }
+                    if (hud)
+                    {
+                        excludedHudPixels++;
+                        if (changed) hudChangedPixels++;
+                    }
                     for (int shift = 0; shift < 24; shift += 8)
                         maxChannelDifference = Math.Max(maxChannelDifference,
                             Math.Abs(((a >> shift) & 255) - ((b >> shift) & 255)));
@@ -188,7 +220,9 @@ using var compare = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
             level, actualLevel = m.ReadU32(RecompOne.Runtime.Catalogs.Catalog.LevelIdAddr),
             frame = frames, fps = ConfigManager.View.FrameRate, wide,
             nativeWidth = native.W, originalWidth = reference.W, height = reference.H,
-            changedPixels, maxChannelDifference, passed = wide && changedPixels == 0,
+            changedPixels, maxChannelDifference, excludedHudPixels, hudChangedPixels,
+            worldChangedPixels = changedPixels - hudChangedPixels,
+            passed = wide && changedPixels == hudChangedPixels,
         };
         string json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(Path.Combine(output, "result.json"), json);
@@ -217,7 +251,7 @@ return comparisonExitCode;
 
 static int Usage()
 {
-    Console.Error.WriteLine("WideCheck --disc <game.cue> --game <game.recomp.dll> [--level 9] [--frame 600] [--fps 0] [--walk | --input <script.json>] [--snapshots 400,500,600] [--boundaries] [--output <folder>]");
+    Console.Error.WriteLine("WideCheck --hud-checks | --disc <game.cue> --game <game.recomp.dll> [--level 9] [--frame 600] [--fps 0] [--walk | --input <script.json>] [--snapshots 400,500,600] [--boundaries] [--output <folder>]");
     return 2;
 }
 

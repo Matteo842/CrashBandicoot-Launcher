@@ -18,14 +18,23 @@ public static class LibGpu
         uint addr = c.A0 & 0x1FFFFCu;
         try
         {
+            Host.FramePacing.CloseNativeWideHudRange(m);
             Host.FramePacing.DrawNativeWideWorld();
             for (int guard = 0; guard < 0x100000; guard++)
             {
                 uint header = m.ReadU32(addr);
                 uint count = header >> 24;
-                GpuHle.CurrentPrimitiveKind = Host.FramePacing.IsNativeWideWorldPrimitive(addr)
-                    ? GpuHle.PrimitiveKind.World
-                    : GpuHle.PrimitiveKind.Default;
+                if (Host.FramePacing.IsNativeWideWorldPrimitive(addr))
+                {
+                    GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.World;
+                    GpuHle.CurrentHudRange = -1;
+                }
+                else
+                {
+                    int hud = Host.FramePacing.NativeWideHudRangeOf(addr);
+                    GpuHle.CurrentHudRange = hud;
+                    GpuHle.CurrentPrimitiveKind = hud >= 0 ? GpuHle.PrimitiveKind.Hud : GpuHle.PrimitiveKind.Default;
+                }
                 for (uint i = 0; i < count; i++)
                     gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
                 uint next = header & 0xFFFFFFu;
@@ -37,6 +46,7 @@ public static class LibGpu
         {
             GpuHle.FinishWideWorldWinding();
             GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.Default;
+            GpuHle.CurrentHudRange = -1;
             Host.FramePacing.FinishNativeWideDraw();
         }
 

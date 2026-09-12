@@ -29,8 +29,9 @@ namespace RecompOne.Runtime.Host;
 /// Default: one original 34-tick GOOL update per 34 wall ticks (still
 /// drawn). That is the turtle skip, at 60 and at uncapped — not an
 /// <c>if (fps==60)</c> branch. 60 Hz is two presents per 34 ticks.
-/// Opt out HUD, SOLID_TOP platforms (Euler dt/34), path rollers,
-/// JunOC rollers, and FruiC. Hoppers (i+=1 / lerp / loopseek) never
+/// Opt out SOLID_TOP platforms (Euler dt/34), path rollers,
+/// JunOC rollers, and world FruiC. DispC HUD and flying FruiC icons
+/// stay on the 30 Hz gate (pause HUD still Euler). Hoppers (i+=1 / lerp / loopseek) never
 /// opt into Euler; Jump may OR SOLID_TOP, sticky ids keep the skip.
 /// Gated crate AABB
 /// is the last real GoolObjectBound, not a
@@ -95,7 +96,9 @@ namespace RecompOne.Runtime.Host;
 /// Unscaled trans <c>x += vel</c> (later turtles) is kept at dt/34 of the extra.
 /// GOOL spawn() in trans is capped to a 30 Hz burst so it cannot fill the 96
 /// object pool. Wumpa sprite frames are <c>+= 1</c> per trans; scaled to dt/34.
-/// HUD uses real ticks. Crash anim_frame is not scaled (GOOL wait).
+/// HUD / flying pickup GOOL is the same per-trans step, gated to 34 wall
+/// ticks so the fruit spin and Tawna mask match 30 FPS. Pause HUD keeps
+/// real ticks so the menu still runs. Crash anim_frame is not scaled (GOOL wait).
 /// ChangeAnim wait=0 is "next GoolObjectUpdate", not 33 ms. At unlocked
 /// refresh that replays look/TNT rock frames every present. Hold that
 /// wait until 34 wall ticks and rewrite the tag every present with the

@@ -4,7 +4,7 @@ This is still experimental. Rendering the loaded world is supported across the g
 
 ## Rendering contract
 
-The GTE projection scale and the original 4:3 image are preserved. Additional triangles are projected with the same camera into a wider framebuffer. There is no horizontal image warp or separate scale for the edges.
+The GTE projection scale and the original 4:3 world image are preserved. Additional triangles are projected with the same camera into a wider framebuffer. There is no horizontal image warp or separate scale for the edges. HUD counters follow the wider edges while the token strip stays centred.
 
 The original ordering table draws the centre. The side pass enumerates the loaded WGEO meshes independently of the authored SLST visibility list, clips against the near plane, and uses the original materials, UV animation, lighting and fog inputs. It supports normal, fog, water ripple, tint, fog plus tint, and lamp shading. Tint deliberately matches the lighting bank selected by the current recompiled game; changing the native pass alone would create a lighting seam.
 
@@ -52,7 +52,15 @@ The default captures the initial camera after loading, at VSync callback 600. `-
 
 The tool captures the native frame and replays the **same ordering table**, restoring the original draw environment first. That restoration matters: the death fade changes draw mode, including dithering, before the next replay. Comparing frames from separate runs would mix rendering changes with animation and timing differences.
 
-Outputs are `native.png`, `original.png` and `result.json`. PNGs contain raw framebuffer pixels with the PS1's non-square pixel aspect; view them at 16:9 and 4:3 respectively for visual assessment. The JSON reports whether wide rendering was active, the number of changed centre RGB pixels, and the maximum channel difference. Exit 0 means wide rendering was active and the centre was identical; it does **not** certify complete side geometry. Exit 1 means comparison failure, 2 invalid arguments, and 3 a timeout or no completed comparison.
+Outputs are `native.png`, `original.png` and `result.json`. PNGs contain raw framebuffer pixels with the PS1's non-square pixel aspect; view them at 16:9 and 4:3 respectively for visual assessment. The JSON retains the raw changed centre RGB count and maximum channel difference. `excludedHudPixels` counts pixels inside the original or shifted HUD sprite bounds; `hudChangedPixels` counts differences there. `worldChangedPixels` counts differences outside those bounds. Exit 0 means wide rendering was active and the centre outside HUD bounds was identical; it does **not** certify HUD appearance, pixels behind the excluded bounds, or complete side geometry. Exit 1 means comparison failure, 2 invalid arguments, and 3 a timeout or no completed comparison.
+
+## Adaptive HUD checks
+
+`FramePacing.NativeWideHud.cs` tracks primitives emitted by DispC and screen-space FruiC objects. One shift per object uses the authored trans.x (8.8 pixels from the 4:3 centre) so a spinning wumpa or a Tawna mask cannot wobble as its first primitive's bounds move; parked tokens still move beyond the wider edge. Pickup displacement fades in from the first visible position and follows the current screen anchor, including the centred token strip. HUD polygons bypass scene depth and GTE subpixel lookup results. GpuUpdate closes the final HUD range before allocating its fade overlays.
+
+DispC counters and flying FruiC icons run one original 34-tick GOOL update per 34 wall ticks (still drawn). Their trans is per interpret (`animframe += 1`, the Tawna collection pose), so Euler every present made the fruit hitch and the mask slide left and right. World fruit keeps Euler spd/gravity. The pause menu is still Euler so it can run while the rest of the world is frozen. The 4:3 path records no HUD ranges and applies no displacement. Returning to a world pass with widescreen disabled also releases cached scenery additions and pickup history. Pickup flight tracking still uses a short inactivity timeout for pooled objects; full pickup trajectories and rapid slot reuse need gameplay coverage.
+
+Run `CrashBandicoot.WideCheck --hud-checks` for disc-free regression checks of range ownership, counter spacing, parked tokens, centred Tawna / spinning-fruit wobble, 30 Hz HUD gating, cross-screen pickup destinations, cleanup and 4:3 gating. Use `--input tools/CrashBandicoot.WideCheck/scenarios/hud-visible.json --frame 500 --level 12` with the normal disc/game arguments to hold Triangle and capture both visible counters. Scenery coverage and remaining level-specific defects are listed above; these HUD changes do not complete untested scenery.
 
 Local checks have shown identical centre RGB for the repaired initial scenes and the moving bridge death fade. Shader diagnostics also compared emitted vertex colours, UVs, texture pages and projected positions against the retail pass. Keep generated assemblies, disc data, dumps and screenshots in ignored output directories.
 
