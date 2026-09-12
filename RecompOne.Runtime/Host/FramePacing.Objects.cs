@@ -428,6 +428,9 @@ public static partial class FramePacing
         if (obj != _obj) return;
         if (!_solidObj) return;
         if (GamePaused(m)) return;
+        // HUD / flying icons are screen-space. Lerping rot+trans of Tawna's
+        // portrait between 30 Hz poses swings it across the top of the frame.
+        if (IsNativeWideHudObject(m, obj, out _)) return;
         if (_exactTicks >= RefTicks - 0.01) return;
 
         if (!_simAcc.TryGetValue(obj, out double acc)) return;
@@ -628,6 +631,7 @@ public static partial class FramePacing
         if (_svtxPatched) return;
         if (GamePaused(m)) return;
         if (_exactTicks >= RefTicks - 0.01) return;
+        if (IsNativeWideHudObject(m, obj, out _)) return;
         bool box = false;
         try { box = TryReadGoolClass(m, obj, out uint typ, out _) && typ == GoolTypeBox; }
         catch { /* */ }

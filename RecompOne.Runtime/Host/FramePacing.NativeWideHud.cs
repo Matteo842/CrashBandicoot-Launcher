@@ -184,6 +184,12 @@ public static partial class FramePacing
             return NativeWideCounterShift(t, margin);
         var range = _nativeWideHudRanges[rangeIndex];
         if (range.HasT) t = range.T;
+        else if (Math.Abs(t) < NativeWideHudCounter)
+            // Tawna's portrait is a wide sprite. Without trans.x the first
+            // primitive is one side of the face and would flip ±margin every
+            // frame. Fruit/lives counters have 8.8 trans; parked tokens sit
+            // beyond ±0.5 and still use the primitive centre.
+            t = 0f;
         if (!range.HasShift)
         {
             range.Shift = range.Pickup != 0
@@ -224,6 +230,13 @@ public static partial class FramePacing
                 if (now - _nativeWidePickups[key].Last > stale)
                     _nativeWidePickups.Remove(key);
         }
+
+        // Tawna / Brio / Cortex fly to the centred strip. A wide portrait
+        // whose first primitive sits off-centre must not be treated as a
+        // fruit or lives counter.
+        if (Math.Abs(seen.Origin) < NativeWideHudEdgeBand
+            && Math.Abs(t) < NativeWideHudCounter)
+            return 0;
 
         float best = 0f;
         for (int dest = -1; dest <= 1; dest += 2)

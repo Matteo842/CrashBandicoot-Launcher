@@ -56,6 +56,23 @@ static class HudChecks
             FramePacing.CloseNativeWideHudRange(memory);
             Check(FramePacing.NativeWideHudShift(0, 180, 0, 512, 86) == 0, "Tawna stays centred despite side prim");
             Check(FramePacing.NativeWideHudShift(0, 330, 0, 512, 86) == 0, "Tawna ignores opposite prim");
+            Call("ResetNativeWideHud");
+            memory.WriteU32(obj + 0x80, 0x01000000); // world X — no 8.8 HUD trans
+            Tail(prim);
+            Call("NoteNativeWideHudTransform", memory, obj);
+            Tail(prim + 0x40);
+            FramePacing.CloseNativeWideHudRange(memory);
+            Check(FramePacing.NativeWideHudShift(0, 180, 0, 512, 86) == 0, "Tawna without 8.8 trans ignores side prim");
+            Call("ResetNativeWideHud");
+            Tail(prim);
+            Call("NoteNativeWideHudTransform", memory, obj);
+            Tail(prim + 0x40);
+            FramePacing.CloseNativeWideHudRange(memory);
+            Check(FramePacing.NativeWideHudShift(0, 550, 0, 512, 86) == 86, "Parked token without 8.8 trans still shifts");
+            memory.WriteU32(obj + 0x80, 0);
+            Call("ResetNativeWideHud");
+            Check(Pickup(0.2f) == 0 && Pickup(-0.3f) == 0, "Tawna portrait prims stay centred");
+            Call("ResetNativeWideHud");
             Check(Pickup(0.8f) == 0, "Pickup starts at its world position");
             Check(Pickup(0f) == 0, "Tawna flight reaches centred strip");
             Check(Pickup(-0.5f) == -86, "Cross-screen fruit reaches left counter");
