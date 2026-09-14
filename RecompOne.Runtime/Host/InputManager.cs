@@ -38,6 +38,7 @@ internal static unsafe class InputManager
     static bool _sessionMarker;
     static bool _cheatMenuToggle;
     static bool _pauseMenuToggle;
+    static int _frameRateIndex = -1;
     static readonly HashSet<Key> _keysDown = [];
 
     
@@ -46,6 +47,12 @@ internal static unsafe class InputManager
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
     public static bool ConsumeCheatMenuToggle() { var v = _cheatMenuToggle; _cheatMenuToggle = false; return v; }
     public static bool ConsumePauseMenuToggle() { var v = _pauseMenuToggle; _pauseMenuToggle = false; return v; }
+    public static bool TryConsumeFrameRateIndex(out int index)
+    {
+        index = _frameRateIndex;
+        _frameRateIndex = -1;
+        return (uint)index < (uint)ViewConfig.FrameRateOptionValues.Length;
+    }
 
     /// <summary>Host / async-key path can request a toggle without Silk KeyDown.</summary>
     public static void RequestFullscreenToggle() => _fullscreenToggle = true;
@@ -55,6 +62,14 @@ internal static unsafe class InputManager
 
     /// <summary>Host / async-key path can request a pause-menu toggle without Silk KeyDown.</summary>
     public static void RequestPauseMenuToggle() => _pauseMenuToggle = true;
+
+    /// <summary>Host / async-key path can request a frame-rate preset without Silk KeyDown.</summary>
+    public static void RequestFrameRateIndex(int index)
+    {
+        if (!ConfigManager.View.FrameRateHotkeys) return;
+        if ((uint)index < (uint)ViewConfig.FrameRateOptionValues.Length)
+            _frameRateIndex = index;
+    }
 
     public static void Initialize(IInputContext input)
     {
@@ -129,6 +144,7 @@ internal static unsafe class InputManager
         PollFullscreenHotkeys();
         PollCheatMenuHotkey();
         PollPauseMenuHotkey();
+        PollFrameRateHotkeys();
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
@@ -137,15 +153,20 @@ internal static unsafe class InputManager
     }
 
     // Embedded child HWND often doesn't get Silk KeyDown (focus on parent / lost focus).
-    // Edge-detect F11 / Alt+Enter / cheat menu / Esc via GetAsyncKeyState so toggles always work.
+    // Edge-detect F11 / Alt+Enter / cheat menu / Esc / 1–5 via GetAsyncKeyState so toggles always work.
     static bool _asyncF11;
     static bool _asyncAltEnter;
     static bool _asyncCheatMenu;
     static bool _asyncPauseMenu;
+    static readonly bool[] _asyncFrameRate = new bool[5];
     const int VkF11 = 0x7A;
+    const int VkShift = 0x10;
+    const int VkControl = 0x11;
     const int VkMenu = 0x12;   // either Alt
     const int VkReturn = 0x0D;
     const int VkEscape = 0x1B;
+    const int Vk1 = 0x31;
+    const int VkNumpad1 = 0x61;
 
     static void PollFullscreenHotkeys()
     {
@@ -180,6 +201,22 @@ internal static unsafe class InputManager
         if (down && !_asyncPauseMenu) _pauseMenuToggle = true;
         _asyncPauseMenu = down;
     }
+
+    static void PollFrameRateHotkeys()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        bool active = HostWindow.IsInputActive && ConfigManager.View.FrameRateHotkeys;
+        bool mods = AsyncDown(VkShift) || AsyncDown(VkControl) || AsyncDown(VkMenu);
+        for (int i = 0; i < _asyncFrameRate.Length; i++)
+        {
+            bool down = AsyncDown(Vk1 + i) || AsyncDown(VkNumpad1 + i);
+            if (active && !mods && down && !_asyncFrameRate[i])
+                _frameRateIndex = i;
+            _asyncFrameRate[i] = down;
+        }
+    }
+
+    static bool AsyncDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
     [DllImport("user32.dll")]
     static extern short GetAsyncKeyState(int vKey);
@@ -447,6 +484,11 @@ internal static unsafe class InputManager
         if (key == Key.F11) _fullscreenToggle = true;
         if (key == Key.Escape) _pauseMenuToggle = true;
         if (key == ResolveCheatMenuKey()) _cheatMenuToggle = true;
+        if (ConfigManager.View.FrameRateHotkeys && !HostModifierDown())
+        {
+            int fps = FrameRateIndexFromKey(key);
+            if (fps >= 0) _frameRateIndex = fps;
+        }
         // Alt+Enter — common fullscreen shortcut (Enter alone stays Start/Cross).
         if (key is Key.Enter or Key.KeypadEnter
             && (_keysDown.Contains(Key.AltLeft) || _keysDown.Contains(Key.AltRight)))
@@ -475,6 +517,21 @@ internal static unsafe class InputManager
             });
         }
     }
+
+    static int FrameRateIndexFromKey(Key key) => key switch
+    {
+        Key.Number1 or Key.Keypad1 => 0,
+        Key.Number2 or Key.Keypad2 => 1,
+        Key.Number3 or Key.Keypad3 => 2,
+        Key.Number4 or Key.Keypad4 => 3,
+        Key.Number5 or Key.Keypad5 => 4,
+        _ => -1,
+    };
+
+    static bool HostModifierDown() =>
+        _keysDown.Contains(Key.ShiftLeft) || _keysDown.Contains(Key.ShiftRight) ||
+        _keysDown.Contains(Key.ControlLeft) || _keysDown.Contains(Key.ControlRight) ||
+        _keysDown.Contains(Key.AltLeft) || _keysDown.Contains(Key.AltRight);
 
     static Key ResolveCheatMenuKey()
     {

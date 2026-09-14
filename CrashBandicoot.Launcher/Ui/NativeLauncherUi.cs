@@ -98,6 +98,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _dejitter;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
+    ThemeCheck? _frameRateHotkeys;
     readonly Dictionary<string, ThemeCheck> _modChecks = new(StringComparer.OrdinalIgnoreCase);
     JsonElement _pendingDiscoveredMods;
 
@@ -288,6 +289,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_dejitter, state, "dejitter");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
+        SetCheck(_frameRateHotkeys, state, "frameRateHotkeys");
 
         if (state.TryGetProperty("discoveredMods", out var dm))
             _pendingDiscoveredMods = dm.Clone();
@@ -1299,6 +1301,17 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             y += 38;
         }
 
+        y += 8;
+        _frameRateHotkeys = MakeCheck("FPS mode keys 1–5");
+        _frameRateHotkeys.Location = new Point(36, y);
+        _frameRateHotkeys.Checked = true;
+        card.Controls.Add(_frameRateHotkeys);
+        y += 32;
+        card.Controls.Add(BodyLabel(
+            "1 original, 2 60, 3 120, 4 240, 5 uncapped. Uncheck to free those keys.",
+            new Point(36, y), 500, 36));
+        y += 40;
+
         var save = MakePrimaryBtn("Save");
         save.Location = new Point(36, y + 10);
         save.Click += (_, _) =>
@@ -1306,7 +1319,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             var keys = new Dictionary<string, string>();
             foreach (var (_, id) in KeyFields)
                 keys[id] = _keyBoxes.TryGetValue(id, out var b) ? b.BoundKey : "";
-            Emit(new { type = "saveControls", keys });
+            Emit(new { type = "saveControls", keys, frameRateHotkeys = _frameRateHotkeys?.Checked ?? true });
             CloseSheet();
         };
         var back = MakeGhostBtn("Back");
@@ -1404,7 +1417,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         ]);
         list.Controls.Add(_frameRate);
         y += rowGap;
-        AddHint("Gameplay and bonus. Same speed as 30 FPS, unique frames at the chosen rate. Menus, crate tally, and bonus save stay 30.");
+        AddHint("Gameplay and bonus. Same speed as 30 FPS, unique frames at the chosen rate. Menus, crate tally, and bonus save stay 30. In-game keys 1–5 switch modes unless turned off in Controls.");
 
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [

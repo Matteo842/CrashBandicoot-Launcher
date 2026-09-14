@@ -68,6 +68,7 @@ internal sealed class InputSettingsSection : ISettingsSection
                 if (_padIndex == 0) ConfigManager.Game.Keys = new KeyBindings();
                 else ConfigManager.Game.Keys2 = KeyBindings.Empty();
                 ConfigManager.View.CheatMenuKey = "F3";
+                ConfigManager.View.FrameRateHotkeys = true;
                 ConfigManager.SaveView(PanelManager.Panels);
             }
             else
@@ -208,7 +209,7 @@ internal sealed class InputSettingsSection : ISettingsSection
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
             return;
 
-        ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 120);
         ImGui.TableSetupColumn("Keyboard", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableHeadersRow();
 
@@ -235,7 +236,19 @@ internal sealed class InputSettingsSection : ISettingsSection
             }
         }
 
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.TextUnformatted("FPS keys 1–5");
+        ImGui.TableSetColumnIndex(1);
+        bool fpsKeys = ConfigManager.View.FrameRateHotkeys;
+        if (ImGui.Checkbox("Enabled##fpsHotkeys", ref fpsKeys))
+        {
+            ConfigManager.View.FrameRateHotkeys = fpsKeys;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
         ImGui.EndTable();
+        ImGuiEx.TextDisabled("1 original, 2 60, 3 120, 4 240, 5 uncapped");
     }
 
     static string? GetPressedKey()

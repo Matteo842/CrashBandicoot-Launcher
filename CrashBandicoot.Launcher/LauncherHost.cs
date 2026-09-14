@@ -240,6 +240,7 @@ public sealed class LauncherHost : Form
                 ["right"] = k.Right,
                 ["cheatMenu"] = ConfigManager.View.CheatMenuKey,
             },
+            frameRateHotkeys = ConfigManager.View.FrameRateHotkeys,
         };
 
         Post(new { type = "state", state });
@@ -505,8 +506,29 @@ public sealed class LauncherHost : Form
                 Runtime.RequestPauseMenuToggle();
                 return true;
             }
+
+            int fpsIndex = FrameRateHotkeyIndex(keyData);
+            if (fpsIndex >= 0 && ConfigManager.View.FrameRateHotkeys)
+            {
+                Runtime.RequestFrameRateIndex(fpsIndex);
+                return true;
+            }
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    static int FrameRateHotkeyIndex(Keys keyData)
+    {
+        if ((keyData & Keys.Modifiers) != 0) return -1;
+        return (keyData & Keys.KeyCode) switch
+        {
+            Keys.D1 or Keys.NumPad1 => 0,
+            Keys.D2 or Keys.NumPad2 => 1,
+            Keys.D3 or Keys.NumPad3 => 2,
+            Keys.D4 or Keys.NumPad4 => 3,
+            Keys.D5 or Keys.NumPad5 => 4,
+            _ => -1,
+        };
     }
 
     static bool MatchesCheatHotkey(string name, Keys keyData)
@@ -560,6 +582,8 @@ public sealed class LauncherHost : Form
             if (!string.IsNullOrWhiteSpace(cheatKey))
                 ConfigManager.View.CheatMenuKey = cheatKey;
         }
+        if (root.TryGetProperty("frameRateHotkeys", out var fpsKeys))
+            ConfigManager.View.FrameRateHotkeys = fpsKeys.ValueKind == JsonValueKind.True;
         ConfigManager.SaveGame();
         ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
         PushState();

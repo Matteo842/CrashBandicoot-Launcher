@@ -242,6 +242,11 @@ internal static class HostWindow
                     pause.IsOpen = !pause.IsOpen;
             }
         }
+        if (InputManager.TryConsumeFrameRateIndex(out int fpsIndex)
+            && ConfigManager.View.FrameRateHotkeys
+            && !ImGuiWantsTextInput()
+            && FrameRateSetting.TryApplyIndex(fpsIndex))
+            DevHudOverlay.Flash(ViewConfig.FrameRateLabels[fpsIndex]);
         // Mute must survive BiosB.PadRead's late Poll — applied via ApplyOverlay.
         ExitToMapInjector.MuteGameplay =
             PanelManager.Get<PauseMenuPopup>()?.IsOpen == true && !ExitToMapInjector.Active;
@@ -251,6 +256,18 @@ internal static class HostWindow
         // Pause menu may request leave during Draw — end only after ImGui finishes.
         if (_endSessionRequested || _window.IsClosing)
             EndSession();
+    }
+
+    static bool ImGuiWantsTextInput()
+    {
+        try
+        {
+            return ImGui.GetCurrentContext() != IntPtr.Zero && ImGui.GetIO().WantTextInput;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Pump window/input events without presenting a frame (for pad sampling mid-frame).</summary>

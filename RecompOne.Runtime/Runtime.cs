@@ -69,6 +69,9 @@ public static class Runtime
     /// <summary>Queue a pause-menu toggle (safe from WinForms key routing).</summary>
     public static void RequestPauseMenuToggle() => Host.InputManager.RequestPauseMenuToggle();
 
+    /// <summary>Queue a frame-rate preset (0–4: original, 60, 120, 240, uncapped).</summary>
+    public static void RequestFrameRateIndex(int index) => Host.InputManager.RequestFrameRateIndex(index);
+
     public static void Initialize(string title)
     {
         Diagnostics.ConsoleMirror.Install();

@@ -267,4 +267,11 @@ public class ViewConfig
         get => GetBool("ShowDevHud");
         set => SetBool("ShowDevHud", value);
     }
+
+    /// <summary>Keys 1–5 switch frame-rate presets during gameplay. On by default.</summary>
+    public bool FrameRateHotkeys
+    {
+        get => GetBool("FrameRateHotkeys", true);
+        set => SetBool("FrameRateHotkeys", value);
+    }
 }
