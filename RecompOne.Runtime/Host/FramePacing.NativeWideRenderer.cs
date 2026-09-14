@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Memory;
@@ -15,7 +16,12 @@ public static partial class FramePacing
     static bool _nativeWideRangeOpen;
     static int _nativeWideLogCount;
     static readonly List<NativeWideTriangle> _nativeWidePending = [];
+    static readonly List<NativeWideTriangle> _nativeWideOpaque = new(1024);
+    static readonly List<NativeWideTriangle> _nativeWideTransparent = new(128);
+    static readonly List<NativeWideTriangle> _nativeWideExtensions = new(256);
+    static readonly short[] _nativeWideMatrix = new short[9];
     static readonly NativeWideClipVertex[][] _nativeWideCameraVertices = new NativeWideClipVertex[8][];
+    public static double LastNativeWideCpuMs { get; private set; }
     static int _nativeWideDrawX, _nativeWideDrawY;
     enum NativeWideShader { Normal, Fog, Ripple, Tint, FogTint, Lamp }
     static NativeWideShader _nativeWideShader;
@@ -207,8 +213,10 @@ public static partial class FramePacing
         var gpu = Runtime.Gpu;
         var backend = GpuHle.Backend;
         if (gpu == null || backend is not { Ready: true }) return false;
-
-        uint zoneEntry = m.ReadU32(CamZoneAddr);
+        long cpuStart = Stopwatch.GetTimestamp();
+        try
+        {
+            uint zoneEntry = m.ReadU32(CamZoneAddr);
         if (!NativeWideGuestPointer(zoneEntry)) return false;
         uint zone = EntryItem(m, zoneEntry, 0);
         if (!NativeWideGuestPointer(zone)) return false;
@@ -283,7 +291,7 @@ public static partial class FramePacing
             };
         }
 
-        var matrix = new short[9];
+        var matrix = _nativeWideMatrix;
         for (int i = 0; i < matrix.Length; i++)
             matrix[i] = (short)m.ReadU16(NativeWideMatrixAddr + (uint)i * 2u);
         int projection = (int)m.ReadU32(NativeWideProjectionAddr);
@@ -321,8 +329,9 @@ public static partial class FramePacing
         float viewCenterY = gpu.DrawOffsetY + screenY;
 
         uint drawCount = m.ReadU32(DrawCountAddr);
-        var opaque = new List<NativeWideTriangle>(1024);
-        var transparent = new List<NativeWideTriangle>(128);
+        _nativeWideOpaque.Clear();
+        _nativeWideTransparent.Clear();
+        _nativeWideExtensions.Clear();
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
         int clippedPolygons = 0;
         int candidates = 0;
@@ -346,7 +355,7 @@ public static partial class FramePacing
                 repairVertices[2] = NativeWideRepairToCamera(m, repair.C, world, matrix);
                 AddNativeWideClippedTriangle(repairVertices, projection, screenX, screenY,
                     gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
-                    repairFlags, true, opaque, transparent);
+                    repairFlags, true, _nativeWideOpaque, _nativeWideTransparent);
             }
             for (int pi = 0; pi < world.PolyCount; pi++)
             {
@@ -359,28 +368,50 @@ public static partial class FramePacing
                     gpu.DrawOffsetX, gpu.DrawOffsetY,
                     viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
                     flags, noCull, u0, v0, u1, v1, u2, v2,
-                    opaque, transparent);
+                    _nativeWideOpaque, _nativeWideTransparent);
             }
         }
 
-        transparent.Sort((a, b) => b.Depth.CompareTo(a.Depth));
+        _nativeWideTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
         _nativeWideDrawX = gpu.DrawOffsetX;
         _nativeWideDrawY = gpu.DrawOffsetY;
-        _nativeWidePending.AddRange(opaque.Where(t => t.Flags.WideMode == WidePrimitiveMode.BackdropSides));
-        _nativeWidePending.AddRange(transparent.Where(t => t.Flags.WideMode == WidePrimitiveMode.BackdropSides));
-        _nativeWidePending.AddRange(opaque.Concat(transparent).Where(t => t.Flags.WideMode == WidePrimitiveMode.WorldExtensionSides).OrderByDescending(t => t.Depth));
-        _nativeWidePending.AddRange(opaque.Where(t => t.Flags.WideMode == WidePrimitiveMode.WorldSides));
-        _nativeWidePending.AddRange(transparent.Where(t => t.Flags.WideMode == WidePrimitiveMode.WorldSides));
+        for (int i = 0; i < _nativeWideOpaque.Count; i++)
+        {
+            var t = _nativeWideOpaque[i];
+            if (t.Flags.WideMode == WidePrimitiveMode.BackdropSides) _nativeWidePending.Add(t);
+            else if (t.Flags.WideMode == WidePrimitiveMode.WorldExtensionSides) _nativeWideExtensions.Add(t);
+        }
+        for (int i = 0; i < _nativeWideTransparent.Count; i++)
+        {
+            var t = _nativeWideTransparent[i];
+            if (t.Flags.WideMode == WidePrimitiveMode.BackdropSides) _nativeWidePending.Add(t);
+            else if (t.Flags.WideMode == WidePrimitiveMode.WorldExtensionSides) _nativeWideExtensions.Add(t);
+        }
+        _nativeWideExtensions.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        _nativeWidePending.AddRange(_nativeWideExtensions);
+        for (int i = 0; i < _nativeWideOpaque.Count; i++)
+            if (_nativeWideOpaque[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
+                _nativeWidePending.Add(_nativeWideOpaque[i]);
+        for (int i = 0; i < _nativeWideTransparent.Count; i++)
+            if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
+                _nativeWidePending.Add(_nativeWideTransparent[i]);
 
+        LastNativeWideCpuMs = (Stopwatch.GetTimestamp() - cpuStart) * 1000.0 / Stopwatch.Frequency;
         if (_nativeWideLogCount < 8)
         {
             _nativeWideLogCount++;
             PaceLog($"native-wide renderer source={totalPolygons} candidates={candidates} "
                 + $"clipped={clippedPolygons} "
-                + $"side={opaque.Count}+{transparent.Count} winding={GpuHle.WideWorldFrontSign} "
+                + $"side={_nativeWideOpaque.Count}+{_nativeWideTransparent.Count} "
+                + $"cpu={LastNativeWideCpuMs:0.0}ms winding={GpuHle.WideWorldFrontSign} "
                 + $"samples={GpuHle.WideWorldPositiveSamples}/{GpuHle.WideWorldNegativeSamples}");
         }
         return true;
+        }
+        finally
+        {
+            LastNativeWideCpuMs = (Stopwatch.GetTimestamp() - cpuStart) * 1000.0 / Stopwatch.Frequency;
+        }
     }
 
     static int AddNativeWideClippedPolygon(
@@ -473,13 +504,93 @@ public static partial class FramePacing
                 continue;
             if (minX >= viewCenterX - coreHalf && maxX <= viewCenterX + coreHalf)
                 continue;
-            var triangle = new NativeWideTriangle(a, b, c, flags, (a.Z + b.Z + c.Z) / 3f);
+            // Clip to the two 16:9 side bands so a spanning sky/ground triangle
+            // is not rasterized across the whole 4:3 core and then discarded.
+            // Keep a 2px overlap with the 4:3 core so CPU clip cannot open a
+            // seam; the GL scissor still rejects those centre fragments.
+            float y0 = viewCenterY - halfHeight, y1 = viewCenterY + halfHeight;
+            added += EmitNativeWideBand(a, b, c, viewCenterX - wideHalf, viewCenterX - coreHalf + 2f, y0, y1,
+                flags, opaque, transparent);
+            added += EmitNativeWideBand(a, b, c, viewCenterX + coreHalf - 2f, viewCenterX + wideHalf, y0, y1,
+                flags, opaque, transparent);
+        }
+        return added;
+    }
+
+    static int EmitNativeWideBand(
+        in HleVertex a, in HleVertex b, in HleVertex c,
+        float x0, float x1, float y0, float y1, in PrimFlags flags,
+        List<NativeWideTriangle> opaque, List<NativeWideTriangle> transparent)
+    {
+        Span<HleVertex> input = stackalloc HleVertex[8];
+        Span<HleVertex> output = stackalloc HleVertex[8];
+        input[0] = a; input[1] = b; input[2] = c;
+        int count = 3;
+        count = ClipHlePlane(input, count, output, x0, vertical: true, keepPositive: true);
+        count = ClipHlePlane(output, count, input, x1, vertical: true, keepPositive: false);
+        count = ClipHlePlane(input, count, output, y0, vertical: false, keepPositive: true);
+        count = ClipHlePlane(output, count, input, y1, vertical: false, keepPositive: false);
+        if (count < 3) return 0;
+
+        int added = 0;
+        for (int i = 1; i + 1 < count; i++)
+        {
+            var pa = input[0];
+            var pb = input[i];
+            var pc = input[i + 1];
+            if (Math.Abs((pb.X - pa.X) * (pc.Y - pa.Y) - (pb.Y - pa.Y) * (pc.X - pa.X)) < 0.01)
+                continue;
+            var triangle = new NativeWideTriangle(pa, pb, pc, flags, (pa.Z + pb.Z + pc.Z) / 3f);
             if (flags.SemiTrans) transparent.Add(triangle);
             else opaque.Add(triangle);
             added++;
         }
         return added;
     }
+
+    static int ClipHlePlane(
+        ReadOnlySpan<HleVertex> input, int count, Span<HleVertex> output,
+        float edge, bool vertical, bool keepPositive)
+    {
+        if (count <= 0) return 0;
+        int n = 0;
+        var prev = input[count - 1];
+        float prevCoord = vertical ? prev.X : prev.Y;
+        float prevDist = keepPositive ? prevCoord - edge : edge - prevCoord;
+        bool prevInside = prevDist >= 0f;
+        for (int i = 0; i < count; i++)
+        {
+            var current = input[i];
+            float curCoord = vertical ? current.X : current.Y;
+            float curDist = keepPositive ? curCoord - edge : edge - curCoord;
+            bool curInside = curDist >= 0f;
+            if (curInside != prevInside && n < output.Length)
+            {
+                float denom = prevDist - curDist;
+                float t = Math.Abs(denom) < 1e-8f ? 0f : prevDist / denom;
+                output[n++] = LerpHle(prev, current, t);
+            }
+            if (curInside && n < output.Length)
+                output[n++] = current;
+            prev = current;
+            prevDist = curDist;
+            prevInside = curInside;
+        }
+        return n;
+    }
+
+    static HleVertex LerpHle(in HleVertex a, in HleVertex b, float t) => new()
+    {
+        X = a.X + (b.X - a.X) * t,
+        Y = a.Y + (b.Y - a.Y) * t,
+        Z = a.Z + (b.Z - a.Z) * t,
+        R = (byte)Math.Clamp((int)Math.Round(a.R + (b.R - a.R) * t), 0, 255),
+        G = (byte)Math.Clamp((int)Math.Round(a.G + (b.G - a.G) * t), 0, 255),
+        B = (byte)Math.Clamp((int)Math.Round(a.B + (b.B - a.B) * t), 0, 255),
+        U = (short)Math.Round(a.U + (b.U - a.U) * t),
+        V = (short)Math.Round(a.V + (b.V - a.V) * t),
+        HasGteZ = a.HasGteZ && b.HasGteZ,
+    };
 
     static bool TryReadNativeWideCameraVertex(
         IMemory m,

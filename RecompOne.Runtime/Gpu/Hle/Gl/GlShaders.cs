@@ -291,6 +291,8 @@ internal static class GlShaders
 
         void main() {
             if (uWideMode == 1) {
+                // Safety net: side-band draws scissor to the margins. Do not
+                // rely on this discard for the 4:3 core — it kills mobile fill.
                 float x1 = gl_FragCoord.x / float(uScale);
                 if (x1 >= uWideCore.x && x1 < uWideCore.y) discard;
             }

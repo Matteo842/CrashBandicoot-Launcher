@@ -56,8 +56,14 @@ public sealed partial class Gpu
             // authored exceptions to geometric depth. Preserve that ordering.
             flags.WideMode = WidePrimitiveMode.CoreOnly;
             be.DrawTri(HV(a, sub, false), HV(b, sub, false), HV(c, sub, false), flags);
-            flags.WideMode = WidePrimitiveMode.DepthTest;
-            be.DrawTri(HV(a, sub, true), HV(b, sub, true), HV(c, sub, true), flags);
+            float ax = sub ? a.Fx : a.X, bx = sub ? b.Fx : b.X, cx = sub ? c.Fx : c.X;
+            float minX = Math.Min(ax, Math.Min(bx, cx));
+            float maxX = Math.Max(ax, Math.Max(bx, cx));
+            if (minX < _drawAreaLeft || maxX > _drawAreaRight)
+            {
+                flags.WideMode = WidePrimitiveMode.DepthTest;
+                be.DrawTri(HV(a, sub, true), HV(b, sub, true), HV(c, sub, true), flags);
+            }
         }
         else
             be.DrawTri(HV(a, sub, false), HV(b, sub, false), HV(c, sub, false), flags);

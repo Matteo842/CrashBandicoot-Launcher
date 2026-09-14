@@ -549,6 +549,76 @@ public sealed class GlBackend : IGpuBackend
         _gl.Uniform4(uBlendOpaque, 1f, 1f, 1f, 0f);
     }
 
+    readonly struct ScissorBand
+    {
+        public readonly int X0, Y0, X1, Y1;
+        public ScissorBand(int x0, int y0, int x1, int y1)
+        {
+            X0 = x0; Y0 = y0; X1 = x1; Y1 = y1;
+        }
+        public bool Empty => X1 < X0 || Y1 < Y0;
+    }
+
+    static bool UsesSideBands(WidePrimitiveMode mode) => mode is
+        WidePrimitiveMode.WorldSides or
+        WidePrimitiveMode.BackdropSides or
+        WidePrimitiveMode.OverlaySides or
+        WidePrimitiveMode.WorldExtensionSides or
+        WidePrimitiveMode.DepthTest;
+
+    int BuildScissorBands(GlDisplayRt? rt, Span<ScissorBand> bands)
+    {
+        if (rt == null)
+        {
+            bands[0] = new ScissorBand(_kClipX0, _kClipY0, _kClipX1, _kClipY1);
+            return 1;
+        }
+
+        int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
+        int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
+        if (_kWideMode == WidePrimitiveMode.CoreOnly && rt.Margin > 0)
+        {
+            cx0 = rt.Margin;
+            cx1 = rt.Margin + rt.W - 1;
+        }
+        else if (rt.Margin > 0 && _kClipX0 <= rt.X && _kClipX1 >= rt.X + rt.W - 1)
+        {
+            cx0 = 0;
+            cx1 = rt.Wide1x - 1;
+        }
+
+        // Side-band primitives used to scissor the whole wide RT and discard the
+        // 4:3 core in the fragment shader. On Adreno that shades (and often
+        // framebuffer-fetches) the entire centre for every spanning WGEO triangle.
+        if (rt.Margin > 0 && UsesSideBands(_kWideMode))
+        {
+            int n = 0;
+            int left1 = Math.Min(cx1, rt.Margin - 1);
+            if (cx0 <= left1)
+                bands[n++] = new ScissorBand(cx0, cy0, left1, cy1);
+            int right0 = Math.Max(cx0, rt.Margin + rt.W);
+            if (right0 <= cx1)
+                bands[n++] = new ScissorBand(right0, cy0, cx1, cy1);
+            return n;
+        }
+
+        bands[0] = new ScissorBand(cx0, cy0, cx1, cy1);
+        return 1;
+    }
+
+    void DrawScissored(ReadOnlySpan<ScissorBand> bands, int bandCount, int scale, int first, uint count)
+    {
+        for (int i = 0; i < bandCount; i++)
+        {
+            var b = bands[i];
+            if (b.Empty) continue;
+            _gl.Scissor(b.X0 * scale, b.Y0 * scale,
+                (uint)Math.Max(0, (b.X1 - b.X0 + 1) * scale),
+                (uint)Math.Max(0, (b.Y1 - b.Y0 + 1) * scale));
+            _gl.DrawArrays(PrimitiveType.Triangles, first, count);
+        }
+    }
+
     public unsafe void Flush()
     {
         if (_count == 0) return;
@@ -610,27 +680,8 @@ public sealed class GlBackend : IGpuBackend
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.ScissorTest);
         int s = GlVram.Scale;
-        if (rt == null)
-        {
-            int sw = _kClipX1 - _kClipX0 + 1, sh = _kClipY1 - _kClipY0 + 1;
-            _gl.Scissor(_kClipX0 * s, _kClipY0 * s, (uint)Math.Max(0, sw * s), (uint)Math.Max(0, sh * s));
-        }
-        else
-        {
-            int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
-            int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
-            if (_kWideMode == WidePrimitiveMode.CoreOnly && rt.Margin > 0)
-            {
-                cx0 = rt.Margin;
-                cx1 = rt.Margin + rt.W - 1;
-            }
-            else if (rt.Margin > 0 && _kClipX0 <= rt.X && _kClipX1 >= rt.X + rt.W - 1)
-            {
-                cx0 = 0;
-                cx1 = rt.Wide1x - 1;
-            }
-            _gl.Scissor(cx0 * s, cy0 * s, (uint)Math.Max(0, (cx1 - cx0 + 1) * s), (uint)Math.Max(0, (cy1 - cy0 + 1) * s));
-        }
+        Span<ScissorBand> bands = stackalloc ScissorBand[2];
+        int bandCount = BuildScissorBands(rt, bands);
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         bool splitFetch = _glesFramebufferFetchPath != GlesFramebufferFetchPath.None && _progPrimFast != 0 &&
@@ -658,7 +709,7 @@ public sealed class GlBackend : IGpuBackend
                 _gl.UseProgram(transparent ? _progPrim : _progPrimFast);
                 if (_glesShadingRate != null)
                     _glesShadingRate(transparent ? 0x96A6u : 0x96A9u);
-                _gl.DrawArrays(PrimitiveType.Triangles, runStart, (uint)(runEnd - runStart));
+                DrawScissored(bands, bandCount, s, runStart, (uint)(runEnd - runStart));
                 runStart = runEnd;
             }
             if (_glesShadingRate != null)
@@ -678,7 +729,7 @@ public sealed class GlBackend : IGpuBackend
             if (_glesFramebufferFetchPath != GlesFramebufferFetchPath.None)
             {
                 _gl.Disable(EnableCap.Blend);
-                _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                DrawScissored(bands, bandCount, s, 0, (uint)_count);
             }
             else if (_gles && !_kSubtractBatch)
             {
@@ -686,7 +737,7 @@ public sealed class GlBackend : IGpuBackend
                 _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                 _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.OneMinusSrc1Alpha,
                     BlendingFactor.One, BlendingFactor.Zero);
-                _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                DrawScissored(bands, bandCount, s, 0, (uint)_count);
             }
             else if (_gles)
             {
@@ -694,12 +745,12 @@ public sealed class GlBackend : IGpuBackend
                 _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
                 _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.OneMinusSrc1Alpha,
                     BlendingFactor.One, BlendingFactor.Zero);
-                _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                DrawScissored(bands, bandCount, s, 0, (uint)_count);
             }
             else if (!_kTransparent)
             {
                 _gl.Disable(EnableCap.Blend);
-                _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                DrawScissored(bands, bandCount, s, 0, (uint)_count);
             }
             else
             {
@@ -709,19 +760,19 @@ public sealed class GlBackend : IGpuBackend
                 {
                     _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                     SetBlend(0f, 1f);
-                    _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                    DrawScissored(bands, bandCount, s, 0, (uint)_count);
 
                     if (readsDrawTarget) Barrier();
                     _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
                     SetBlend(1f, 1f);
                     _gl.Uniform4(_uBlendOpaque, 0f, 0f, 0f, 1f);
-                    _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                    DrawScissored(bands, bandCount, s, 0, (uint)_count);
                 }
                 else
                 {
                     _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                     SetBlend(_kBlend switch { 0 => 0.5f, 3 => 0.25f, _ => 1f }, _kBlend == 0 ? 0.5f : 1f);
-                    _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+                    DrawScissored(bands, bandCount, s, 0, (uint)_count);
                 }
             }
 
