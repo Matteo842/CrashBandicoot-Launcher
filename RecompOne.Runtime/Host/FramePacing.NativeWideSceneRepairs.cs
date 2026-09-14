@@ -68,16 +68,18 @@ public static partial class FramePacing
         if (cached != null) return cached;
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
-        var triangles = new NativeWideClipVertex[world.PolyCount][];
+        var triangles = new NativeWideClipVertex[world.PolyCount * 3];
         for (int pi = 0; pi < world.PolyCount; pi++)
         {
             uint poly = world.Polygons + (uint)pi * 8;
-            NativeWidePolygonVertices(m.ReadU32(poly), m.ReadU32(poly + 4), out int a, out int b, out int c);
-            var vertices = new[] { ReadNativeWideLocal(m, world, a), ReadNativeWideLocal(m, world, b), ReadNativeWideLocal(m, world, c) };
-            triangles[pi] = vertices;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            int o = pi * 3;
+            triangles[o] = ReadNativeWideLocal(m, world, a);
+            triangles[o + 1] = ReadNativeWideLocal(m, world, b);
+            triangles[o + 2] = ReadNativeWideLocal(m, world, c);
             for (int ei = 0; ei < 3; ei++)
             {
-                Vector3 pa = Position(vertices[ei]), pb = Position(vertices[(ei + 1) % 3]);
+                Vector3 pa = Position(triangles[o + ei]), pb = Position(triangles[o + (ei + 1) % 3]);
                 bool swap = pa.X > pb.X || (pa.X == pb.X && (pa.Y > pb.Y || (pa.Y == pb.Y && pa.Z > pb.Z)));
                 var edge = swap ? new NativeWideEdge(pb, pa) : new NativeWideEdge(pa, pb);
                 edges[edge] = edges.TryGetValue(edge, out var owner)
@@ -89,8 +91,10 @@ public static partial class FramePacing
         foreach (var owner in edges.Values)
         {
             if (owner.Count != 1) continue;
-            var vertices = triangles[owner.Polygon];
-            var a = vertices[owner.Edge]; var b = vertices[(owner.Edge + 1) % 3]; var c = vertices[(owner.Edge + 2) % 3];
+            int o = owner.Polygon * 3;
+            var a = triangles[o + owner.Edge];
+            var b = triangles[o + (owner.Edge + 1) % 3];
+            var c = triangles[o + (owner.Edge + 2) % 3];
             if (sky)
             {
                 if (a.Y != 64 || b.Y != 64) continue;
@@ -268,7 +272,7 @@ public static partial class FramePacing
     static NativeWideClipVertex ReadNativeWideLocal(IMemory m, NativeWideWorld world, int index)
     {
         uint address = world.Vertices + (uint)index * 8;
-        uint a = m.ReadU32(address), b = m.ReadU32(address + 4);
+        uint a = FastU32(m, address), b = FastU32(m, address + 4);
         return new(NativeWideSign13((int)((b >> 3) & 8191)) * 8,
             NativeWideSign13((int)((b >> 19) & 8191)) * 8,
             NativeWideSign13((int)((a >> 24) | (((b >> 1) & 3) << 8) | (((b >> 16) & 7) << 10))) * 8,

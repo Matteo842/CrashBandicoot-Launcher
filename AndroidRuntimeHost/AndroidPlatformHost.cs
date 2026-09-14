@@ -74,6 +74,9 @@ sealed class AndroidPlatformHost(
             ? 0
             : (phaseStart - _lastPresentTimestamp) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         _lastPresentTimestamp = phaseStart;
+        if (frameIntervalMilliseconds > 200)
+            Android.Util.Log.Warn("CrashGPU",
+                $"frame hitch {frameIntervalMilliseconds:F0} ms, wideCpu {RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs:F1} ms");
         var presented = backend.PresentDisplay(
             gpu.DisplayX, gpu.DisplayY, nativeWidth, nativeHeight, gpu.Display24Bit,
             surfaceWidth, surfaceHeight);
@@ -110,7 +113,8 @@ sealed class AndroidPlatformHost(
                                                $"present {presented.w}x{presented.h}, CPU submit " +
                                                $"{_prepareMilliseconds / frames:F2}+{_surfaceMilliseconds / frames:F2} ms, " +
                                                $"swap {_swapMilliseconds / frames:F2} ms, " +
-                                               $"wideCpu {RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs:F1} ms, " +
+                                               $"wideCpu {RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs:F1} ms " +
+                                               $"(peak {RecompOne.Runtime.Host.FramePacing.ConsumeNativeWideCpuPeakMs():F1}), " +
                                                $"scale {GlVram.Scale}x, " +
                                                $"batches {_flushes / (double)frames:F1}, writes {_writebacks / (double)frames:F1}, " +
                                                $"verts {_vertices / (double)frames:F0}, GL {backend.LastDiagnostic}");

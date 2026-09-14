@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Hle;
@@ -30,6 +31,7 @@ public static partial class FramePacing
     static byte[]? _nativeWideRam;
     static int _nativeWideRamMask;
     public static double LastNativeWideCpuMs { get; private set; }
+    public static double LastNativeWideCpuPeakMs { get; private set; }
     static int _nativeWideDrawX, _nativeWideDrawY;
     enum NativeWideShader { Normal, Fog, Ripple, Tint, FogTint, Lamp }
     static NativeWideShader _nativeWideShader;
@@ -447,6 +449,37 @@ public static partial class FramePacing
             _nativeWideRam = null;
             _nativeWideRamMask = 0;
             LastNativeWideCpuMs = (Stopwatch.GetTimestamp() - cpuStart) * 1000.0 / Stopwatch.Frequency;
+            if (LastNativeWideCpuMs > LastNativeWideCpuPeakMs)
+                LastNativeWideCpuPeakMs = LastNativeWideCpuMs;
+        }
+    }
+
+    public static double ConsumeNativeWideCpuPeakMs()
+    {
+        double peak = LastNativeWideCpuPeakMs;
+        LastNativeWideCpuPeakMs = LastNativeWideCpuMs;
+        return peak;
+    }
+
+    /// <summary>
+    /// JIT the native-wide helpers before the first gameplay frame. Android ships
+    /// without AOT, so the first walk into a new WGEO otherwise compiles methods
+    /// on the hot path (Cemu-style stutter, but on the CPU).
+    /// </summary>
+    public static void WarmNativeWideJit()
+    {
+        const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        foreach (var method in typeof(FramePacing).GetMethods(flags))
+        {
+            if (method.IsGenericMethodDefinition || method.ContainsGenericParameters)
+                continue;
+            string name = method.Name;
+            if (!name.Contains("NativeWide", StringComparison.Ordinal)
+                && name is not ("ClipHlePlane" or "LerpHle" or "FastU32"
+                    or "EmitNativeWideBand" or "EmitNativeWideUnclipped"))
+                continue;
+            try { RuntimeHelpers.PrepareMethod(method.MethodHandle); }
+            catch { /* dynamic or unsupported signatures */ }
         }
     }
 

@@ -608,11 +608,15 @@ public sealed class MainActivity : Activity
                     throw new InvalidOperationException("The Android OpenGL ES renderer failed to initialize.");
                 var configured = gpuInfo.ConfigureBackend(
                     backend, ConfigManager.View.InternalResolution);
+                var warmupStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                backend.WarmGpuPipelines();
+                var warmupMs = (System.Diagnostics.Stopwatch.GetTimestamp() - warmupStart)
+                    * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                 Android.Util.Log.Info("CrashGPU",
                     $"GPU {gpuInfo.Vendor} / {gpuInfo.Renderer}; " +
                     $"framebuffer fetch: {gpuInfo.FramebufferFetchLabel}; " +
                     $"texture barrier: {(configured.textureBarrier ? gpuInfo.TextureBarrierFunction : "flush fallback")}; " +
-                    $"2x2 shading: {configured.coarseShading}");
+                    $"2x2 shading: {configured.coarseShading}; pipeline warmup {warmupMs:F0} ms");
                 diagnostics = new GameGpuDiagnosticsSession(
                     this, gpuInfo, ConfigManager.View.InternalResolution,
                     configured.textureBarrier, configured.coarseShading);

@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Silk.NET.OpenGL;
 
@@ -36,7 +38,9 @@ public sealed class GlBackend : IGpuBackend
     byte[] _readback = [];
 
     readonly GlVertex[] _verts = new GlVertex[MaxVerts];
+    readonly GlVertex[] _depthVerts = new GlVertex[MaxVerts];
     int _count;
+    int _depthCount;
 
     HleDrawEnv _env;
 
@@ -81,6 +85,7 @@ public sealed class GlBackend : IGpuBackend
         _glesFramebufferFetchPath = gles ? framebufferFetch : GlesFramebufferFetchPath.None;
         _vram.Init(gles);
         CheckError("vram.init");
+        RecompOne.Runtime.Host.FramePacing.WarmNativeWideJit();
 
         _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim", gles, _glesFramebufferFetchPath);
         if (_glesFramebufferFetchPath != GlesFramebufferFetchPath.None)
@@ -191,8 +196,146 @@ public sealed class GlBackend : IGpuBackend
         Ready = true;
     }
 
+    readonly HashSet<long> _warmedRtKeys = [];
     bool _classifyValid;
     GlDisplayRt? _classifiedRt;
+
+    /// <summary>
+    /// Adreno (and other GLES drivers) compile the real draw pipeline on the
+    /// first glDraw with a given program, FBO format, blend and depth state —
+    /// the same hitch as Cemu's shader cache. Force those combinations now so
+    /// walking into new geometry does not stall mid-level.
+    /// </summary>
+    public void WarmGpuPipelines() => WarmTypicalPipelines();
+
+    void WarmTypicalPipelines()
+    {
+        if (!Ready) return;
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        foreach (var method in typeof(GlBackend).GetMethods(
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (method.IsGenericMethodDefinition || method.ContainsGenericParameters) continue;
+            try { RuntimeHelpers.PrepareMethod(method.MethodHandle); }
+            catch { /* ignore */ }
+        }
+        // Dummy FBOs do not compile Adreno pipelines for the real display RT.
+        // Warm each live RT the first time it is created (see GetOrCreateRt).
+        WarmPresentPipeline();
+        _gl.Finish();
+        _frameFlushes = 0;
+        _frameWritebacks = 0;
+        _frameVertices = 0;
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000.0
+            / System.Diagnostics.Stopwatch.Frequency;
+        Console.WriteLine($"[GlBackend] pipeline warmup {ms:0}ms");
+        CheckError("pipeline.warmup");
+    }
+
+    void WarmDisplayRt(GlDisplayRt rt)
+    {
+        if (rt.Fbo == 0 || !_warmedRtKeys.Add(rt.Fbo)) return;
+
+        int savedCount = _count;
+        var savedTarget = _kTarget;
+        var savedMode = _kWideMode;
+        int savedCheck = _kCheckMask;
+        bool savedTrans = _kTransparent;
+        int savedBlend = _kBlend;
+
+        _kTarget = rt;
+        _kClipX0 = rt.X;
+        _kClipY0 = rt.Y;
+        _kClipX1 = rt.X + rt.W - 1;
+        _kClipY1 = rt.Y + rt.H - 1;
+        _kSetMask = 0;
+        _kCheckMask = 0;
+        _kBlend = 0;
+        _kTwAndX = 0xFF;
+        _kTwAndY = 0xFF;
+        _kTwOrX = 0;
+        _kTwOrY = 0;
+
+        foreach (WidePrimitiveMode mode in Enum.GetValues<WidePrimitiveMode>())
+        {
+            FillWarmVertices(rt);
+            _kWideMode = mode;
+            _kTransparent = mode is WidePrimitiveMode.OverlaySides or WidePrimitiveMode.WorldExtensionSides;
+            Flush();
+        }
+
+        FillWarmVertices(rt);
+        _kWideMode = WidePrimitiveMode.WorldSides;
+        _kCheckMask = 1;
+        _kTransparent = false;
+        Flush();
+
+        _count = savedCount;
+        _kTarget = savedTarget;
+        _kWideMode = savedMode;
+        _kCheckMask = savedCheck;
+        _kTransparent = savedTrans;
+        _kBlend = savedBlend;
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        _gl.Finish();
+    }
+
+    void FillWarmVertices(GlDisplayRt rt)
+    {
+        float left = rt.X - Math.Max(4, rt.Margin) * 0.5f;
+        float core = rt.X + rt.W * 0.5f;
+        float right = rt.X + rt.W + Math.Max(4, rt.Margin) * 0.5f;
+        float y = rt.Y + 8f;
+        int n = 0;
+        n = PushWarmTri(n, left, y, 0);
+        n = PushWarmTri(n, right, y, 0);
+        n = PushWarmTri(n, core, y, 0x8000);
+        n = PushWarmTri(n, left, y + 8f, 0x1000);
+        n = PushWarmTri(n, right, y + 8f, 0x1000);
+        _count = n;
+    }
+
+    int PushWarmTri(int n, float x, float y, int tpage)
+    {
+        _verts[n++] = WarmVert(x, y, tpage);
+        _verts[n++] = WarmVert(x + 4f, y, tpage);
+        _verts[n++] = WarmVert(x, y + 4f, tpage);
+        return n;
+    }
+
+    static GlVertex WarmVert(float x, float y, int tpage) => new()
+    {
+        X = x,
+        Y = y,
+        Color = 0x808080u,
+        Texpage = tpage,
+        InvZ = 0.01f,
+    };
+
+    void WarmPresentPipeline()
+    {
+        int w = Math.Max(64, 512 * Math.Max(1, GlVram.Scale));
+        int h = Math.Max(64, 240 * Math.Max(1, GlVram.Scale));
+        foreach (bool nearest in new[] { false, true })
+        {
+            EnsurePresentSize(w, h, nearest);
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
+            _gl.Viewport(0, 0, (uint)w, (uint)h);
+            _gl.Disable(EnableCap.DepthTest);
+            _gl.Disable(EnableCap.Blend);
+            _gl.Disable(EnableCap.ScissorTest);
+            _gl.UseProgram(_progPresent);
+            _gl.BindVertexArray(_presentVao);
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);
+            _gl.Uniform2(_uPresentOrigin, 0f, 0f);
+            _gl.Uniform2(_uPresentSize, 512f, 240f);
+            _gl.Uniform2(_uPresentTexSize, (float)VramShadow.Width, VramShadow.Height);
+            _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+        }
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
 
     public void SetDrawEnv(in HleDrawEnv env)
     {
@@ -203,6 +346,7 @@ public sealed class GlBackend : IGpuBackend
             && env.SetMask == _env.SetMask && env.CheckMask == _env.CheckMask
             && env.Dither == _env.Dither)
             return;
+        FlushDeferredDepth();
         _env = env;
         _classifyValid = false;
     }
@@ -217,6 +361,7 @@ public sealed class GlBackend : IGpuBackend
 
     public unsafe void BeginWideDepth(uint? clearColor)
     {
+        FlushDeferredDepth();
         Flush();
         _classifyValid = false;
         var rt = Classify();
@@ -309,6 +454,7 @@ public sealed class GlBackend : IGpuBackend
         fresh.Create(_gl);
         _rts[slot] = fresh;
         SyncRtFromVram(fresh, fbX, fbY, fbW, fbH);
+        WarmDisplayRt(fresh);
         return fresh;
     }
 
@@ -363,6 +509,7 @@ public sealed class GlBackend : IGpuBackend
         foreach (var rt in _rts)
             if (rt is { Dirty: true } && rt.Intersects(px, py, pw, 256))
             {
+                FlushDeferredDepth();
                 Flush();
                 Writeback(rt);
             }
@@ -388,6 +535,8 @@ public sealed class GlBackend : IGpuBackend
 
     void Begin(in PrimFlags f, int vertsNeeded)
     {
+        if (_depthCount > 0 && f.WideMode is not (WidePrimitiveMode.CoreOnly or WidePrimitiveMode.DepthTest))
+            FlushDeferredDepth();
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
         bool subtractBatch = transparent && blend == 2;
@@ -431,9 +580,44 @@ public sealed class GlBackend : IGpuBackend
 
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
+        if (f.WideMode == WidePrimitiveMode.DepthTest)
+        {
+            if (_depthCount + 3 > MaxVerts) FlushDeferredDepth();
+            bool depthDith = DitherOf(f);
+            _depthVerts[_depthCount++] = V(a, f, depthDith);
+            _depthVerts[_depthCount++] = V(b, f, depthDith);
+            _depthVerts[_depthCount++] = V(c, f, depthDith);
+            return;
+        }
         Begin(f, 3);
         bool dith = DitherOf(f);
         _verts[_count++] = V(a, f, dith); _verts[_count++] = V(b, f, dith); _verts[_count++] = V(c, f, dith);
+    }
+
+    void FlushDeferredDepth()
+    {
+        if (_depthCount == 0) return;
+        Flush();
+        Array.Copy(_depthVerts, 0, _verts, 0, _depthCount);
+        _count = _depthCount;
+        _depthCount = 0;
+        _pendingWideMode = WidePrimitiveMode.DepthTest;
+        _kWideMode = WidePrimitiveMode.DepthTest;
+        _kTarget = ClassifyCached();
+        _kTransparent = false;
+        _kSubtractBatch = false;
+        _kBlend = 0;
+        _kSetMask = _env.SetMask ? 1 : 0;
+        _kCheckMask = _env.CheckMask ? 1 : 0;
+        _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF;
+        _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
+        _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8;
+        _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
+        _kClipX0 = _env.ClipX0;
+        _kClipY0 = _env.ClipY0;
+        _kClipX1 = _env.ClipX1;
+        _kClipY1 = _env.ClipY1;
+        Flush();
     }
 
     public void DrawRect(in HleRect r, in PrimFlags f)
@@ -843,6 +1027,7 @@ public sealed class GlBackend : IGpuBackend
         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
         _classifyValid = false;
         _frame++;
+        FlushDeferredDepth();
         Flush();
 
         for (int i = 0; i < _rts.Length; i++)
