@@ -301,6 +301,18 @@ public static partial class FramePacing
         }
     }
 
+    static bool IsChefC(IMemory m, uint obj)
+    {
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypeChef;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     static bool TryReadGoolClass(IMemory m, uint obj, out uint type, out uint cat)
     {
         if (TryReadGoolClassFrom(m, m.ReadU32(obj + ObjGlobalOff), out type, out cat))
@@ -749,7 +761,7 @@ public static partial class FramePacing
         CpuContext c, IMemory m, uint obj, uint drawn, bool crash, bool box, int itemsHint = 0)
     {
         if (crash) return;
-        if (IsPinsC(m, obj)) return;
+        if (IsPinsC(m, obj) || IsChefC(m, obj)) return;
         if ((drawn & 0xFF000000u) != 0x80000000u) return;
         if (GamePaused(m)) return;
 
