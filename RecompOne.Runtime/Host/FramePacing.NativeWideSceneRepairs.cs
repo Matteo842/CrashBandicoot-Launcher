@@ -279,9 +279,9 @@ public static partial class FramePacing
     {
         var camera = v with
         {
-            X = Math.Floor((matrix[0] * v.X + matrix[1] * v.Y + matrix[2] * v.Z) / 4096) + world.X,
-            Y = Math.Floor((matrix[3] * v.X + matrix[4] * v.Y + matrix[5] * v.Z) / 4096) + world.Y,
-            Z = Math.Floor((matrix[6] * v.X + matrix[7] * v.Y + matrix[8] * v.Z) / 4096) + world.Z,
+            X = MathF.Floor((matrix[0] * v.X + matrix[1] * v.Y + matrix[2] * v.Z) / 4096f) + world.X,
+            Y = MathF.Floor((matrix[3] * v.X + matrix[4] * v.Y + matrix[5] * v.Z) / 4096f) + world.Y,
+            Z = MathF.Floor((matrix[6] * v.X + matrix[7] * v.Y + matrix[8] * v.Z) / 4096f) + world.Z,
         };
         int r = (int)Math.Round(v.R), g = (int)Math.Round(v.G), b = (int)Math.Round(v.B);
         NativeWideShadeVertex(m, world, (int)v.X, (int)v.Y, (int)v.Z, camera.Z, false, ref r, ref g, ref b);

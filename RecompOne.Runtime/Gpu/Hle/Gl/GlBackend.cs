@@ -191,11 +191,34 @@ public sealed class GlBackend : IGpuBackend
         Ready = true;
     }
 
-    public void SetDrawEnv(in HleDrawEnv env) => _env = env;
+    bool _classifyValid;
+    GlDisplayRt? _classifiedRt;
+
+    public void SetDrawEnv(in HleDrawEnv env)
+    {
+        if (env.ClipX0 == _env.ClipX0 && env.ClipY0 == _env.ClipY0
+            && env.ClipX1 == _env.ClipX1 && env.ClipY1 == _env.ClipY1
+            && env.TwMaskX == _env.TwMaskX && env.TwMaskY == _env.TwMaskY
+            && env.TwOffX == _env.TwOffX && env.TwOffY == _env.TwOffY
+            && env.SetMask == _env.SetMask && env.CheckMask == _env.CheckMask
+            && env.Dither == _env.Dither)
+            return;
+        _env = env;
+        _classifyValid = false;
+    }
+
+    GlDisplayRt? ClassifyCached()
+    {
+        if (_classifyValid) return _classifiedRt;
+        _classifiedRt = Classify();
+        _classifyValid = true;
+        return _classifiedRt;
+    }
 
     public unsafe void BeginWideDepth(uint? clearColor)
     {
         Flush();
+        _classifyValid = false;
         var rt = Classify();
         if (rt == null || rt.Margin <= 0) return;
         rt.HasWideWorld = GpuHle.NativeWideRendererActive;
@@ -368,11 +391,12 @@ public sealed class GlBackend : IGpuBackend
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
         bool subtractBatch = transparent && blend == 2;
-        var target = Classify();
+        var target = ClassifyCached();
         _pendingWideMode = f.WideMode;
         if (_count > 0 && (target != _kTarget || !DesiredMatches(transparent, blend))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
-        CheckTextureFeedback(f);
+        if (!IsNativeWideSideDraw(f.WideMode))
+            CheckTextureFeedback(f);
 
         _kTarget = target;
         _kSubtractBatch = subtractBatch;
@@ -528,9 +552,8 @@ public sealed class GlBackend : IGpuBackend
         {
             _gl.Uniform2(uPosBias, (float)(rt.Margin - rt.X), (float)(-rt.Y));
             _gl.Uniform2(uFbInv, 2f / rt.Wide1x, 2f / rt.H);
-            _gl.Uniform1(uWideMode, _kWideMode is WidePrimitiveMode.WorldSides
-                or WidePrimitiveMode.BackdropSides or WidePrimitiveMode.OverlaySides
-                or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.DepthTest ? 1 : 0);
+            _gl.Uniform1(uWideMode, rt.Margin > 0 && IsNativeWideSideDraw(_kWideMode)
+                && !NeedsSplitScissor(_kWideMode) ? 1 : 0);
             _gl.Uniform2(uWideCore, (float)rt.Margin, (float)(rt.Margin + rt.W));
         }
         else
@@ -559,7 +582,11 @@ public sealed class GlBackend : IGpuBackend
         public bool Empty => X1 < X0 || Y1 < Y0;
     }
 
-    static bool UsesSideBands(WidePrimitiveMode mode) => mode is
+    static bool NeedsSplitScissor(WidePrimitiveMode mode) => mode is
+        WidePrimitiveMode.OverlaySides or
+        WidePrimitiveMode.DepthTest;
+
+    static bool IsNativeWideSideDraw(WidePrimitiveMode mode) => mode is
         WidePrimitiveMode.WorldSides or
         WidePrimitiveMode.BackdropSides or
         WidePrimitiveMode.OverlaySides or
@@ -590,7 +617,7 @@ public sealed class GlBackend : IGpuBackend
         // Side-band primitives used to scissor the whole wide RT and discard the
         // 4:3 core in the fragment shader. On Adreno that shades (and often
         // framebuffer-fetches) the entire centre for every spanning WGEO triangle.
-        if (rt.Margin > 0 && UsesSideBands(_kWideMode))
+        if (rt.Margin > 0 && NeedsSplitScissor(_kWideMode))
         {
             int n = 0;
             int left1 = Math.Min(cx1, rt.Margin - 1);
@@ -685,7 +712,8 @@ public sealed class GlBackend : IGpuBackend
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         bool splitFetch = _glesFramebufferFetchPath != GlesFramebufferFetchPath.None && _progPrimFast != 0 &&
-                          GlVram.Scale >= 8 && rt != null && _kCheckMask == 0;
+                          rt != null && _kCheckMask == 0 &&
+                          (GlVram.Scale >= 8 || IsNativeWideSideDraw(_kWideMode));
         if (splitFetch)
         {
             // Upload the complete PS1 draw list once, then switch shaders only
@@ -813,6 +841,7 @@ public sealed class GlBackend : IGpuBackend
     public unsafe (uint tex, int w, int h, float aspect) PresentDisplay(int dispX, int dispY, int w, int h, bool rgb24 = false, int outW = 0, int outH = 0)
     {
         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
+        _classifyValid = false;
         _frame++;
         Flush();
 

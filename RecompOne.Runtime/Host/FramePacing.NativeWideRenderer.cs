@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Memory;
@@ -20,7 +21,14 @@ public static partial class FramePacing
     static readonly List<NativeWideTriangle> _nativeWideTransparent = new(128);
     static readonly List<NativeWideTriangle> _nativeWideExtensions = new(256);
     static readonly short[] _nativeWideMatrix = new short[9];
+    static readonly NativeWideWorld[] _nativeWideWorldPool =
+    [
+        new(), new(), new(), new(), new(), new(), new(), new(),
+    ];
     static readonly NativeWideClipVertex[][] _nativeWideCameraVertices = new NativeWideClipVertex[8][];
+    static readonly bool[][] _nativeWideVertexShaded = new bool[8][];
+    static byte[]? _nativeWideRam;
+    static int _nativeWideRamMask;
     public static double LastNativeWideCpuMs { get; private set; }
     static int _nativeWideDrawX, _nativeWideDrawY;
     enum NativeWideShader { Normal, Fog, Ripple, Tint, FogTint, Lamp }
@@ -47,6 +55,7 @@ public static partial class FramePacing
         public int FogFar;
         public int FogShift;
         public NativeWideClipVertex[]? CameraVertices;
+        public bool[]? VertexShaded;
     }
 
     readonly record struct NativeWideTriangle(
@@ -57,14 +66,14 @@ public static partial class FramePacing
         float Depth);
 
     readonly record struct NativeWideClipVertex(
-        double X,
-        double Y,
-        double Z,
-        double R,
-        double G,
-        double B,
-        double U,
-        double V);
+        float X,
+        float Y,
+        float Z,
+        float R,
+        float G,
+        float B,
+        float U,
+        float V);
 
     static void BeginNativeWideWorldPass(IMemory m)
     {
@@ -133,8 +142,9 @@ public static partial class FramePacing
         backend.BeginWideDepth(clearColor);
         float dx = gpu.DrawOffsetX - _nativeWideDrawX;
         float dy = gpu.DrawOffsetY - _nativeWideDrawY;
-        foreach (var triangle in _nativeWidePending)
+        for (int i = 0; i < _nativeWidePending.Count; i++)
         {
+            var triangle = _nativeWidePending[i];
             var a = triangle.A; var b = triangle.B; var c = triangle.C;
             a.X += dx; a.Y += dy;
             b.X += dx; b.Y += dy;
@@ -216,6 +226,8 @@ public static partial class FramePacing
         long cpuStart = Stopwatch.GetTimestamp();
         try
         {
+            _nativeWideRam = m is PSMemory psm ? psm.RamBuffer : null;
+            _nativeWideRamMask = (_nativeWideRam?.Length ?? 1) - 1;
             uint zoneEntry = m.ReadU32(CamZoneAddr);
         if (!NativeWideGuestPointer(zoneEntry)) return false;
         uint zone = EntryItem(m, zoneEntry, 0);
@@ -244,51 +256,53 @@ public static partial class FramePacing
                 : ((int)(visibility - 204800u) >> 8) - (_nativeWideFogShift == 1 ? 1200 : 0);
         }
 
-        var worlds = new NativeWideWorld[worldCount];
+        var worlds = _nativeWideWorldPool;
         int totalPolygons = 0;
         for (int wi = 0; wi < worldCount; wi++)
         {
+            var slot = worlds[wi];
             uint world = zone + 4u + (uint)wi * 0x40u;
-            uint header = m.ReadU32(world + 0x10u);
-            uint polygons = m.ReadU32(world + 0x14u);
-            uint vertices = m.ReadU32(world + 0x18u);
-            uint texinfos = m.ReadU32(world + 0x1Cu);
+            uint header = FastU32(m, world + 0x10u);
+            uint polygons = FastU32(m, world + 0x14u);
+            uint vertices = FastU32(m, world + 0x18u);
+            uint texinfos = FastU32(m, world + 0x1Cu);
             // Cortex's arena includes an empty WGEO placeholder. It must not
             // invalidate the other, populated meshes in the same zone.
-            if (NativeWideGuestPointer(header) && m.ReadU32(header + 0x0Cu) == 0)
+            if (NativeWideGuestPointer(header) && FastU32(m, header + 0x0Cu) == 0)
             {
-                worlds[wi] = new NativeWideWorld();
+                slot.PolyCount = 0;
+                slot.VertexCount = 0;
+                slot.CameraVertices = null;
                 continue;
             }
             if (!NativeWideGuestPointer(header) || !NativeWideGuestPointer(polygons)
                 || !NativeWideGuestPointer(vertices) || !NativeWideGuestPointer(texinfos))
                 return false;
-            int polyCount = (int)m.ReadU32(header + 0x0Cu);
-            int vertexCount = (int)m.ReadU32(header + 0x10u);
-            int texinfoCount = (int)m.ReadU32(header + 0x14u);
-            int tpageCount = (int)m.ReadU32(header + 0x18u);
+            int polyCount = (int)FastU32(m, header + 0x0Cu);
+            int vertexCount = (int)FastU32(m, header + 0x10u);
+            int texinfoCount = (int)FastU32(m, header + 0x14u);
+            int tpageCount = (int)FastU32(m, header + 0x18u);
             if (polyCount is <= 0 or > 4096) return false;
             if (vertexCount is <= 0 or > 4096 || texinfoCount is <= 0 or > 4096
                 || tpageCount is <= 0 or > 8)
                 return false;
             totalPolygons += polyCount;
-            worlds[wi] = new NativeWideWorld
-            {
-                PolyCount = polyCount,
-                VertexCount = vertexCount,
-                TexinfoCount = texinfoCount,
-                TpageCount = tpageCount,
-                Header = header,
-                Polygons = polygons,
-                Vertices = vertices,
-                Texinfos = texinfos,
-                Tpages = world + 0x20u,
-                X = (int)m.ReadU32(world + 4u),
-                Y = (int)m.ReadU32(world + 8u),
-                Z = (int)m.ReadU32(world + 0x0Cu),
-                FogFar = (ushort)m.ReadU32(0x1F800100u + (uint)wi * 0x40u),
-                FogShift = (int)(m.ReadU32(0x1F800100u + (uint)wi * 0x40u) >> 16) & 31,
-            };
+            slot.PolyCount = polyCount;
+            slot.VertexCount = vertexCount;
+            slot.TexinfoCount = texinfoCount;
+            slot.TpageCount = tpageCount;
+            slot.Header = header;
+            slot.Polygons = polygons;
+            slot.Vertices = vertices;
+            slot.Texinfos = texinfos;
+            slot.Tpages = world + 0x20u;
+            slot.X = (int)FastU32(m, world + 4u);
+            slot.Y = (int)FastU32(m, world + 8u);
+            slot.Z = (int)FastU32(m, world + 0x0Cu);
+            uint fog = FastU32(m, 0x1F800100u + (uint)wi * 0x40u);
+            slot.FogFar = (ushort)fog;
+            slot.FogShift = (int)(fog >> 16) & 31;
+            slot.CameraVertices = null;
         }
 
         var matrix = _nativeWideMatrix;
@@ -298,16 +312,6 @@ public static partial class FramePacing
         if (projection is <= 0 or > 4096) return false;
         int screenX = (int)Gte.ReadControl(24) >> 16;
         int screenY = (int)Gte.ReadControl(25) >> 16;
-        for (int wi = 0; wi < worldCount; wi++)
-        {
-            var world = worlds[wi];
-            var vertices = _nativeWideCameraVertices[wi];
-            if (vertices == null || vertices.Length < world.VertexCount)
-                _nativeWideCameraVertices[wi] = vertices = new NativeWideClipVertex[world.VertexCount];
-            for (int vi = 0; vi < world.VertexCount; vi++)
-                TryReadNativeWideCameraVertex(m, world, vi, matrix, 0, 0, out vertices[vi]);
-            world.CameraVertices = vertices;
-        }
 
         int displayWidth = 512;
         int displayHeight = 216;
@@ -327,6 +331,24 @@ public static partial class FramePacing
         float halfHeight = displayHeight * 0.5f + 16f;
         float viewCenterX = gpu.DrawOffsetX + screenX;
         float viewCenterY = gpu.DrawOffsetY + screenY;
+        float near = projection * 0.5f + 1f;
+
+        for (int wi = 0; wi < worldCount; wi++)
+        {
+            var world = worlds[wi];
+            var vertices = _nativeWideCameraVertices[wi];
+            if (vertices == null || vertices.Length < world.VertexCount)
+                _nativeWideCameraVertices[wi] = vertices = new NativeWideClipVertex[world.VertexCount];
+            var shaded = _nativeWideVertexShaded[wi];
+            if (shaded == null || shaded.Length < world.VertexCount)
+                _nativeWideVertexShaded[wi] = shaded = new bool[world.VertexCount];
+            else
+                Array.Clear(shaded, 0, world.VertexCount);
+            for (int vi = 0; vi < world.VertexCount; vi++)
+                TryReadNativeWideCameraVertex(m, world, vi, matrix, 0, 0, shade: false, out vertices[vi]);
+            world.CameraVertices = vertices;
+            world.VertexShaded = shaded;
+        }
 
         uint drawCount = m.ReadU32(DrawCountAddr);
         _nativeWideOpaque.Clear();
@@ -357,18 +379,30 @@ public static partial class FramePacing
                     gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
                     repairFlags, true, _nativeWideOpaque, _nativeWideTransparent);
             }
+            if (world.PolyCount == 0) continue;
+            if (!NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
+                    viewCenterX, coreHalf))
+                continue;
             for (int pi = 0; pi < world.PolyCount; pi++)
             {
                 candidates++;
+                uint poly = world.Polygons + (uint)pi * 8u;
+                uint p0 = FastU32(m, poly);
+                uint p1 = FastU32(m, poly + 4u);
+                NativeWidePolygonVertices(p0, p1, out int indexA, out int indexB, out int indexC);
+                if (!NativeWideTouchesSides(world, indexA, indexB, indexC, near,
+                        projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
+                        viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight))
+                    continue;
                 if (!TryNativeWideMaterial(m, world, pi, drawCount, out PrimFlags flags, out bool noCull,
                         out short u0, out short v0, out short u1, out short v1, out short u2, out short v2))
                     continue;
                 clippedPolygons += AddNativeWideClippedPolygon(
-                    m, world, pi, matrix, projection, screenX, screenY,
+                    m, world, indexA, indexB, indexC, u0, v0, u1, v1, u2, v2,
+                    projection, screenX, screenY,
                     gpu.DrawOffsetX, gpu.DrawOffsetY,
                     viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
-                    flags, noCull, u0, v0, u1, v1, u2, v2,
-                    _nativeWideOpaque, _nativeWideTransparent);
+                    flags, noCull, _nativeWideOpaque, _nativeWideTransparent);
             }
         }
 
@@ -410,6 +444,8 @@ public static partial class FramePacing
         }
         finally
         {
+            _nativeWideRam = null;
+            _nativeWideRamMask = 0;
             LastNativeWideCpuMs = (Stopwatch.GetTimestamp() - cpuStart) * 1000.0 / Stopwatch.Frequency;
         }
     }
@@ -417,8 +453,15 @@ public static partial class FramePacing
     static int AddNativeWideClippedPolygon(
         IMemory m,
         NativeWideWorld world,
-        int polyIndex,
-        short[] matrix,
+        int indexA,
+        int indexB,
+        int indexC,
+        short u0,
+        short v0,
+        short u1,
+        short v1,
+        short u2,
+        short v2,
         int projection,
         int screenX,
         int screenY,
@@ -431,26 +474,23 @@ public static partial class FramePacing
         float halfHeight,
         PrimFlags flags,
         bool noCull,
-        short u0,
-        short v0,
-        short u1,
-        short v1,
-        short u2,
-        short v2,
         List<NativeWideTriangle> opaque,
         List<NativeWideTriangle> transparent)
     {
-        uint poly = world.Polygons + (uint)polyIndex * 8u;
-        uint p0 = m.ReadU32(poly);
-        uint p1 = m.ReadU32(poly + 4u);
-        NativeWidePolygonVertices(p0, p1, out int indexA, out int indexB, out int indexC);
-        Span<NativeWideClipVertex> input = stackalloc NativeWideClipVertex[4];
-        if (!TryReadNativeWideCameraVertex(m, world, indexA, matrix, u0, v0, out input[0])
-            || !TryReadNativeWideCameraVertex(m, world, indexB, matrix, u1, v1, out input[1])
-            || !TryReadNativeWideCameraVertex(m, world, indexC, matrix, u2, v2, out input[2]))
+        var cached = world.CameraVertices;
+        if (cached == null
+            || (uint)indexA >= (uint)cached.Length
+            || (uint)indexB >= (uint)cached.Length
+            || (uint)indexC >= (uint)cached.Length)
             return 0;
-
-        return AddNativeWideClippedTriangle(input[..3], projection, screenX, screenY, drawX, drawY,
+        NativeWideEnsureShaded(m, world, indexA);
+        NativeWideEnsureShaded(m, world, indexB);
+        NativeWideEnsureShaded(m, world, indexC);
+        Span<NativeWideClipVertex> input = stackalloc NativeWideClipVertex[3];
+        input[0] = cached[indexA] with { U = u0, V = v0 };
+        input[1] = cached[indexB] with { U = u1, V = v1 };
+        input[2] = cached[indexC] with { U = u2, V = v2 };
+        return AddNativeWideClippedTriangle(input, projection, screenX, screenY, drawX, drawY,
             viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight, flags, noCull, opaque, transparent);
     }
 
@@ -471,7 +511,7 @@ public static partial class FramePacing
             bool currentInside = current.Z >= near;
             if (currentInside != previousInside)
             {
-                double t = (near - previous.Z) / (current.Z - previous.Z);
+                float t = (float)((near - previous.Z) / (current.Z - previous.Z));
                 clipped[clippedCount++] = NativeWideLerp(previous, current, t);
             }
             if (currentInside)
@@ -504,17 +544,41 @@ public static partial class FramePacing
                 continue;
             if (minX >= viewCenterX - coreHalf && maxX <= viewCenterX + coreHalf)
                 continue;
-            // Clip to the two 16:9 side bands so a spanning sky/ground triangle
-            // is not rasterized across the whole 4:3 core and then discarded.
-            // Keep a 2px overlap with the 4:3 core so CPU clip cannot open a
-            // seam; the GL scissor still rejects those centre fragments.
+            // Clip spanning sky/ground triangles to the two 16:9 side bands so
+            // they are not rasterized across the 4:3 core. Triangles already
+            // wholly in one band skip the Sutherland–Hodgman pass.
             float y0 = viewCenterY - halfHeight, y1 = viewCenterY + halfHeight;
-            added += EmitNativeWideBand(a, b, c, viewCenterX - wideHalf, viewCenterX - coreHalf + 2f, y0, y1,
-                flags, opaque, transparent);
-            added += EmitNativeWideBand(a, b, c, viewCenterX + coreHalf - 2f, viewCenterX + wideHalf, y0, y1,
-                flags, opaque, transparent);
+            float left0 = viewCenterX - wideHalf, left1 = viewCenterX - coreHalf + 2f;
+            float right0 = viewCenterX + coreHalf - 2f, right1 = viewCenterX + wideHalf;
+            if (maxX <= left1)
+            {
+                added += minX >= left0 && minY >= y0 && maxY <= y1
+                    ? EmitNativeWideUnclipped(a, b, c, flags, opaque, transparent)
+                    : EmitNativeWideBand(a, b, c, left0, left1, y0, y1, flags, opaque, transparent);
+            }
+            else if (minX >= right0)
+            {
+                added += maxX <= right1 && minY >= y0 && maxY <= y1
+                    ? EmitNativeWideUnclipped(a, b, c, flags, opaque, transparent)
+                    : EmitNativeWideBand(a, b, c, right0, right1, y0, y1, flags, opaque, transparent);
+            }
+            else
+            {
+                added += EmitNativeWideBand(a, b, c, left0, left1, y0, y1, flags, opaque, transparent);
+                added += EmitNativeWideBand(a, b, c, right0, right1, y0, y1, flags, opaque, transparent);
+            }
         }
         return added;
+    }
+
+    static int EmitNativeWideUnclipped(
+        in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags flags,
+        List<NativeWideTriangle> opaque, List<NativeWideTriangle> transparent)
+    {
+        var triangle = new NativeWideTriangle(a, b, c, flags, (a.Z + b.Z + c.Z) / 3f);
+        if (flags.SemiTrans) transparent.Add(triangle);
+        else opaque.Add(triangle);
+        return 1;
     }
 
     static int EmitNativeWideBand(
@@ -584,11 +648,11 @@ public static partial class FramePacing
         X = a.X + (b.X - a.X) * t,
         Y = a.Y + (b.Y - a.Y) * t,
         Z = a.Z + (b.Z - a.Z) * t,
-        R = (byte)Math.Clamp((int)Math.Round(a.R + (b.R - a.R) * t), 0, 255),
-        G = (byte)Math.Clamp((int)Math.Round(a.G + (b.G - a.G) * t), 0, 255),
-        B = (byte)Math.Clamp((int)Math.Round(a.B + (b.B - a.B) * t), 0, 255),
-        U = (short)Math.Round(a.U + (b.U - a.U) * t),
-        V = (short)Math.Round(a.V + (b.V - a.V) * t),
+        R = (byte)Math.Clamp((int)(a.R + (b.R - a.R) * t + 0.5f), 0, 255),
+        G = (byte)Math.Clamp((int)(a.G + (b.G - a.G) * t + 0.5f), 0, 255),
+        B = (byte)Math.Clamp((int)(a.B + (b.B - a.B) * t + 0.5f), 0, 255),
+        U = (short)MathF.Round(a.U + (b.U - a.U) * t),
+        V = (short)MathF.Round(a.V + (b.V - a.V) * t),
         HasGteZ = a.HasGteZ && b.HasGteZ,
     };
 
@@ -599,6 +663,7 @@ public static partial class FramePacing
         short[] matrix,
         short u,
         short v,
+        bool shade,
         out NativeWideClipVertex result)
     {
         if ((uint)vertexIndex >= (uint)world.VertexCount)
@@ -608,12 +673,13 @@ public static partial class FramePacing
         }
         if (world.CameraVertices is { } cached)
         {
+            if (shade) NativeWideEnsureShaded(m, world, vertexIndex);
             result = cached[vertexIndex] with { U = u, V = v };
             return true;
         }
         uint vertex = world.Vertices + (uint)vertexIndex * 8u;
-        uint v0 = m.ReadU32(vertex);
-        uint v1 = m.ReadU32(vertex + 4u);
+        uint v0 = FastU32(m, vertex);
+        uint v1 = FastU32(m, vertex + 4u);
         int x = NativeWideSign13((int)((v1 >> 3) & 0x1FFFu)) * 8;
         int y = NativeWideSign13((int)((v1 >> 19) & 0x1FFFu)) * 8;
         int z = NativeWideSign13((int)(v0 >> 24)
@@ -625,17 +691,51 @@ public static partial class FramePacing
             y = (short)(y + _nativeWideRipple[wave]);
             x = (short)v1;
         }
-        double rx = (((long)matrix[0] * x + (long)matrix[1] * y + (long)matrix[2] * z) >> 12) + world.X;
-        double ry = (((long)matrix[3] * x + (long)matrix[4] * y + (long)matrix[5] * z) >> 12) + world.Y;
-        double rz = (((long)matrix[6] * x + (long)matrix[7] * y + (long)matrix[8] * z) >> 12) + world.Z;
+        float rx = (((long)matrix[0] * x + (long)matrix[1] * y + (long)matrix[2] * z) >> 12) + world.X;
+        float ry = (((long)matrix[3] * x + (long)matrix[4] * y + (long)matrix[5] * z) >> 12) + world.Y;
+        float rz = (((long)matrix[6] * x + (long)matrix[7] * y + (long)matrix[8] * z) >> 12) + world.Z;
         int r = (byte)v0, g = (byte)(v0 >> 8), b = (byte)(v0 >> 16);
-        NativeWideShadeVertex(m, world, x, y, z, rz, (v1 & 1u) != 0, ref r, ref g, ref b);
+        if (shade)
+            NativeWideShadeVertex(m, world, x, y, z, rz, (v1 & 1u) != 0, ref r, ref g, ref b);
         result = new NativeWideClipVertex(rx, ry, rz, r, g, b, u, v);
         return true;
     }
 
+    static void NativeWideEnsureShaded(IMemory m, NativeWideWorld world, int vertexIndex)
+    {
+        var shaded = world.VertexShaded;
+        var verts = world.CameraVertices;
+        if (shaded == null || verts == null || (uint)vertexIndex >= (uint)shaded.Length || shaded[vertexIndex])
+            return;
+        if (_nativeWideShader is NativeWideShader.Normal or NativeWideShader.Ripple)
+        {
+            shaded[vertexIndex] = true;
+            return;
+        }
+
+        var v = verts[vertexIndex];
+        int r = (int)(v.R + 0.5f), g = (int)(v.G + 0.5f), b = (int)(v.B + 0.5f);
+        int lx = 0, ly = 0, lz = 0;
+        bool lightBank = false;
+        if (_nativeWideShader == NativeWideShader.Lamp)
+        {
+            uint vertex = world.Vertices + (uint)vertexIndex * 8u;
+            uint v0 = FastU32(m, vertex);
+            uint v1 = FastU32(m, vertex + 4u);
+            lx = NativeWideSign13((int)((v1 >> 3) & 0x1FFFu)) * 8;
+            ly = NativeWideSign13((int)((v1 >> 19) & 0x1FFFu)) * 8;
+            lz = NativeWideSign13((int)(v0 >> 24)
+                + (int)(((v1 >> 1) & 3u) << 8)
+                + (int)(((v1 >> 16) & 7u) << 10)) * 8;
+            lightBank = (v1 & 1u) != 0;
+        }
+        NativeWideShadeVertex(m, world, lx, ly, lz, v.Z, lightBank, ref r, ref g, ref b);
+        verts[vertexIndex] = v with { R = r, G = g, B = b };
+        shaded[vertexIndex] = true;
+    }
+
     static void NativeWideShadeVertex(IMemory m, NativeWideWorld world, int x, int y, int z,
-        double rz, bool lightBank, ref int r, ref int g, ref int b)
+        float rz, bool lightBank, ref int r, ref int g, ref int b)
     {
         int sz = Math.Clamp((int)rz, 0, 0xFFFF);
         if (_nativeWideShader is NativeWideShader.Tint or NativeWideShader.FogTint)
@@ -649,9 +749,9 @@ public static partial class FramePacing
         }
         if (_nativeWideShader == NativeWideShader.Lamp)
         {
-            int distance = Math.Abs((int)m.ReadU32(world.Header) + x - _nativeWideLighting[0])
-                + Math.Abs((int)m.ReadU32(world.Header + 4) + y - _nativeWideLighting[1])
-                + Math.Abs((int)m.ReadU32(world.Header + 8) + z - _nativeWideLighting[2]);
+            int distance = Math.Abs((int)FastU32(m, world.Header) + x - _nativeWideLighting[0])
+                + Math.Abs((int)FastU32(m, world.Header + 4) + y - _nativeWideLighting[1])
+                + Math.Abs((int)FastU32(m, world.Header + 8) + z - _nativeWideLighting[2]);
             int amount = Math.Clamp(distance + (int)((uint)distance >> (_nativeWideLighting[3] & 31))
                 - (int)((uint)distance >> (_nativeWideLighting[4] & 31))
                 + _nativeWideLighting[lightBank ? 6 : 5], 0, 4095);
@@ -678,7 +778,7 @@ public static partial class FramePacing
         return Math.Clamp((int)(((long)delta * amount + ((long)color << 16)) >> 16), 0, 255);
     }
 
-    static NativeWideClipVertex NativeWideLerp(NativeWideClipVertex a, NativeWideClipVertex b, double t) => new(
+    static NativeWideClipVertex NativeWideLerp(NativeWideClipVertex a, NativeWideClipVertex b, float t) => new(
         a.X + (b.X - a.X) * t,
         a.Y + (b.Y - a.Y) * t,
         a.Z + (b.Z - a.Z) * t,
@@ -688,6 +788,63 @@ public static partial class FramePacing
         a.U + (b.U - a.U) * t,
         a.V + (b.V - a.V) * t);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static float NativeWideProjectAxis(float axis, float depth, int projection, int origin)
+    {
+        float sz = Math.Min(Math.Max(depth, 1f), 65535f);
+        float ir = Math.Clamp(axis, -32768f, 32767f);
+        return origin + projection * ir / sz;
+    }
+
+    static bool NativeWideTouchesSides(
+        NativeWideWorld world, int ia, int ib, int ic, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float wideHalf, float halfHeight)
+    {
+        var verts = world.CameraVertices;
+        if (verts == null || (uint)ia >= (uint)verts.Length
+            || (uint)ib >= (uint)verts.Length || (uint)ic >= (uint)verts.Length)
+            return false;
+        var a = verts[ia]; var b = verts[ib]; var c = verts[ic];
+        if (a.Z < near || b.Z < near || c.Z < near) return true;
+
+        int ox = drawX + screenX, oy = drawY + screenY;
+        float ax = NativeWideProjectAxis(a.X, a.Z, projection, ox);
+        float bx = NativeWideProjectAxis(b.X, b.Z, projection, ox);
+        float cx = NativeWideProjectAxis(c.X, c.Z, projection, ox);
+        float minX = Math.Min(ax, Math.Min(bx, cx));
+        float maxX = Math.Max(ax, Math.Max(bx, cx));
+        if (maxX < viewCenterX - wideHalf || minX > viewCenterX + wideHalf) return false;
+        if (minX >= viewCenterX - coreHalf && maxX <= viewCenterX + coreHalf) return false;
+
+        float ay = NativeWideProjectAxis(a.Y, a.Z, projection, oy);
+        float by = NativeWideProjectAxis(b.Y, b.Z, projection, oy);
+        float cy = NativeWideProjectAxis(c.Y, c.Z, projection, oy);
+        float minY = Math.Min(ay, Math.Min(by, cy));
+        float maxY = Math.Max(ay, Math.Max(by, cy));
+        return maxY >= viewCenterY - halfHeight && minY <= viewCenterY + halfHeight;
+    }
+
+    static bool NativeWideWorldTouchesSides(
+        NativeWideWorld world, float near, int projection, int originX,
+        float viewCenterX, float coreHalf)
+    {
+        var verts = world.CameraVertices;
+        if (verts == null || world.VertexCount <= 0) return false;
+        float left = viewCenterX - coreHalf;
+        float right = viewCenterX + coreHalf;
+        int n = world.VertexCount;
+        if (n > verts.Length) n = verts.Length;
+        for (int i = 0; i < n; i++)
+        {
+            var v = verts[i];
+            if (v.Z < near) return true;
+            float x = NativeWideProjectAxis(v.X, v.Z, projection, originX);
+            if (x < left || x > right) return true;
+        }
+        return false;
+    }
+
     static HleVertex ProjectNativeWideClipVertex(
         NativeWideClipVertex vertex,
         int projection,
@@ -696,20 +853,18 @@ public static partial class FramePacing
         int drawX,
         int drawY)
     {
-        double irx = Math.Clamp(vertex.X, -0x8000, 0x7FFF);
-        double iry = Math.Clamp(vertex.Y, -0x8000, 0x7FFF);
-        float sz = (float)Math.Min(vertex.Z, 0xFFFF);
+        float sz = Math.Min(vertex.Z, 65535f);
         return new HleVertex
         {
-            X = drawX + screenX + (float)(projection * irx / sz),
-            Y = drawY + screenY + (float)(projection * iry / sz),
+            X = NativeWideProjectAxis(vertex.X, vertex.Z, projection, drawX + screenX),
+            Y = NativeWideProjectAxis(vertex.Y, vertex.Z, projection, drawY + screenY),
             Z = sz,
             HasGteZ = true,
-            R = (byte)Math.Clamp((int)Math.Round(vertex.R), 0, 255),
-            G = (byte)Math.Clamp((int)Math.Round(vertex.G), 0, 255),
-            B = (byte)Math.Clamp((int)Math.Round(vertex.B), 0, 255),
-            U = (short)Math.Round(vertex.U),
-            V = (short)Math.Round(vertex.V),
+            R = (byte)Math.Clamp((int)MathF.Round(vertex.R), 0, 255),
+            G = (byte)Math.Clamp((int)MathF.Round(vertex.G), 0, 255),
+            B = (byte)Math.Clamp((int)MathF.Round(vertex.B), 0, 255),
+            U = (short)MathF.Round(vertex.U),
+            V = (short)MathF.Round(vertex.V),
         };
     }
 
@@ -731,14 +886,14 @@ public static partial class FramePacing
         noCull = false;
         u0 = v0 = u1 = v1 = u2 = v2 = 0;
         uint poly = world.Polygons + (uint)polyIndex * 8u;
-        uint p0 = m.ReadU32(poly);
-        uint p1 = m.ReadU32(poly + 4u);
+        uint p0 = FastU32(m, poly);
+        uint p1 = FastU32(m, poly + 4u);
         int tinf = (int)((p0 >> 8) & 0x0FFFu);
         int tpagIndex = (int)((p0 >> 5) & 7u);
         if ((uint)tinf >= (uint)world.TexinfoCount || (uint)tpagIndex >= (uint)world.TpageCount)
             return false;
         uint texinfo = world.Texinfos + (uint)tinf * 4u;
-        uint colinfo = m.ReadU32(texinfo);
+        uint colinfo = FastU32(m, texinfo);
         byte material = (byte)(colinfo >> 24);
         bool textured = (material & 0x80) != 0;
         bool semi = (material & 0x60) != 0x60;
@@ -749,7 +904,7 @@ public static partial class FramePacing
             SemiTrans = semi,
             RawTexture = false,
             Gouraud = true,
-            WideMode = m.ReadU32(world.Header + 0x1Cu) != 0
+            WideMode = FastU32(m, world.Header + 0x1Cu) != 0
                 ? WidePrimitiveMode.BackdropSides : WidePrimitiveMode.WorldSides,
         };
         if (!textured) return true;
@@ -758,17 +913,17 @@ public static partial class FramePacing
         int mask = (int)((p1 >> 1) & 0x0Fu);
         int phase = (int)(p0 & 0x1Fu);
         int anim = mask == 0 ? 0 : (phase + (int)(drawCount >> period)) & ((mask << 1) | 1);
-        uint rgn = m.ReadU32(texinfo + 4u + (uint)anim * 4u);
+        uint rgn = FastU32(m, texinfo + 4u + (uint)anim * 4u);
         // The zone stores a resolved GPU page word, not a guest pointer.
-        uint tpageInfo = m.ReadU32(world.Tpages + (uint)tpagIndex * 4u);
+        uint tpageInfo = FastU32(m, world.Tpages + (uint)tpagIndex * 4u);
         int colorMode = (int)((rgn >> 20) & 3u);
         int segment = (int)((rgn >> 18) & 3u);
         int baseU = (int)((rgn >> 10) & 0xF8u) >> colorMode;
         int baseV = (int)((rgn & 0x1Fu) << 2) | (int)(tpageInfo & 0x80u);
         int regionIndex = (int)(rgn >> 22);
         uint uv = NativeWideUvMapAddr + (uint)regionIndex * 8u;
-        uint uv01 = m.ReadU32(uv);
-        ushort uv2 = m.ReadU16(uv + 4u);
+        uint uv01 = FastU32(m, uv);
+        ushort uv2 = (ushort)FastU32(m, uv + 4u);
         u0 = (byte)(baseU + (byte)uv01);
         v0 = (byte)(baseV + (byte)(uv01 >> 8));
         u1 = (byte)(baseU + (byte)(uv01 >> 16));
@@ -790,8 +945,23 @@ public static partial class FramePacing
         c = (int)((p0 >> 20) & 0x0FFFu);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static uint FastU32(IMemory m, uint address)
+    {
+        var ram = _nativeWideRam;
+        if (ram != null)
+        {
+            uint phys = address & MemoryMap.PhysicalMask;
+            if (phys < MemoryMap.RamWindow)
+            {
+                uint off = phys & (uint)_nativeWideRamMask;
+                if (off + 3u < (uint)ram.Length)
+                    return Unsafe.ReadUnaligned<uint>(ref ram[(int)off]);
+            }
+        }
+        return m.ReadU32(address);
+    }
+
     static int NativeWideSign13(int value) => (value & 0x1000) != 0 ? value - 0x2000 : value;
     static bool NativeWideGuestPointer(uint value) => (value & 0xFFE00000u) == 0x80000000u;
 }
-
-

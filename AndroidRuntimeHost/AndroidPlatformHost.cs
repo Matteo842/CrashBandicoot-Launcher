@@ -111,6 +111,7 @@ sealed class AndroidPlatformHost(
                                                $"{_prepareMilliseconds / frames:F2}+{_surfaceMilliseconds / frames:F2} ms, " +
                                                $"swap {_swapMilliseconds / frames:F2} ms, " +
                                                $"wideCpu {RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs:F1} ms, " +
+                                               $"scale {GlVram.Scale}x, " +
                                                $"batches {_flushes / (double)frames:F1}, writes {_writebacks / (double)frames:F1}, " +
                                                $"verts {_vertices / (double)frames:F0}, GL {backend.LastDiagnostic}");
             _fpsFrames = 0;
