@@ -10,7 +10,7 @@ namespace CrashBandicoot.Launcher;
 
 public sealed class LauncherHost : Form
 {
-    public const string AppVersion = "1.9.1";
+    public const string AppVersion = "1.9.2";
 
     readonly ILauncherUi _ui = LauncherUiFactory.Create();
     readonly Panel _gameHost = new()
