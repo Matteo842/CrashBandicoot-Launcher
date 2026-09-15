@@ -12,8 +12,8 @@ namespace RecompOne.Runtime.Host;
 /// <summary>
 /// Unlocked sim dt is wall seconds × 1020. Never branch on 60/120/240.
 /// Crash: grounded 34-tick trans+physics then scale(dt/34) so StopAtWalls
-/// sees a real bitmap cell. Jump trans hang uses wall ticks; physics XZ
-/// stays 34+scale; Y is hang + wall-dt gravity.
+/// sees a real bitmap cell. Jump trans hang is also 34-tick spd; physics XZ
+/// stays 34+scale; Y keeps bounce SETs and dt/34 hang + wall-dt gravity.
 /// After pit death, Warp_In / Force_Fall / death cine interpret once per
 /// 34 wall ticks (still drawn). That acc is not shared with gated solids:
 /// EvictDict in a busy room (Generator Room) dropped Crash so Death_Fall
@@ -150,6 +150,11 @@ namespace RecompOne.Runtime.Host;
 /// half-steps at 60 (looks like 30) and a rocket at 120/240. Rebuild
 /// Y from hang×dt + gravity×dt like the foot jump. Ride is
 /// TRACK_PATH_SIGN, not a WillC state index.
+/// Wooden crates Bonk_Jump once and break — they do not re-fire.
+/// Spring-crate SET is kept. FinishJumpScale must not undo StopAtCeil
+/// (status A 0x80): that rewrite flew the roof. Crate takeoff is
+/// GROUNDLAND, not 0x80. Do not pin vy=0 on 0x80 — jump hang
+/// (spd 5454 while X held) re-hits the roof every present and stuck.
 /// Hog spawn calcpath is a checkpoint snap — do not lerp XZ from the
 /// death pose. Death cine is stateflag 0x4000 (not a WillC index).
 /// CamFollow look-behind is cam_offset_z += 0x3200 per display frame
@@ -316,7 +321,13 @@ public static partial class FramePacing
     const uint ObjGlobalOff = 0x20u;
 
     const uint FlagGroundLand = 0x1u;
+    /// <summary>
+    /// Status A bit 8. <c>StopAtCeil</c> sets this and zeros +vy. Not crate GROUNDLAND.
+    /// </summary>
+    const uint FlagHitCeiling = 0x80u;
     const uint FlagFirstFrame = 0x20u;
+    /// <summary>WillC <c>stateflag</c> AIR (Jump 0x9, Bounce 0x2408). Not a state index.</summary>
+    const uint FlagStateAir = 0x8u;
     /// <summary>WillC death cine <c>stateflag 0x4000</c> (Fall / Warthog). Not a state index.</summary>
     const uint FlagStateDeathCine = 0x4000u;
     const uint Flag2D = 0x200u;

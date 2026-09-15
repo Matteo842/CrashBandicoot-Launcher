@@ -425,15 +425,22 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Jump trans does <c>vely = spd(vely, 5454)</c> while X is held. That
-    /// must share the wall clock with gravity. If these states use 34 ticks
-    /// per display frame, hang is 30 Hz × fps (fly until X is released).
-    /// Walk/stance stay 34+scale even if leftover fall vy is large.
+    /// Jump trans does <c>vely = spd(vely, 5454)</c> while X is held.
+    /// <c>stateflag</c> 0x8 is AIR (region-safe). Indices cover NTSC-U WillC
+    /// when flags are stale. vy&gt;0 is the bounce takeoff present: CODE SETs
+    /// vely while GROUNDLAND is still on from the crate. Walk/stance stay
+    /// 34+scale when vy≤0 even if leftover fall vy is large.
     /// </summary>
     static bool CrashAirborne(IMemory m, uint obj)
     {
         try
         {
+            if ((m.ReadU32(obj + ObjStateFlagsOff) & FlagStateAir) != 0)
+                return true;
+            // Bounce/jump CODE SETs vely while GROUNDLAND is still on.
+            if ((int)m.ReadU32(obj + ObjVelYOff) > 0
+                && (m.ReadU32(obj + ObjStatusAOff) & FlagGroundLand) != 0)
+                return true;
             uint state = m.ReadU32(obj + ObjStateOff);
             // Jump / fall-jump / bounce / air spin. Walk is 2. Hang is in 3, 4, 10.
             return state is 3 or 4 or 5 or 6 or 10 or 11 or 14 or 16 or 18 or 20;
@@ -691,7 +698,17 @@ public static partial class FramePacing
         if (_crashObj)
         {
             _crashAir = CrashAirborne(m, _obj);
-            WriteAllTicks(m, _crashAir ? _frameTicks : RefTicks);
+            // Land→Bounce CODE SETs vely this present; flags/index can lag.
+            if (!_crashAir)
+            {
+                int dvy = (int)m.ReadU32(_obj + ObjVelYOff) - _ovy;
+                if (dvy > Teleport || dvy < -Teleport)
+                    _crashAir = true;
+            }
+            // Hang spd and StopAtWalls both need a 34-tick step. FinishJumpScale
+            // keeps bounce SETs and dt/34 of hang — same as the hog. Wall ticks
+            // here made Land→Bounce (still 34 at Pre) then dt gravity (fly).
+            WriteAllTicks(m, RefTicks);
             return;
         }
         WriteAllTicks(m, _solidObj ? RefTicks : _frameTicks);

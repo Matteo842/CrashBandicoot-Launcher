@@ -310,13 +310,16 @@ public static partial class FramePacing
         if (_crashObj && IsLandLockedState(m, _obj))
             return true;
         WriteCrashOrObjectTicks(m);
-        // Trans already used wall ticks (hang). Physics needs a 34-tick
-        // StopAtWalls step on XZ; Y is reintegrated in FinishPacedScale.
+        // Hang trans is a 34-tick spd. Physics needs 34-tick StopAtWalls on
+        // XZ. Scale Y vel so the 34-tick Y step matches dt (else GROUNDLAND
+        // is a ceiling 0.6 m up). FinishPacedScale restores hang+gravity Y.
         if (_crashObj && _crashAir)
         {
             _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
             _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
             _haveTransY = true;
+            int vyPhys = (int)Math.Round(_vyTrans * _exactTicks / RefTicks);
+            m.WriteU32(_obj + ObjVelYOff, (uint)vyPhys);
             WriteAllTicks(m, RefTicks);
         }
         else if (_crashObj && HogNeedsJumpY(m))
@@ -324,6 +327,8 @@ public static partial class FramePacing
             _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
             _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
             _haveTransY = true;
+            int vyPhys = (int)Math.Round(_vyTrans * _exactTicks / RefTicks);
+            m.WriteU32(_obj + ObjVelYOff, (uint)vyPhys);
         }
         return true;
     }

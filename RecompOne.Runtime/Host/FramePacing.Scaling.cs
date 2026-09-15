@@ -108,9 +108,9 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Physics ran a 34-tick StopAtWalls step. Keep dt/34 of XZ. Rebuild Y
-    /// from post-trans vy (hang already at wall ticks) + 4000*dt gravity.
-    /// Guest order: displace then gravity.
+    /// Physics ran a 34-tick StopAtWalls step. Keep dt/34 of XZ. Hang trans
+    /// is a 34-tick <c>spd(vely, 5454)</c> — keep bounce SETs, dt/34 of hang,
+    /// then y += vy×dt/1024 and gravity 4000×dt. Guest order: displace then gravity.
     /// </summary>
     static void FinishJumpScale(IMemory m)
     {
@@ -145,31 +145,73 @@ public static partial class FramePacing
 
         if (!_haveTransY) return;
 
+        int vyHang = ScaleJumpVy(_ovy, _vyTrans, m, o);
+        int y = _yTrans + (int)Math.Round(vyHang * _exactTicks / 1024.0);
+        int vy = vyHang - (int)Math.Round(4000.0 * _exactTicks);
+        WriteAirborneY(m, y, vy, vyHang);
+        RejectCrateEmbed(m);
+    }
+
+    /// <summary>
+    /// Takeoff/bounce SET is millions; 34-tick hang spd is much smaller.
+    /// Scaling the SET is the 60-only half-impulse. Keep it; scale hang.
+    /// </summary>
+    static int ScaleJumpVy(int from, int after, IMemory m, uint obj)
+    {
+        int dvy = after - from;
+        if (IsFirstFrame(m, obj) || dvy > 0x80000 || dvy < -0x80000)
+            return after;
+        return from + (int)Math.Round(dvy * _exactTicks / RefTicks);
+    }
+
+    /// <summary>
+    /// StopAtCeil clamped Y and set status A 0x80. Rebuilding hang×dt
+    /// punches the roof. Crate takeoff is GROUNDLAND, 0x80 clear — keep
+    /// the SET. Do not write vy=0 on every 0x80: jump hang while X is
+    /// held re-enters the roof each present and pins the fall pose.
+    /// Kill +vy, keep gravity, do not Land.
+    /// </summary>
+    static void WriteAirborneY(IMemory m, int y, int vy, int vyBeforeGravity)
+    {
+        uint o = _obj;
+        if (vy < -0x2EE000) vy = -0x2EE000;
         int yPhys = (int)m.ReadU32(o + ObjTransOff + 4);
         uint statusA = m.ReadU32(o + ObjStatusAOff);
-        int y = _yTrans + (int)Math.Round(_vyTrans * _exactTicks / 1024.0);
-        int vy = _vyTrans - (int)Math.Round(4000.0 * _exactTicks);
-        if (vy < -0x2EE000) vy = -0x2EE000;
-
+        bool hitCeil = (statusA & FlagHitCeiling) != 0;
         bool landed = (statusA & FlagGroundLand) != 0;
-        if (landed && y > yPhys + 0x400)
+        bool rising = vyBeforeGravity > 0;
+        if (hitCeil)
+        {
             m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+            if (vy > 0)
+            {
+                y = yPhys;
+                vy = 0;
+            }
+            else if (y > yPhys)
+                y = yPhys;
+            m.WriteU32(o + ObjTransOff + 4, (uint)y);
+            m.WriteU32(o + ObjVelYOff, (uint)vy);
+            return;
+        }
+        if (landed && (rising || y > yPhys + EmbedSlop))
+        {
+            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
+        }
         else if (landed)
         {
             m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
             m.WriteU32(o + ObjVelYOff, 0);
-            RejectCrateEmbed(m);
             return;
         }
 
         m.WriteU32(o + ObjTransOff + 4, (uint)y);
         m.WriteU32(o + ObjVelYOff, (uint)vy);
-        if (vy > 0)
+        if (vy > 0 || rising)
         {
             statusA = m.ReadU32(o + ObjStatusAOff);
             m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
         }
-        RejectCrateEmbed(m);
     }
 
     /// <summary>
@@ -676,36 +718,10 @@ public static partial class FramePacing
     static void FinishHogJumpY(IMemory m)
     {
         uint o = _obj;
-        int vyAfter = _vyTrans;
-        int dvy = vyAfter - _ovy;
-        // Takeoff/bounce SET is millions; 34-tick hang spd is much smaller.
-        // Scaling the SET is the 60-only half-impulse. Keep it; scale hang.
-        int vyHang = IsFirstFrame(m, o) || dvy > 0x80000 || dvy < -0x80000
-            ? vyAfter
-            : _ovy + (int)Math.Round(dvy * _exactTicks / RefTicks);
+        int vyHang = ScaleJumpVy(_ovy, _vyTrans, m, o);
         int y = _yTrans + (int)Math.Round(vyHang * _exactTicks / 1024.0);
         int vy = vyHang - (int)Math.Round(4000.0 * _exactTicks);
-        if (vy < -0x2EE000) vy = -0x2EE000;
-
-        int yPhys = (int)m.ReadU32(o + ObjTransOff + 4);
-        uint statusA = m.ReadU32(o + ObjStatusAOff);
-        bool landed = (statusA & FlagGroundLand) != 0;
-        if (landed && y > yPhys + 0x400)
-            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
-        else if (landed)
-        {
-            m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
-            m.WriteU32(o + ObjVelYOff, 0);
-            return;
-        }
-
-        m.WriteU32(o + ObjTransOff + 4, (uint)y);
-        m.WriteU32(o + ObjVelYOff, (uint)vy);
-        if (vy > 0)
-        {
-            statusA = m.ReadU32(o + ObjStatusAOff);
-            m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
-        }
+        WriteAirborneY(m, y, vy, vyHang);
     }
 
     static int KeepHogPath(int from, int to)
