@@ -410,6 +410,38 @@ public static partial class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// Skip presents replace GoolObjectUpdate with a draw of the last pose.
+    /// Death cine clears category display bits (enemies/boxes/plats) and
+    /// DISPLAY_WORLDS so the orbit is Crash on black. Transform here used
+    /// to ignore those bits, so gated objects flickered back every refresh.
+    /// Same tests as GoolObjectUpdate — not an extra death-only path.
+    /// </summary>
+    static bool GatedObjectShouldDisplay(IMemory m, uint obj, uint statusB)
+    {
+        uint flags = m.ReadU32(DisplayFlagsAddr);
+        if ((flags & FlagDisplay) == 0)
+            return false;
+        if (((statusB & FlagForceUpdate) != 0
+                || (m.ReadU32(obj + ObjStateFlagsOff) & FlagMenuTextState) != 0)
+            && (flags & FlagForceDispMenus) != 0)
+            return true;
+        uint cat;
+        if (_crashObj)
+            cat = GoolCategoryPlayer;
+        else if (!TryReadGoolClass(m, obj, out _, out cat))
+            return (flags & (FlagDisplayC356 | FlagDisplayC4)) != 0;
+        return cat switch
+        {
+            GoolCategoryPlayer => (flags & FlagDisplayC1) != 0,
+            GoolCategoryEnemy or GoolCategoryMisc or GoolCategoryPlatform =>
+                (flags & FlagDisplayC356) != 0,
+            GoolCategoryBox => (flags & FlagDisplayC4) != 0,
+            GoolCategoryHud => (flags & FlagDisplayC2) != 0,
+            _ => false
+        };
+    }
+
     static void DrawGatedObject(CpuContext c, IMemory m, uint obj)
     {
         try
@@ -418,6 +450,7 @@ public static partial class FramePacing
             if ((seq & 0xFF000000u) != 0x80000000u) return;
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
             if ((statusB & FlagInvisible) != 0) return;
+            if (!GatedObjectShouldDisplay(m, obj, statusB)) return;
             if (!_gateRot.ContainsKey(obj))
                 CaptureGateRot(m, obj);
             RegisterGatedBound(m, obj, statusB);

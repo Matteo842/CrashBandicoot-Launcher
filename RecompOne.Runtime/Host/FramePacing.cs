@@ -172,6 +172,8 @@ namespace RecompOne.Runtime.Host;
 /// GoolTransform SETs a circle, so dt/34 of the coords is a chord (wrong
 /// radius). Skip extra CamDeath calls; one original interpret per 34 wall
 /// ticks. Same clock as the death cine. CamFollow is untouched.
+/// Skip-frame DrawGatedObject still honors GoolObjectUpdate display bits:
+/// the cine clears C356/C4 (and worlds) so enemies, boxes, and plats vanish.
 /// Crate/sparkle freeze (first break frame, collide stays): gated GOOL
 /// skipped forever while Crash still 34+scales. NSInit did not drop
 /// <c>_simAcc</c>, and return-to-map left <c>pause_obj</c> dangling so the
@@ -291,7 +293,18 @@ public static partial class FramePacing
     /// <summary>CamDeath (NTSC-U). SPIN_DEATH orbit; skip extras, do not rewrite pose.</summary>
     const uint CamDeathAddr = 0x8002BAB4u;
     const uint DisplayFlagsAddr = 0x800618B0u;
+    /// <summary>GoolObjectUpdate: skip Transform unless this bit is set.</summary>
+    const uint FlagDisplay = 0x4u;
+    const uint FlagDisplayC1 = 0x10u;
+    const uint FlagDisplayC356 = 0x40u;
+    const uint FlagDisplayC2 = 0x200u;
+    const uint FlagDisplayC4 = 0x800u;
+    const uint FlagForceDispMenus = 0x4000u;
     const uint FlagSpinDeath = 0x10000u;
+    /// <summary>status_b. Pause DispC keeps drawing when category bits are off.</summary>
+    const uint FlagForceUpdate = 0x2000000u;
+    /// <summary>state_flags. Same override as FORCE_UPDATE + FORCE_DISP_MENUS.</summary>
+    const uint FlagMenuTextState = 0x20000u;
 
     const uint ObjTransOff = 0x80u;
     const uint ObjRotOff = 0x8Cu;
@@ -368,8 +381,11 @@ public static partial class FramePacing
     const uint FlagSolidSides = 0x10000u;
     const uint FlagSolidTop = 0x20000u;
     const uint FlagStall = 0x10000000u;
+    const uint GoolCategoryPlayer = 0x100u;
     const uint GoolCategoryHud = 0x200u;
     const uint GoolCategoryEnemy = 0x300u;
+    const uint GoolCategoryBox = 0x400u;
+    const uint GoolCategoryMisc = 0x500u;
     /// <summary>Platform GOOL (RuiOC, RWaOC, PoPlC, …). Header category 0x600.</summary>
     const uint GoolCategoryPlatform = 0x600u;
     /// <summary>DispC lives / fruit / Tawna pickup HUD. Not world FLAG_2D (mist, torches).</summary>
