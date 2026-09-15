@@ -115,10 +115,11 @@ namespace RecompOne.Runtime.Host;
 /// next: look-at-cam reverse, and look-ahead overshoots). Crash's mesh
 /// is not lerped — blending WillC keys tears the face (eyes/brows) and
 /// a signed 8-bit take exploded the whole model. PinsC (Pinstripe),
-/// ChefC (Papu Papu), and PlanC (Temple Ruins / Jaws cobras — jungle
-/// plants share the exe) are the same SVTX wrap: unsigned lerp of signed
-/// xyz flies the mesh apart. Still gated as an enemy (one original
-/// interpret per 34 wall ticks); extra presents draw the authored key.
+/// ChefC (Papu Papu), PlanC (Temple Ruins / Jaws cobras — jungle plants
+/// share the exe), and FatsC (Toxic Waste barrel thrower) are the same
+/// SVTX wrap: unsigned lerp of signed xyz flies the mesh apart. Still
+/// gated as an enemy (one original interpret per 34 wall ticks); extra
+/// presents draw the authored key.
 /// HoldAnimWait still steps Crash's pose at 30 Hz; extra presents
 /// hold the authored frame.
 /// Hold does not treat reverse as a teleport — stance look is
@@ -376,6 +377,8 @@ public static partial class FramePacing
     const uint GoolTypeChef = 20u;
     /// <summary>PlanC plants / temple cobras. Enemy cat 0x300; SVTX skip like PinsC.</summary>
     const uint GoolTypePlan = 25u;
+    /// <summary>FatsC Toxic Waste barrel thrower. Enemy cat 0x300; SVTX skip like PinsC.</summary>
+    const uint GoolTypeFats = 17u;
     /// <summary>RooOC Ripper Roo objects. BIG TNT hops/rocks here, not BoxsC.</summary>
     const uint GoolTypeRooO = 39u;
     /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
