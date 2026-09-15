@@ -16,6 +16,8 @@ public static partial class FramePacing
     /// (SOLID_TOP). Everything else — lizards, turtles, boxes, unknown
     /// GOOL — one original 30 Hz step, same skip at 60 and uncapped.
     /// RuiOC is cat 0x600 with SOLID_TOP but is not Euler: gate it.
+    /// WalOC spike-log Up is FLAG_SOLID_ALL on the same platform type — gate
+    /// it before the SOLID_TOP Euler opt-out or Pace crawls the Y SET.
     /// Torch flames are the same exe with <c>do playanim while 1</c>. Sprite
     /// anims OR FLAG_2D. RuiOC is gated before this. DispC HUD and flying
     /// FruiC icons are per-trans (<c>animframe += 1</c>, Tawna slide) so they
@@ -37,6 +39,7 @@ public static partial class FramePacing
             if (IsLizaEntity(m, obj, type))
                 return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
+            if (IsGatedWalocSpikeLog(m, obj, type)) return false;
             if (IsHud(m, obj)) return GamePaused(m);
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) != 0
@@ -61,7 +64,7 @@ public static partial class FramePacing
     }
 
     static bool IsPlatformGoolType(uint type) =>
-        type is 11 or 26 or 28 or 33 or 46 or 58;
+        type is 11 or 26 or 28 or GoolTypeWalO or 46 or 58;
 
     /// <summary>
     /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
@@ -122,6 +125,28 @@ public static partial class FramePacing
         type == GoolTypeRWaO && m.ReadU32(Catalog.LevelIdAddr) == LidLostCity
         && m.ReadU32(obj + ObjStateOff) is >= StateRwaPusherSpawn and <= StateRwaPusherLast;
 
+    /// <summary>
+    /// WalOC spike logs. CODE <c>playanim</c> + <c>LogYOff</c>, trans SETs
+    /// <c>y</c>. Down (6–8) is SOLID_SIDES so KeepRealDt already skips.
+    /// Up (3–5) is FLAG_SOLID_ALL — SOLID_TOP plus type 33 Euler'd it as a
+    /// standing plat, then Pace dt/34 of the SET crawled Y at uncapped.
+    /// Not <see cref="IsGatedTempleSolid"/>: that path is ride carry, and
+    /// these only EventHit / push X.
+    /// </summary>
+    static bool IsGatedWalocSpikeLog(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypeWalO) return false;
+        try
+        {
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state is >= StateWalSpikeLogUpSpawn and <= StateWalSpikeLogDownActive;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     static bool HasSolidPhysics(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
@@ -180,7 +205,8 @@ public static partial class FramePacing
     /// Per-CODE hop (i+=1 / lerp / loopseek), any level. Jump may OR
     /// SOLID_TOP — sticky so it cannot become a pillar. Boxes are never hoppers.
     /// RuiOC stays gated even with SOLID_TOP (orbit <c>vectransf2</c>).
-    /// RWaOC wall mill too. Temple / Jaws every PoPlC. Other lids' Auto / Drop / Active
+    /// RWaOC wall mill too. WalOC spike-log Up is FLAG_SOLID_ALL — sticky
+    /// so SOLID_TOP cannot Euler it as a pillar. Temple / Jaws every PoPlC. Other lids' Auto / Drop / Active
     /// as well. Wait / Spawn on those lids stay Euler. Spawn CODE writes
     /// SOLID_TOP after the first Pre; drop the sticky bit so those path
     /// plats can Euler. Lizards stay sticky.
@@ -202,6 +228,11 @@ public static partial class FramePacing
                 return true;
             }
             if (IsGatedTempleSolid(m, obj, type))
+            {
+                _pathHoppers.Add(obj);
+                return true;
+            }
+            if (IsGatedWalocSpikeLog(m, obj, type))
             {
                 _pathHoppers.Add(obj);
                 return true;
@@ -262,6 +293,7 @@ public static partial class FramePacing
             if (!TryReadGoolClass(m, obj, out uint type, out uint cat))
                 return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
+            if (IsGatedWalocSpikeLog(m, obj, type)) return false;
             if (!IsPlatformGoolType(type) && cat != GoolCategoryPlatform)
                 return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);

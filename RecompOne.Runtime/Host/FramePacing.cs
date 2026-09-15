@@ -33,6 +33,11 @@ namespace RecompOne.Runtime.Host;
 /// JunOC rollers, and world FruiC. DispC HUD and flying FruiC icons
 /// stay on the 30 Hz gate (pause HUD still Euler). Hoppers (i+=1 / lerp / loopseek) never
 /// opt into Euler; Jump may OR SOLID_TOP, sticky ids keep the skip.
+/// WalOC spike logs (Native Fortress / Great Gate) CODE <c>playanim</c> then
+/// SET <c>y = base±LogYOff</c>. Down is SOLID_SIDES so the 30 Hz skip already
+/// applies. Up is FLAG_SOLID_ALL — SOLID_TOP used to Euler it as a standing
+/// plat, then Pace dt/34 of that SET crawled Y at uncapped (looks idle).
+/// Same gate as Down. Not ride carry: trans only EventHit / X push.
 /// Gated crate AABB
 /// is the last real GoolObjectBound, not a
 /// reconstructed col/yaw. Box stacks share velocity with box_link;
@@ -390,6 +395,16 @@ public static partial class FramePacing
     /// Never Euler — CODE/trans is per interpret (<c>vectransf2</c>, <c>time()</c>).
     /// </summary>
     const uint GoolTypeRuiO = 42u;
+    /// <summary>
+    /// WalOC (The Great Gate / Native Fortress). Type 33 is in
+    /// <see cref="IsPlatformGoolType"/>; spike logs still gate (see
+    /// <see cref="IsGatedWalocSpikeLog"/>).
+    /// </summary>
+    const uint GoolTypeWalO = 33u;
+    /// <summary>WalOC <c>Spike_Log_Up_Spawn</c>. Inclusive start of the spike-log gate.</summary>
+    const uint StateWalSpikeLogUpSpawn = 3;
+    /// <summary>WalOC <c>Spike_Log_Down_Active</c>. Inclusive end of the spike-log gate.</summary>
+    const uint StateWalSpikeLogDownActive = 8;
     /// <summary>
     /// RWaOC. Wall mill + slide/pusher gate; seesaw / sensitive / iguana Euler.
     /// </summary>
