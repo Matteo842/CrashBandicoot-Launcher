@@ -12,6 +12,82 @@ namespace RecompOne.Runtime.Host;
 public static partial class FramePacing
 {
     /// <summary>
+    /// One original GOOL interpret per 34 wall ticks. Leftover acc from a
+    /// previous occupant of this pool slot, or EvictDict dropping a live id,
+    /// used to skip forever (crates stuck on the first break frame). If skip
+    /// exceeds two original frames, force the step and unstick playframe.
+    /// </summary>
+    static bool GatedShouldInterpret(IMemory m, uint obj)
+    {
+        if (_simAcc.Count > 128)
+            _simAcc.Clear();
+        if (_gateTs.Count > 128)
+            _gateTs.Clear();
+        _simAcc.TryGetValue(obj, out double acc);
+        if (double.IsNaN(acc) || acc < 0 || acc > RefTicks * 4)
+            acc = 0;
+        acc += _exactTicks;
+        long now = Stopwatch.GetTimestamp();
+        if (acc >= RefTicks)
+        {
+            _simAcc[obj] = acc - RefTicks;
+            _gateTs[obj] = now;
+            UnstickGoolWait(m, obj, expire: false);
+            return true;
+        }
+
+        if (!_gateTs.TryGetValue(obj, out long ts))
+        {
+            _gateTs[obj] = now;
+            _simAcc[obj] = acc;
+            return false;
+        }
+
+        double stuck = (now - ts) / (double)Stopwatch.Frequency;
+        if (stuck >= HitchSeconds * 2)
+        {
+            _simAcc[obj] = 0;
+            _gateTs[obj] = now;
+            UnstickGoolWait(m, obj, expire: true);
+            if (_gateStuckLog < 12)
+            {
+                _gateStuckLog++;
+                PaceLog($"gate unstick 0x{obj:X8} acc={acc:0.00} stuck={stuck:0.000}");
+            }
+            return true;
+        }
+
+        _simAcc[obj] = acc;
+        return false;
+    }
+
+    /// <summary>
+    /// playframe: elapsed_since = frames_elapsed - stamp (signed). A rewound
+    /// draw_stamp leaves that negative and CODE never leaves wait=1.
+    /// </summary>
+    static void UnstickGoolWait(IMemory m, uint obj, bool expire)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
+        try
+        {
+            uint sp = m.ReadU32(obj + ObjSpOff);
+            if ((sp & 0xFF000000u) != 0x80000000u || sp < 4) return;
+            uint tagAddr = sp - 4;
+            uint top = m.ReadU32(tagAddr);
+            uint wait = top >> 24;
+            if (wait == 0) return;
+            uint fe = m.ReadU32(FramesElapsedAddr) & 0x00FFFFFFu;
+            int elapsed = (int)fe - (int)(top & 0x00FFFFFFu);
+            if (expire || elapsed < 0)
+                m.WriteU32(tagAddr, fe);
+        }
+        catch
+        {
+            // stack not mapped
+        }
+    }
+
+    /// <summary>
     /// Iron crates are walls via <c>PlotObjWalls</c> + SOLID_SIDES. Skipping
     /// GoolObjectUpdate also skips GoolObjectBound, so they vanish from
     /// <c>object_bounds</c> and Crash walks through. Write the AABB only —

@@ -178,32 +178,14 @@ public static partial class FramePacing
         _crashGateState = uint.MaxValue;
         _crashSpawnUsed = false;
         _crashLandAcc = 0;
-        _lastBound.Clear();
-        _animAcc.Clear();
-        _animHold.Clear();
-        _waitHoldTs.Clear();
-        _poseClock.Clear();
-        _animPose.Clear();
-        _poseHoldLog = 0;
-        _gateRot.Clear();
-        _dispRotApplied = false;
-        _dispTransApplied = false;
-        _svtxPatched = false;
+        ClearObjectPacing();
         _svtxLog = 0;
         _svtxCrashLog = 0;
         _svtxBoxLog = 0;
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
-        _spawnBudget = 0;
-        _spawnAcc = 0;
-        _spawnCredit.Clear();
-        _simAcc.Clear();
-        _pathHoppers.Clear();
-        _platFrac.Clear();
-        _platObj = false;
         _platLog = 0;
-        ClearGatedRide();
         _rideLog = 0;
         _objClassLog = 0;
         _stampLog = 0;
@@ -222,6 +204,7 @@ public static partial class FramePacing
         _armedThisGpu = false;
         _gpuFinished = false;
         _didPreUpdateObjects = false;
+        _wasPaused = false;
         _worldDraw = 0;
         _worldDrawFrac = 0;
         _rippleFrac = 0;
@@ -238,6 +221,37 @@ public static partial class FramePacing
                 $"{DateTime.Now:HH:mm:ss.fff} reset{Environment.NewLine}");
         }
         catch { /* ignore */ }
+    }
+
+    /// <summary>
+    /// Per-object host state. Must drop on NSInit: the 96-slot pool is
+    /// reused and leftover 30 Hz acc never reaches 34 again (crates stick
+    /// on the first break frame).
+    /// </summary>
+    static void ClearObjectPacing()
+    {
+        _lastBound.Clear();
+        _animAcc.Clear();
+        _animHold.Clear();
+        _waitHoldTs.Clear();
+        _poseClock.Clear();
+        _animPose.Clear();
+        _poseHoldLog = 0;
+        _gateRot.Clear();
+        _dispRotApplied = false;
+        _dispTransApplied = false;
+        _svtxPatched = false;
+        _spawnBudget = 0;
+        _spawnAcc = 0;
+        _spawnCredit.Clear();
+        _simAcc.Clear();
+        _gateTs.Clear();
+        _gateStuckLog = 0;
+        _pathHoppers.Clear();
+        _platFrac.Clear();
+        _platObj = false;
+        _stallFrac = 0;
+        ClearGatedRide();
     }
 
     /// <summary>
@@ -399,6 +413,7 @@ public static partial class FramePacing
         WriteDrawStamp(m, GfxC1pAddr);
         WriteDrawStamp(m, GfxC2pAddr);
         WriteDrawStamp(m, GfxCurAddr);
+        PublishWallFrames(m);
         if (_stampLog >= 6) return;
         try
         {
@@ -407,6 +422,25 @@ public static partial class FramePacing
             PaceLog($"stamp ticks={_guestTicks} fe={fe} wallFe={_guestTicks / RefTicks} dt={_exactTicks:0.00}/{_frameTicks}");
         }
         catch { /* */ }
+    }
+
+    /// <summary>
+    /// playframe is <c>elapsed_since = frames_elapsed - stamp</c> (signed).
+    /// GoolUpdateObjects then overwrites fe from c2 draw_stamp/34; write
+    /// again in PreGoolObjectUpdate so a rewound stamp cannot freeze waits.
+    /// </summary>
+    static void PublishWallFrames(IMemory m)
+    {
+        try { m.WriteU32(FramesElapsedAddr, _guestTicks / RefTicks); }
+        catch { /* overlay swap */ }
+    }
+
+    static void NotePauseClock(IMemory m)
+    {
+        bool paused = GamePaused(m);
+        if (_wasPaused && !paused)
+            _clockArmed = false;
+        _wasPaused = paused;
     }
 
     static void WriteDrawStamp(IMemory m, uint ptrAddr)

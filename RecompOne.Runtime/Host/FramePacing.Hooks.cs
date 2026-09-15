@@ -31,6 +31,9 @@ public static partial class FramePacing
         _didPreUpdateObjects = true;
         _ticksTakenThisLoop = false;
         _crashDidScale = false;
+        if (UnstickPause(m))
+            c.A0 = 1;
+        NotePauseClock(m);
         NoteSaveUiWorld(m);
         if (IsActive(m))
         {
@@ -112,6 +115,7 @@ public static partial class FramePacing
             IsPathHopper(m, c.A0);
             return true;
         }
+        PublishWallFrames(m);
         SnapshotObject(m, c.A0);
         _solidObj = _haveObj && !_crashObj && !KeepRealDt(m, c.A0);
         if (_crashObj)
@@ -144,11 +148,10 @@ public static partial class FramePacing
             // in trans are per-call not per-tick — 34+scale cannot fix that.
             // Run one original 34-tick update per 34 wall ticks; still draw.
             // First frame always runs so box_link / stall init is not delayed.
-            if (_simAcc.Count > 96)
-                EvictDict(_simAcc, _obj);
             if (IsFirstFrame(m, _obj))
             {
                 _simAcc[_obj] = 0;
+                _gateTs[_obj] = Stopwatch.GetTimestamp();
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
                 SnapshotGatedCarry(m, _obj);
@@ -162,19 +165,15 @@ public static partial class FramePacing
                 c.V0 = GoolSuccess;
                 return false;
             }
+            else if (!GatedShouldInterpret(m, _obj))
+            {
+                _gatedSolid = true;
+                DrawGatedObject(c, m, _obj);
+                c.V0 = GoolSuccess;
+                return false;
+            }
             else
             {
-                _simAcc.TryGetValue(_obj, out double acc);
-                acc += _exactTicks;
-                if (acc < RefTicks)
-                {
-                    _simAcc[_obj] = acc;
-                    _gatedSolid = true;
-                    DrawGatedObject(c, m, _obj);
-                    c.V0 = GoolSuccess;
-                    return false;
-                }
-                _simAcc[_obj] = acc - RefTicks;
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
                 SnapshotGatedCarry(m, _obj);
@@ -373,27 +372,21 @@ public static partial class FramePacing
         _fadeHold = false;
         _deathReenterLog = 0;
         _deathFadeLog = 0;
-        _lastBound.Clear();
-        _animAcc.Clear();
-        _animHold.Clear();
-        _waitHoldTs.Clear();
-        _poseClock.Clear();
-        _animPose.Clear();
-        _poseHoldLog = 0;
-        _gateRot.Clear();
-        _dispRotApplied = false;
-        _dispTransApplied = false;
-        _svtxPatched = false;
         _svtxLog = 0;
         _svtxCrashLog = 0;
         _svtxBoxLog = 0;
         _stampLog = 0;
-        _platFrac.Clear();
-        _platObj = false;
         _platLog = 0;
-        ClearGatedRide();
         _rideLog = 0;
-        _pathHoppers.Clear();
+        _wasPaused = false;
+        ClearObjectPacing();
+        try
+        {
+            m.WriteU32(PausedAddr, 0);
+            m.WriteU32(PauseStatusAddr, 0);
+            m.WriteU32(PauseObjAddr, 0);
+        }
+        catch { /* overlay swap */ }
         _hogPathFrac = 0;
         _hogTrotFracX = 0;
         _hogTrotFracY = 0;

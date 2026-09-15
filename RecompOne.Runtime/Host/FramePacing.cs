@@ -165,6 +165,14 @@ namespace RecompOne.Runtime.Host;
 /// GoolTransform SETs a circle, so dt/34 of the coords is a chord (wrong
 /// radius). Skip extra CamDeath calls; one original interpret per 34 wall
 /// ticks. Same clock as the death cine. CamFollow is untouched.
+/// Crate/sparkle freeze (first break frame, collide stays): gated GOOL
+/// skipped forever while Crash still 34+scales. NSInit did not drop
+/// <c>_simAcc</c>, and return-to-map left <c>pause_obj</c> dangling so the
+/// next Start sets paused without a menu — GoolUpdateObjects(0) then
+/// never runs playframe. Native FPS bypasses the host skip. Publish
+/// wall frames_elapsed so a rewound draw_stamp cannot leave
+/// elapsed_since &lt; 0, and force a 30 Hz step if skip exceeds two
+/// original frames.
 /// </summary>
 public static partial class FramePacing
 {
@@ -228,6 +236,17 @@ public static partial class FramePacing
     const uint RipplePeriodAddr = 0x80056478u;
     const uint TriWaveAddr = 0x800567B8u;
     const uint PausedAddr = 0x80056400u;
+    /// <summary>NTSC-U <c>pause_status</c>. 1 while the pause DispC exists.</summary>
+    const uint PauseStatusAddr = 0x8005640Cu;
+    /// <summary>
+    /// NTSC-U <c>pause_obj</c>. CoreLoop creates DispC subtype 4. NSInit kills
+    /// the pool but leaves this pointer; the next Start then sets paused
+    /// without a menu.
+    /// </summary>
+    const uint PauseObjAddr = 0x800618BCu;
+    /// <summary>DispC pause screen (GoolObjectCreate handle 7, type 4, subtype 4).</summary>
+    const uint PauseDispSubtype = 4u;
+    const uint ObjSubtypeOff = 0xD4u;
     const uint CrashPtrAddr = 0x800566B4u;
     const uint ObjStateOff = 0x2Cu;
     /// <summary>WillC <c>Willy_Warp_Out</c> (EventWarp). NTSC-U SCUS-94900.</summary>
@@ -543,6 +562,10 @@ public static partial class FramePacing
     static double _spawnAcc;
     static readonly Dictionary<uint, double> _spawnCredit = new();
     static readonly Dictionary<uint, double> _simAcc = new();
+    /// <summary>Last real 30 Hz interpret for a gated object. Watchdog if skip hangs.</summary>
+    static readonly Dictionary<uint, long> _gateTs = new();
+    static int _gateStuckLog;
+    static bool _wasPaused;
     static readonly Dictionary<uint, double[]> _platFrac = new();
     static readonly int[] _platFrom = new int[PlatSlotCount];
     static bool _platObj;

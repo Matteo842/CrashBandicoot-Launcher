@@ -13,8 +13,53 @@ public static partial class FramePacing
 {
     static bool GamePaused(IMemory m)
     {
-        try { return m.ReadU32(PausedAddr) != 0; }
+        try
+        {
+            if (m.ReadU32(PausedAddr) == 0) return false;
+            return PauseObjectAlive(m, m.ReadU32(PauseObjAddr));
+        }
         catch { return false; }
+    }
+
+    static bool PauseObjectAlive(IMemory m, uint obj)
+    {
+        if (obj == 0 || (obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            uint kind = m.ReadU32(obj);
+            if (kind is 0 or 2) return false;
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeDisp)
+                return false;
+            return m.ReadU32(obj + ObjSubtypeOff) == PauseDispSubtype;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Return-to-map NSInit zeros paused but leaves pause_obj on a recycled
+    /// slot. The next Start then sets paused without creating DispC-4, so
+    /// GoolUpdateObjects(0) freezes crates on the first break frame while
+    /// Crash still 34+scales.
+    /// </summary>
+    static bool UnstickPause(IMemory m)
+    {
+        try
+        {
+            if (m.ReadU32(PausedAddr) == 0) return false;
+            if (PauseObjectAlive(m, m.ReadU32(PauseObjAddr))) return false;
+            m.WriteU32(PausedAddr, 0);
+            m.WriteU32(PauseStatusAddr, 0);
+            m.WriteU32(PauseObjAddr, 0);
+            PaceLog("unstick pause (no pause obj)");
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     static int ScaleStep(int step)
