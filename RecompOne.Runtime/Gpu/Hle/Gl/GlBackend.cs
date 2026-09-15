@@ -38,9 +38,7 @@ public sealed class GlBackend : IGpuBackend
     byte[] _readback = [];
 
     readonly GlVertex[] _verts = new GlVertex[MaxVerts];
-    readonly GlVertex[] _depthVerts = new GlVertex[MaxVerts];
     int _count;
-    int _depthCount;
 
     HleDrawEnv _env;
 
@@ -237,12 +235,25 @@ public sealed class GlBackend : IGpuBackend
     {
         if (rt.Fbo == 0 || !_warmedRtKeys.Add(rt.Fbo)) return;
 
-        int savedCount = _count;
+        // Close the live batch first. Dummy verts used to overwrite _verts and
+        // then restore only _count, so leftover gameplay triangles were flushed
+        // as warmup geometry. The dummy draws also stayed in the colour/depth
+        // attachments and showed up as 16:9 specks and stretched side-band tris.
+        Flush();
+
         var savedTarget = _kTarget;
         var savedMode = _kWideMode;
+        var savedPending = _pendingWideMode;
         int savedCheck = _kCheckMask;
+        int savedSetMask = _kSetMask;
         bool savedTrans = _kTransparent;
+        bool savedSubtract = _kSubtractBatch;
         int savedBlend = _kBlend;
+        int savedTwAndX = _kTwAndX, savedTwAndY = _kTwAndY;
+        int savedTwOrX = _kTwOrX, savedTwOrY = _kTwOrY;
+        int savedClipX0 = _kClipX0, savedClipY0 = _kClipY0;
+        int savedClipX1 = _kClipX1, savedClipY1 = _kClipY1;
+        int savedFlushes = _frameFlushes, savedWritebacks = _frameWritebacks, savedVertices = _frameVertices;
 
         _kTarget = rt;
         _kClipX0 = rt.X;
@@ -252,6 +263,7 @@ public sealed class GlBackend : IGpuBackend
         _kSetMask = 0;
         _kCheckMask = 0;
         _kBlend = 0;
+        _kSubtractBatch = false;
         _kTwAndX = 0xFF;
         _kTwAndY = 0xFF;
         _kTwOrX = 0;
@@ -261,24 +273,58 @@ public sealed class GlBackend : IGpuBackend
         {
             FillWarmVertices(rt);
             _kWideMode = mode;
+            _pendingWideMode = mode;
             _kTransparent = mode is WidePrimitiveMode.OverlaySides or WidePrimitiveMode.WorldExtensionSides;
             Flush();
         }
 
         FillWarmVertices(rt);
         _kWideMode = WidePrimitiveMode.WorldSides;
+        _pendingWideMode = WidePrimitiveMode.WorldSides;
         _kCheckMask = 1;
         _kTransparent = false;
         Flush();
 
-        _count = savedCount;
+        RestoreRtAfterWarmup(rt);
+
         _kTarget = savedTarget;
         _kWideMode = savedMode;
+        _pendingWideMode = savedPending;
         _kCheckMask = savedCheck;
+        _kSetMask = savedSetMask;
         _kTransparent = savedTrans;
+        _kSubtractBatch = savedSubtract;
         _kBlend = savedBlend;
+        _kTwAndX = savedTwAndX; _kTwAndY = savedTwAndY;
+        _kTwOrX = savedTwOrX; _kTwOrY = savedTwOrY;
+        _kClipX0 = savedClipX0; _kClipY0 = savedClipY0;
+        _kClipX1 = savedClipX1; _kClipY1 = savedClipY1;
+        _frameFlushes = savedFlushes;
+        _frameWritebacks = savedWritebacks;
+        _frameVertices = savedVertices;
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-        _gl.Finish();
+    }
+
+    unsafe void RestoreRtAfterWarmup(GlDisplayRt rt)
+    {
+        SyncRtFromVram(rt, rt.X, rt.Y, rt.W, rt.H);
+        int s = GlVram.Scale;
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.Fbo);
+        _gl.Enable(EnableCap.ScissorTest);
+        _gl.ClearColor(0f, 0f, 0f, 0f);
+        if (rt.Margin > 0)
+        {
+            _gl.Scissor(0, 0, (uint)(rt.Margin * s), (uint)rt.TexH);
+            _gl.Clear(ClearBufferMask.ColorBufferBit);
+            _gl.Scissor((rt.Margin + rt.W) * s, 0, (uint)(rt.Margin * s), (uint)rt.TexH);
+            _gl.Clear(ClearBufferMask.ColorBufferBit);
+        }
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.DepthMask(true);
+        float depth = 1f;
+        _gl.ClearBuffer(GLEnum.Depth, 0, &depth);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        rt.Dirty = false;
     }
 
     void FillWarmVertices(GlDisplayRt rt)
@@ -346,7 +392,6 @@ public sealed class GlBackend : IGpuBackend
             && env.SetMask == _env.SetMask && env.CheckMask == _env.CheckMask
             && env.Dither == _env.Dither)
             return;
-        FlushDeferredDepth();
         _env = env;
         _classifyValid = false;
     }
@@ -361,7 +406,6 @@ public sealed class GlBackend : IGpuBackend
 
     public unsafe void BeginWideDepth(uint? clearColor)
     {
-        FlushDeferredDepth();
         Flush();
         _classifyValid = false;
         var rt = Classify();
@@ -446,7 +490,10 @@ public sealed class GlBackend : IGpuBackend
 
         if (_rts[slot] is { } old)
         {
+            if (_count > 0 && ReferenceEquals(_kTarget, old))
+                Flush();
             if (old.Dirty) Writeback(old);
+            if (old.Fbo != 0) _warmedRtKeys.Remove(old.Fbo);
             old.Destroy(_gl);
         }
 
@@ -509,7 +556,6 @@ public sealed class GlBackend : IGpuBackend
         foreach (var rt in _rts)
             if (rt is { Dirty: true } && rt.Intersects(px, py, pw, 256))
             {
-                FlushDeferredDepth();
                 Flush();
                 Writeback(rt);
             }
@@ -535,8 +581,6 @@ public sealed class GlBackend : IGpuBackend
 
     void Begin(in PrimFlags f, int vertsNeeded)
     {
-        if (_depthCount > 0 && f.WideMode is not (WidePrimitiveMode.CoreOnly or WidePrimitiveMode.DepthTest))
-            FlushDeferredDepth();
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
         bool subtractBatch = transparent && blend == 2;
@@ -580,44 +624,9 @@ public sealed class GlBackend : IGpuBackend
 
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
-        if (f.WideMode == WidePrimitiveMode.DepthTest)
-        {
-            if (_depthCount + 3 > MaxVerts) FlushDeferredDepth();
-            bool depthDith = DitherOf(f);
-            _depthVerts[_depthCount++] = V(a, f, depthDith);
-            _depthVerts[_depthCount++] = V(b, f, depthDith);
-            _depthVerts[_depthCount++] = V(c, f, depthDith);
-            return;
-        }
         Begin(f, 3);
         bool dith = DitherOf(f);
         _verts[_count++] = V(a, f, dith); _verts[_count++] = V(b, f, dith); _verts[_count++] = V(c, f, dith);
-    }
-
-    void FlushDeferredDepth()
-    {
-        if (_depthCount == 0) return;
-        Flush();
-        Array.Copy(_depthVerts, 0, _verts, 0, _depthCount);
-        _count = _depthCount;
-        _depthCount = 0;
-        _pendingWideMode = WidePrimitiveMode.DepthTest;
-        _kWideMode = WidePrimitiveMode.DepthTest;
-        _kTarget = ClassifyCached();
-        _kTransparent = false;
-        _kSubtractBatch = false;
-        _kBlend = 0;
-        _kSetMask = _env.SetMask ? 1 : 0;
-        _kCheckMask = _env.CheckMask ? 1 : 0;
-        _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF;
-        _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
-        _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8;
-        _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        _kClipX0 = _env.ClipX0;
-        _kClipY0 = _env.ClipY0;
-        _kClipX1 = _env.ClipX1;
-        _kClipY1 = _env.ClipY1;
-        Flush();
     }
 
     public void DrawRect(in HleRect r, in PrimFlags f)
@@ -1027,7 +1036,6 @@ public sealed class GlBackend : IGpuBackend
         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
         _classifyValid = false;
         _frame++;
-        FlushDeferredDepth();
         Flush();
 
         for (int i = 0; i < _rts.Length; i++)
