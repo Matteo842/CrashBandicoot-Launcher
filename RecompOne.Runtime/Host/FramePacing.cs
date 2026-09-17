@@ -162,6 +162,10 @@ namespace RecompOne.Runtime.Host;
 /// (status A 0x80): that rewrite flew the roof. Crate takeoff is
 /// GROUNDLAND, not 0x80. Do not pin vy=0 on 0x80 — jump hang
 /// (spd 5454 while X held) re-hits the roof every present and stuck.
+/// Willy_Success (third Aku Aku / Event39 Tawna tokens) SETs vely and
+/// has AIR (stateflag 0x48) but is not a jump hang. Treating it as
+/// airborne rebuilt Y at dt and cleared GROUNDLAND, so the hop fell
+/// through the floor whenever dt&lt;34. Keep grounded 34+scale.
 /// Hog spawn calcpath is a checkpoint snap — do not lerp XZ from the
 /// death pose. Death cine is stateflag 0x4000 (not a WillC index).
 /// CamFollow look-behind is cam_offset_z += 0x3200 per display frame
@@ -260,6 +264,10 @@ public static partial class FramePacing
     const uint ObjStateOff = 0x2Cu;
     /// <summary>WillC <c>Willy_Warp_Out</c> (EventWarp). NTSC-U SCUS-94900.</summary>
     const uint StateWarpOut = 32;
+    /// <summary>
+    /// WillC <c>Willy_Success</c> (AddDoctor third mask / Event39). NTSC-U and J.
+    /// </summary>
+    const uint StateWillySuccess = 21;
     /// <summary>WillC spawn/respawn fall. <c>statusc 0</c> so FALL_KILL re-enters.</summary>
     const uint StateForceFall = 12;
     const uint StateDeathFall = 22;
@@ -367,6 +375,10 @@ public static partial class FramePacing
     const uint FlagFirstFrame = 0x20u;
     /// <summary>WillC <c>stateflag</c> AIR (Jump 0x9, Bounce 0x2408). Not a state index.</summary>
     const uint FlagStateAir = 0x8u;
+    /// <summary>
+    /// Willy_Success is <c>0x48</c> (this bit | AIR). Jump is 0x9, bounce 0x2408.
+    /// </summary>
+    const uint FlagStateSuccess = 0x40u;
     /// <summary>WillC death cine <c>stateflag 0x4000</c> (Fall / Warthog). Not a state index.</summary>
     const uint FlagStateDeathCine = 0x4000u;
     const uint Flag2D = 0x200u;
