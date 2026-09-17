@@ -55,7 +55,7 @@ static class SettingsDialog
 
         var widescreen = AddSwitch(activity, card, "Native widescreen (16:9)", view.Widescreen, bodyBold);
         card.AddView(Hint(activity,
-            "Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.", bodyFont));
+            "Native 16:9 gameplay with a wider view. Crates and other objects stay visible in the extra view. Menus, map, and cutscenes stay 4:3.", bodyFont));
 
         var frameRate = AddChoice(activity, card, "Frame rate",
             ViewConfig.FrameRateLabels, ViewConfig.FrameRateToIndex(view.FrameRate), bodyFont, bodyBold);

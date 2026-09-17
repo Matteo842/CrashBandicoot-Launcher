@@ -389,6 +389,17 @@ public static partial class FramePacing
     const uint FlagGravity = 0x20u;
     const uint FlagTransMotion = 0x40u;
     const uint FlagInvisible = 0x100u;
+    /// <summary>
+    /// status_b. GfxCalcObjectMatrices skips the 4:3 screen test (and near
+    /// clip). Native widescreen sets this for the transform of objects that
+    /// sit in the 16:9 side bands.
+    /// </summary>
+    const uint FlagSkipFrustum = 0x40000u;
+    /// <summary>
+    /// status_b. Use the projected AABB instead of the object midpoint when
+    /// deciding 4:3 visibility.
+    /// </summary>
+    const uint FlagScreenAreaCull = 0x80000000u;
     const uint FlagSolidGround = 0x4000u;
     const uint FlagSolidSides = 0x10000u;
     const uint FlagSolidTop = 0x20000u;

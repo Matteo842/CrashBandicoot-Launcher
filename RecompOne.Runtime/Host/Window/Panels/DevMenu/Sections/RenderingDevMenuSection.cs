@@ -41,6 +41,7 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGuiEx.TextDisabled("Native 16:9 gameplay with a wider view.");
+        ImGuiEx.TextDisabled("Crates and other objects stay visible in the extra view.");
         ImGuiEx.TextDisabled("Menus, map, and cutscenes stay 4:3.");
 
         bool dedither = ConfigManager.View.Dedither;

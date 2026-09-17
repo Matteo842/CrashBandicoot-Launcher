@@ -203,6 +203,7 @@ public static partial class FramePacing
 
     static void ResetNativeWideRenderer()
     {
+        RestoreNativeWideObjectFrustum(Runtime.Mem);
         FinishNativeWideDraw();
         ResetNativeWideHud();
         _nativeWideLogCount = 0;

@@ -386,8 +386,8 @@ internal static class HostWindow
 
     /// <summary>
     /// Enable the experimental 16:9 world renderer. Supported gameplay scenes
-    /// reveal additional geometry at the original projection scale. Other scenes
-    /// retain their 4:3 presentation until their renderer is supported.
+    /// reveal additional geometry at the original projection scale, and objects
+    /// in the extra view keep drawing. Other scenes retain 4:3 until supported.
     /// </summary>
     public static void ApplyWidescreen(bool on)
     {

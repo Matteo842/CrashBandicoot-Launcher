@@ -103,6 +103,65 @@ static class HudChecks
             Tail(prim + 0x40);
             FramePacing.CloseNativeWideHudRange(memory);
             Check(FramePacing.NativeWideHudRangeOf(prim & 0x1FFFFC) == -1, "4:3 does not capture HUD ranges");
+
+            Call("RestoreNativeWideObjectFrustum", memory);
+            memory.WriteU32(0x80056710, 9); // N. Sanity Beach — gameplay, not UI
+            memory.WriteU32(0x800618B0, 0); // display flags, no spin death
+            for (int i = 0; i < 9; i++)
+                memory.WriteU16(0x80057844 + (uint)i * 2, (ushort)(i % 4 == 0 ? 0x1000 : 0));
+            memory.WriteU32(0x80057280, 0);
+            memory.WriteU32(0x80057284, 0);
+            memory.WriteU32(0x80057288, 0);
+            memory.WriteU32(0x80057888, 0);
+            memory.WriteU32(0x8005788C, 0);
+            memory.WriteU32(0x80057890, 0);
+            memory.WriteU32(0x800578D0, 500);
+            const uint crate = 0x80074000;
+            memory.ZeroRange(crate, 0x180);
+            memory.WriteU32(crate + 0x80, 0);
+            memory.WriteU32(crate + 0x84, 0);
+            memory.WriteU32(crate + 0x88, 1000u << 8); // camera-space Z = 1000
+            memory.WriteU32(crate + 0xCC, 0);
+            void PlaceX(int screenX) =>
+                memory.WriteU32(crate + 0x80, (uint)((screenX * 2) << 8)); // sx = proj * (x>>8) / 1000
+            bool NeedsStretch() => (bool)Call("NativeWideObjectNeedsFrustumStretch", memory, crate,
+                memory.ReadU32(crate + 0xCC))!;
+            GpuHle.WideAspect = 16f / 9f;
+            GpuHle.RefreshWideFov();
+            PlaceX(350);
+            Check(NeedsStretch(), "Crate in 16:9 side band keeps drawing");
+            PlaceX(100);
+            Check(!NeedsStretch(), "On-screen 4:3 crate keeps original frustum");
+            PlaceX(500);
+            Check(!NeedsStretch(), "Crate past the 16:9 edge still culls");
+            PlaceX(350);
+            memory.WriteU32(crate + 0x88, 400u << 8);
+            Check(!NeedsStretch(), "Near-plane cull stays in 16:9");
+            memory.WriteU32(crate + 0x88, 1000u << 8);
+            PlaceX(300);
+            memory.WriteU32(crate + 0xCC, 0x80000000);
+            Check(NeedsStretch(), "AABB crate overlapping 16:9 sides keeps drawing");
+            memory.WriteU32(crate + 0xCC, 0);
+            PlaceX(350);
+            Call("WidenNativeWideObjectFrustumFor", memory, crate);
+            Check((memory.ReadU32(crate + 0xCC) & 0x40000) != 0, "Transform sets skip-frustum in the side band");
+            Call("RestoreNativeWideObjectFrustum", memory);
+            Check((memory.ReadU32(crate + 0xCC) & 0x40000) == 0, "Transform restores skip-frustum after draw");
+            memory.WriteU32(obj + 0x20, entry);
+            memory.WriteU32(entry + 16, header);
+            memory.WriteU32(header, 4);
+            memory.WriteU32(obj + 0x80, (uint)((350 * 2) << 8));
+            memory.WriteU32(obj + 0x84, 0);
+            memory.WriteU32(obj + 0x88, 1000u << 8);
+            memory.WriteU32(obj + 0xCC, 0);
+            Call("WidenNativeWideObjectFrustumFor", memory, obj);
+            Check((memory.ReadU32(obj + 0xCC) & 0x40000) == 0, "HUD does not steal skip-frustum");
+            Call("RestoreNativeWideObjectFrustum", memory);
+            GpuHle.WideAspect = 0;
+            GpuHle.RefreshWideFov();
+            PlaceX(350);
+            Check(!NeedsStretch(), "4:3 does not stretch object frustum");
+
             Console.WriteLine($"HUD checks passed: {checks}");
             return 0;
         }
@@ -114,6 +173,7 @@ static class HudChecks
         finally
         {
             Call("ResetNativeWideHud");
+            Call("RestoreNativeWideObjectFrustum", memory);
             GpuHle.WideAspect = oldAspect;
             GpuHle.RefreshWideFov();
         }

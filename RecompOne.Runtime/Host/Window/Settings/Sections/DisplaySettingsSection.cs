@@ -48,6 +48,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGui.TextDisabled("Native 16:9 gameplay with a wider view.");
+        ImGui.TextDisabled("Crates and other objects stay visible in the extra view.");
         ImGui.TextDisabled("Menus, map, and cutscenes stay 4:3.");
 
         bool integer = ConfigManager.View.IntegerScale;

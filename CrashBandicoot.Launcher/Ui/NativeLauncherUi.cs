@@ -1409,7 +1409,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _widescreen.Location = new Point(12, y);
         list.Controls.Add(_widescreen);
         y += 52;
-        AddHint("Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.");
+        AddHint("Native 16:9 gameplay with a wider view. Crates and other objects stay visible in the extra view. Menus, map, and cutscenes stay 4:3.");
 
         AddLabel("Frame rate");
         _frameRate = MakeCombo(new Point(controlX, y), [

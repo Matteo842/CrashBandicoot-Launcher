@@ -162,8 +162,8 @@ public class ViewConfig
     }
 
     /// <summary>
-    /// Native 16:9 gameplay: renders additional scenery at the original projection scale.
-    /// Menus, the map, and cutscenes retain their 4:3 presentation.
+    /// Native 16:9 gameplay: renders additional scenery at the original projection scale
+    /// and keeps objects visible in the extra view. Menus, the map, and cutscenes retain 4:3.
     /// </summary>
     public bool Widescreen
     {

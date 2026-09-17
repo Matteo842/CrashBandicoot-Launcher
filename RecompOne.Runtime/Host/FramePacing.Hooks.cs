@@ -242,6 +242,7 @@ public static partial class FramePacing
             case GfxTransformSvtxAddr:
             case GfxTransformCvtxAddr:
                 RestoreSvtx(m);
+                RestoreNativeWideObjectFrustum(m);
                 return;
             case GoolObjectUpdateAddr:
                 break;
@@ -360,6 +361,7 @@ public static partial class FramePacing
 
     public static bool PreNsInit(CpuContext c, IMemory m)
     {
+        RestoreNativeWideObjectFrustum(m);
         ResetNativeWideRenderer();
         _inNsInit = true;
         _levelReady = false;

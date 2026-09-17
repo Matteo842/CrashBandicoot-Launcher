@@ -290,7 +290,7 @@ sealed partial class DevMenuOverlay : FrameLayout
         {
             view.Widescreen = value;
             AndroidGraphics.ApplyLive();
-        }, "Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.");
+        }, "Native 16:9 gameplay with a wider view. Crates and other objects stay visible in the extra view. Menus, map, and cutscenes stay 4:3.");
         Choice("Frame rate", ViewConfig.FrameRateLabels,
             ViewConfig.FrameRateToIndex(view.FrameRate),
             index =>
@@ -340,7 +340,7 @@ sealed partial class DevMenuOverlay : FrameLayout
         {
             view.Widescreen = value;
             AndroidGraphics.ApplyLive();
-        }, "Native 16:9 gameplay with a wider view. Menus, map, and cutscenes stay 4:3.");
+        }, "Native 16:9 gameplay with a wider view. Crates and other objects stay visible in the extra view. Menus, map, and cutscenes stay 4:3.");
         Toggle("Dedither", view.Dedither, value =>
         {
             view.Dedither = value;
