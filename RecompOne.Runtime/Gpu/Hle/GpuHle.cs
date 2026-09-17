@@ -148,4 +148,12 @@ public static class GpuHle
         int wide = (int)MathF.Ceiling(w * WideAspect / BaseAspect);
         return Math.Max(0, (wide - w + 1) / 2);
     }
+
+    /// <summary>
+    /// Present the 16:9 RT when the side margins were filled this frame.
+    /// Native-wide world geometry counts, and so does a DRAWENV background
+    /// clear — spin death is Crash on black, so the gutters match the core.
+    /// </summary>
+    public static bool ShouldPresentWide(bool hasMargin, bool hasWideContent)
+        => hasMargin && WideFovActive && (hasWideContent || DrawEnvClearsBackground);
 }

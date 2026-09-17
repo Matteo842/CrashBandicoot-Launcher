@@ -157,10 +157,22 @@ static class HudChecks
             Call("WidenNativeWideObjectFrustumFor", memory, obj);
             Check((memory.ReadU32(obj + 0xCC) & 0x40000) == 0, "HUD does not steal skip-frustum");
             Call("RestoreNativeWideObjectFrustum", memory);
+            memory.WriteU32(0x800618B0, 0x10000); // SPIN_DEATH
+            PlaceX(350);
+            Call("WidenNativeWideObjectFrustumFor", memory, crate);
+            Check((memory.ReadU32(crate + 0xCC) & 0x40000) == 0, "Spin death does not stretch object frustum");
+            Call("RestoreNativeWideObjectFrustum", memory);
+            GpuHle.DrawEnvClearsBackground = true;
+            Check(GpuHle.ShouldPresentWide(true, false), "Spin death black clear presents 16:9");
+            GpuHle.DrawEnvClearsBackground = false;
+            Check(!GpuHle.ShouldPresentWide(true, false), "Empty gutters stay 4:3");
+            Check(GpuHle.ShouldPresentWide(true, true), "Wide world presents 16:9");
+            memory.WriteU32(0x800618B0, 0);
             GpuHle.WideAspect = 0;
             GpuHle.RefreshWideFov();
             PlaceX(350);
             Check(!NeedsStretch(), "4:3 does not stretch object frustum");
+            Check(!GpuHle.ShouldPresentWide(true, true), "4:3 does not present wide gutters");
 
             Console.WriteLine($"HUD checks passed: {checks}");
             return 0;
@@ -174,6 +186,7 @@ static class HudChecks
         {
             Call("ResetNativeWideHud");
             Call("RestoreNativeWideObjectFrustum", memory);
+            GpuHle.DrawEnvClearsBackground = false;
             GpuHle.WideAspect = oldAspect;
             GpuHle.RefreshWideFov();
         }

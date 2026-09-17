@@ -88,6 +88,10 @@ public static partial class FramePacing
             ResetNativeWideRenderer();
             return;
         }
+        // SPIN_DEATH hides worlds (Crash on black). Do not fill the 16:9
+        // gutters with leftover scenery around the orbit.
+        if ((m.ReadU32(DisplayFlagsAddr) & FlagSpinDeath) != 0)
+            return;
         uint zoneEntry = m.ReadU32(CamZoneAddr);
         uint zone = NativeWideGuestPointer(zoneEntry) ? EntryItem(m, zoneEntry, 0) : 0;
         uint level = m.ReadU32(Catalog.LevelIdAddr);

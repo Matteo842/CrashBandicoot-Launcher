@@ -410,7 +410,9 @@ public sealed class GlBackend : IGpuBackend
         _classifyValid = false;
         var rt = Classify();
         if (rt == null || rt.Margin <= 0) return;
-        rt.HasWideWorld = GpuHle.NativeWideRendererActive;
+        rt.HasWideWorld = GpuHle.NativeWideRendererActive
+            || GpuHle.DrawEnvClearsBackground
+            || clearColor.HasValue;
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.Fbo);
 
         // PutDrawEnv already extends the game's background clear across both
@@ -1064,9 +1066,9 @@ public sealed class GlBackend : IGpuBackend
                 if (src == null || rt.LastDrawFrame > src.LastDrawFrame) src = rt;
             }
 
-        // Only show side margins while FOV expand is filling them. Otherwise present the
-        // 4:3 core alone (clean black pillars) — avoids flickering stale gutter pixels.
-        bool showWide = src is { Margin: > 0, HasWideWorld: true } && GpuHle.WideFovActive;
+        // Only show side margins while they were filled this frame. Otherwise present
+        // the 4:3 core alone (clean black pillars) — avoids flickering stale gutter pixels.
+        bool showWide = GpuHle.ShouldPresentWide(src is { Margin: > 0 }, src is { HasWideWorld: true });
         int w1x = showWide ? w + src!.Margin * 2 : w;
         int h1x = h;
         float aspect = showWide ? GpuHle.WideAspect : GpuHle.OutputAspect;
