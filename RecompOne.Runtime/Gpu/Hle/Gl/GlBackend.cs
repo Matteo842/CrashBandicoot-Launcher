@@ -233,7 +233,9 @@ public sealed class GlBackend : IGpuBackend
 
     void WarmDisplayRt(GlDisplayRt rt)
     {
-        if (rt.Fbo == 0 || !_warmedRtKeys.Add(rt.Fbo)) return;
+        // Adreno-only: dummy draws into the live RT plus RestoreRtAfterWarmup
+        // have TDR'd desktop AMD on 16:9 level entry (issue #45).
+        if (!_gles || rt.Fbo == 0 || !_warmedRtKeys.Add(rt.Fbo)) return;
 
         // Close the live batch first. Dummy verts used to overwrite _verts and
         // then restore only _count, so leftover gameplay triangles were flushed
