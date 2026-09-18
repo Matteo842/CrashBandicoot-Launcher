@@ -372,7 +372,7 @@ public static partial class FramePacing
         try
         {
             if (!TryReadGoolClass(m, obj, out uint type, out _)
-                || (type != GoolTypeBox && !IsRuinsEulerPlat(m, obj, type)))
+                || (type != GoolTypeBox && !IsRuinsTimePathPlat(m, obj, type)))
                 return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             return (b & FlagSolidSides) != 0

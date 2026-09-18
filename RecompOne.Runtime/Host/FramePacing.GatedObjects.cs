@@ -19,10 +19,8 @@ public static partial class FramePacing
     /// </summary>
     static bool GatedShouldInterpret(IMemory m, uint obj)
     {
-        if (_simAcc.Count > 128)
-            _simAcc.Clear();
-        if (_gateTs.Count > 128)
-            _gateTs.Clear();
+        EvictDictDown(_simAcc, obj, 96);
+        EvictDictDown(_gateTs, obj, 96);
         _simAcc.TryGetValue(obj, out double acc);
         if (double.IsNaN(acc) || acc < 0 || acc > RefTicks * 4)
             acc = 0;
@@ -561,8 +559,7 @@ public static partial class FramePacing
         credit += _exactTicks;
         if (credit >= RefTicks)
             _spawnBurst = true;
-        if (_spawnCredit.Count > 128)
-            _spawnCredit.Clear();
+        EvictDictDown(_spawnCredit, obj, 96);
         _spawnCredit[obj] = credit;
     }
 
@@ -663,6 +660,7 @@ public static partial class FramePacing
         if ((obj & 0xFF000000u) != 0x80000000u) return;
         if (IsHud(m, obj)) return;
         if (GamePaused(m)) return;
+        if (IsRigidWorldPlat(m, obj)) return;
         if (obj == _obj && _solidObj) return;
         // Crash look is CODE playanim wait=0 (stance 14↔19). HoldAnimWait
         // already steps that like gated TNT: one ChangeAnim per 33 ms wall.

@@ -446,7 +446,7 @@ public static partial class FramePacing
     const uint StateWalSpikeLogDownActive = 8;
     /// <summary>
     /// RWaOC. Wall mill + slide/pusher gate; seesaw / sensitive / iguana Euler.
-    /// Lost City / Sunset Vista pushers and Sunset Vista column mill are Euler.
+    /// Lost City / Sunset Vista TimePathProg mill/pushers gate like Slippery Climb.
     /// </summary>
     const uint GoolTypeRWaO = 46u;
     /// <summary>RWaOC seesaw array. Inclusive start of the Euler state range.</summary>
@@ -652,6 +652,11 @@ public static partial class FramePacing
     static readonly HashSet<uint> _pathHoppers = new();
     static int _stampLog;
     static uint _worldDraw;
+    static uint _worldDrawBase;
+    static uint _worldDrawGuest0;
+    static bool _worldDrawPauseHold;
+    static uint _worldDrawPauseGuest;
+    static uint _worldDrawPauseValue;
     static double _worldDrawFrac;
     static double _rippleFrac;
     static int _savedRippleSpeed;
