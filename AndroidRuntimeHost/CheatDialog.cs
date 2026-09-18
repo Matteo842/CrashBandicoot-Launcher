@@ -53,7 +53,7 @@ static class CheatDialog
         root.AddView(Hint(activity, "Invincible: bats, TNT, water, pits. On by default.", bodyFont));
 
         var fly = AddSwitch(activity, root, "Fly", CheatConfig.Fly, bodyBold);
-        root.AddView(Hint(activity, "No gravity. Cross / R1 up, Triangle / L2 down.", bodyFont));
+        root.AddView(Hint(activity, "No gravity. D-pad/stick XY, Cross/R1 up, Triangle/L2 down.", bodyFont));
 
         var actions = new LinearLayout(activity) { Orientation = Orientation.Horizontal };
         actions.SetGravity(GravityFlags.Center);

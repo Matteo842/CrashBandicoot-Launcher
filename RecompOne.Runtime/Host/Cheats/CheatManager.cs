@@ -30,14 +30,16 @@ public static class CheatManager
     const uint FramesElapsedAddr = 0x80060E04u;
     const uint ObjStateOff = 0x2Cu;
     const uint ObjTransOff = 0x80u;
+    const uint ObjRotOff = 0x8Cu;
+    const uint ObjVelXOff = 0xA4u;
     const uint ObjVelYOff = 0xA8u;
-    const uint ObjStatusAOff = 0xC8u;
+    const uint ObjVelZOff = 0xACu;
     const uint ObjStatusBOff = 0xCCu;
     const uint ObjStateFlagsOff = 0x120u;
     const uint ObjInvincibleOff = 0x128u;
     const uint ObjInvincibleStampOff = 0x12Cu;
-    const uint FlagGroundLand = 0x1u;
     const uint FlagGravity = 0x20u;
+    const uint FlagDpadControl = 0x80u;
     const uint FlagStateDeathCine = 0x4000u;
     /// <summary>WillC engine hit-block (states 2–4). Also sends EventHitInvincible to bats.</summary>
     const uint InvincibleHit = 4u;
@@ -46,9 +48,6 @@ public static class CheatManager
 
     // Hold the instant-save poke for a few frames — a single write can be overwritten.
     static int _instantSaveHoldFrames;
-    static int _safeX, _safeY, _safeZ;
-    static bool _haveSafe;
-    static uint _safeLevel;
     static long _flyTs;
 
     public static void Apply()
@@ -90,42 +89,25 @@ public static class CheatManager
         {
             uint crash = mem.ReadU32(CrashPtrAddr);
             if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
-            if (TryGetLevelId(out uint lid) && lid != _safeLevel)
+
+            uint state = mem.ReadU32(crash + ObjStateOff);
+            uint flags = mem.ReadU32(crash + ObjStateFlagsOff);
+            // Invincible 2–4 ORs 0x1002 into status_c and skips GoolObjectChangeState
+            // when the target state's flags overlap — including Warp_In (0x1022).
+            // Keeping it on through a drown/fall cine loops the death anim forever.
+            bool cine = (flags & FlagStateDeathCine) != 0 || IsDeathOrWarpState(state);
+            if (CheatConfig.GodMode)
+                mem.WriteU16(MapLivesAddr, 99);
+            if (cine)
             {
-                _safeLevel = lid;
-                _haveSafe = false;
+                _flyTs = 0;
+                return;
             }
 
             if (CheatConfig.GodMode)
             {
                 mem.WriteU32(crash + ObjInvincibleOff, InvincibleHit);
                 mem.WriteU32(crash + ObjInvincibleStampOff, mem.ReadU32(FramesElapsedAddr));
-                mem.WriteU16(MapLivesAddr, 99);
-                mem.WriteU16(MapMaskAddr, 2);
-            }
-
-            int x = (int)mem.ReadU32(crash + ObjTransOff);
-            int y = (int)mem.ReadU32(crash + ObjTransOff + 4);
-            int z = (int)mem.ReadU32(crash + ObjTransOff + 8);
-            uint state = mem.ReadU32(crash + ObjStateOff);
-            uint flags = mem.ReadU32(crash + ObjStateFlagsOff);
-            uint statusA = mem.ReadU32(crash + ObjStatusAOff);
-            bool dead = (flags & FlagStateDeathCine) != 0 || IsDeathState(state);
-
-            if (CheatConfig.GodMode && dead && _haveSafe)
-            {
-                mem.WriteU32(crash + ObjTransOff, (uint)_safeX);
-                mem.WriteU32(crash + ObjTransOff + 4, (uint)_safeY);
-                mem.WriteU32(crash + ObjTransOff + 8, (uint)_safeZ);
-                mem.WriteU32(crash + ObjVelYOff, 0);
-                y = _safeY;
-            }
-            else if ((statusA & FlagGroundLand) != 0 && !dead)
-            {
-                _safeX = x;
-                _safeY = y;
-                _safeZ = z;
-                _haveSafe = true;
             }
 
             if (!CheatConfig.Fly)
@@ -135,7 +117,11 @@ public static class CheatManager
             }
 
             uint statusB = mem.ReadU32(crash + ObjStatusBOff);
-            mem.WriteU32(crash + ObjStatusBOff, statusB & ~FlagGravity);
+            // Own XZ: GOOL air states barely strafe, and death cine clears DPAD.
+            mem.WriteU32(crash + ObjStatusBOff, statusB & ~FlagGravity & ~FlagDpadControl);
+            mem.WriteU32(crash + ObjVelXOff, 0);
+            mem.WriteU32(crash + ObjVelYOff, 0);
+            mem.WriteU32(crash + ObjVelZOff, 0);
 
             long now = Stopwatch.GetTimestamp();
             double sec = _flyTs == 0 ? 0 : (now - _flyTs) / (double)Stopwatch.Frequency;
@@ -145,20 +131,25 @@ public static class CheatManager
             int step = (int)Math.Round(sec * Meter * FlyMetersPerSecond);
             if (step < 1) step = 1;
 
+            int y = (int)mem.ReadU32(crash + ObjTransOff + 4);
             if (Held(Controller.Cross) || Held(Controller.R1))
-            {
                 mem.WriteU32(crash + ObjTransOff + 4, (uint)(y + step));
-                mem.WriteU32(crash + ObjVelYOff, 0);
-            }
             else if (Held(Controller.L2) || Held(Controller.Triangle))
-            {
                 mem.WriteU32(crash + ObjTransOff + 4, (uint)(y - step));
-                mem.WriteU32(crash + ObjVelYOff, 0);
-            }
-            else
-            {
-                mem.WriteU32(crash + ObjVelYOff, 0);
-            }
+
+            ReadFlyPlanar(out float forward, out float strafe);
+            if (forward == 0 && strafe == 0) return;
+
+            int yaw = (int)mem.ReadU32(crash + ObjRotOff + 4) & 0xFFF;
+            double a = yaw * (Math.PI / 2048.0);
+            float sin = (float)Math.Sin(a);
+            float cos = (float)Math.Cos(a);
+            int dx = (int)Math.Round(step * (forward * sin + strafe * cos));
+            int dz = (int)Math.Round(step * (forward * cos - strafe * sin));
+            if (dx != 0)
+                mem.WriteU32(crash + ObjTransOff, (uint)((int)mem.ReadU32(crash + ObjTransOff) + dx));
+            if (dz != 0)
+                mem.WriteU32(crash + ObjTransOff + 8, (uint)((int)mem.ReadU32(crash + ObjTransOff + 8) + dz));
         }
         catch
         {
@@ -166,13 +157,52 @@ public static class CheatManager
         }
     }
 
-    static bool IsDeathState(uint state) =>
-        state is >= 22 and <= 31 or 40;
+    static bool IsDeathOrWarpState(uint state) =>
+        state is >= 22 and <= 31 or 40 or 41;
 
     static bool Held(ushort button) =>
         (Controller.State & button) == 0
         || (Controller.VirtualButtons & button) != 0
         || (Controller.PhysicalButtons & button) != 0;
+
+    static void ReadFlyPlanar(out float forward, out float strafe)
+    {
+        forward = 0;
+        strafe = 0;
+        if (Held(Controller.Up)) forward += 1;
+        if (Held(Controller.Down)) forward -= 1;
+        if (Held(Controller.Right)) strafe += 1;
+        if (Held(Controller.Left)) strafe -= 1;
+
+        float ax = StickAxis(Controller.LeftX);
+        float ay = StickAxis(Controller.LeftY);
+        if (Controller.PhysicalConnected)
+        {
+            ax = AbsMax(ax, StickAxis(Controller.PhysicalLeftX));
+            ay = AbsMax(ay, StickAxis(Controller.PhysicalLeftY));
+        }
+
+        // SDL left-Y: up is negative → byte < 0x80 after AxisToByte.
+        strafe += ax;
+        forward -= ay;
+
+        float mag = MathF.Sqrt(forward * forward + strafe * strafe);
+        if (mag > 1f)
+        {
+            forward /= mag;
+            strafe /= mag;
+        }
+    }
+
+    static float StickAxis(byte v)
+    {
+        int d = v - 0x80;
+        if (d is > -24 and < 24) return 0;
+        return Math.Clamp(d / 128f, -1f, 1f);
+    }
+
+    static float AbsMax(float a, float b) =>
+        Math.Abs(a) >= Math.Abs(b) ? a : b;
 
     /// <summary>
     /// Finds the single active per-level lives counter. Ambiguous → false (avoid corruption).

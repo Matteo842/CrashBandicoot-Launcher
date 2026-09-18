@@ -1872,7 +1872,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _cheatGod.Location = new Point(36, y);
         card.Controls.Add(_cheatGod);
         y += 40;
-        _cheatFly = MakeCheck("Fly  (Cross/R1 up, Triangle/L2 down)");
+        _cheatFly = MakeCheck("Fly  (D-pad/stick, Cross/R1 up, Triangle/L2 down)");
         _cheatFly.Location = new Point(36, y);
         card.Controls.Add(_cheatFly);
         y += 40;

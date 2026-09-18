@@ -258,7 +258,7 @@ sealed partial class DevMenuOverlay : FrameLayout
         {
             CheatConfig.Fly = value;
             CheatConfig.Save();
-        }, "No gravity. Cross / R1 up, Triangle / L2 down.");
+        }, "No gravity. D-pad/stick XY, Cross/R1 up, Triangle/L2 down.");
         Divider();
         FullButton("99 Lives (map)", () => CheatManager.Give99LivesOnMap());
         FullButton("2nd Mask (map)", () => CheatManager.Give2ndMaskOnMap());

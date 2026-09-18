@@ -53,7 +53,7 @@ internal sealed class CheatsDevMenuSection : IDevMenuSection
             CheatConfig.Fly = fly;
             CheatConfig.Save();
         }
-        ImGuiEx.TextDisabled("No gravity. Cross / R1 up, Triangle / L2 down.");
+        ImGuiEx.TextDisabled("No gravity. D-pad/stick XY, Cross/R1 up, Triangle/L2 down.");
 
         ImGui.Spacing();
         ImGui.Separator();
