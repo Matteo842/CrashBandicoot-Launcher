@@ -80,21 +80,58 @@ public static partial class FramePacing
         _waterArmed = false;
         _waterDoneThisLoop = false;
         _worldDrawFrac = 0;
+        _worldDrawBase = 0;
+        _worldDrawGuest0 = 0;
+        _worldDrawPauseHold = false;
         _rippleFrac = 0;
         _ripplePatched = false;
         _waterLog = 0;
     }
 
-    static void CommitWaterDrawCount(IMemory m)
+    static void CommitWaterDrawCount(IMemory m) => SyncWorldDraw(m);
+
+    /// <summary>
+    /// <c>time()</c> is <c>(offset + draw_count) % period</c>. A second wall
+    /// clock for this field drifted from the sim guest ticks (hitch clamp /
+    /// GfxUpdateMatrices running less often) so mill plats dropped to ~10 Hz
+    /// after a long session while Crash still used ticks. Same origin as
+    /// frames_elapsed. Pause on Lost City / Sunset Vista still freezes it.
+    /// </summary>
+    static void SyncWorldDraw(IMemory m)
     {
         if (!_waterArmed || !IsActive(m)) return;
-        try { m.WriteU32(DrawCountAddr, _worldDraw); }
-        catch { /* overlay swap */ }
+        try
+        {
+            bool pause = GamePaused(m) && IsRuinsPauseLid(m);
+            if (pause)
+            {
+                if (!_worldDrawPauseHold)
+                {
+                    _worldDrawPauseHold = true;
+                    _worldDrawPauseGuest = _guestTicks;
+                    _worldDrawPauseValue = _worldDraw;
+                }
+                _worldDraw = _worldDrawPauseValue;
+            }
+            else
+            {
+                if (_worldDrawPauseHold)
+                {
+                    _worldDrawGuest0 += _guestTicks - _worldDrawPauseGuest;
+                    _worldDrawPauseHold = false;
+                }
+                _worldDraw = _worldDrawBase + (_guestTicks - _worldDrawGuest0) / RefTicks;
+            }
+            m.WriteU32(DrawCountAddr, _worldDraw);
+        }
+        catch
+        {
+            // overlay swap
+        }
     }
 
     /// <summary>
-    /// One wall sample per game loop. 30 original frames per wall second, with
-    /// a remainder — 60/120/280/350 must match. Never uses <c>_exactTicks</c>.
+    /// One wall sample per game loop for ripple. draw_count follows guest ticks.
     /// </summary>
     static void AdvanceWater(IMemory m)
     {
@@ -115,6 +152,9 @@ public static partial class FramePacing
         {
             try { _worldDraw = m.ReadU32(DrawCountAddr); }
             catch { return; }
+            _worldDrawBase = _worldDraw;
+            _worldDrawGuest0 = _guestTicks;
+            _worldDrawPauseHold = false;
             _worldDrawFrac = 0;
             _rippleFrac = 0;
             _waterTs = now;
@@ -133,10 +173,7 @@ public static partial class FramePacing
 
         double frames = sec * (TicksPerSecond / RefTicks);
         _worldDrawFrac += frames;
-        int n = (int)Math.Floor(_worldDrawFrac);
-        _worldDrawFrac -= n;
-        if (n > 0)
-            _worldDraw += (uint)n;
+        _worldDrawFrac -= Math.Floor(_worldDrawFrac);
 
         _waterDoneThisLoop = true;
         CommitWaterDrawCount(m);

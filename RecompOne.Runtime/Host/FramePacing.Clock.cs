@@ -348,6 +348,12 @@ public static partial class FramePacing
             _clockArmed = true;
             _frameTicks = RefTicks;
             _ticksTakenThisLoop = true;
+            if (_waterArmed)
+            {
+                _worldDrawBase = _worldDraw;
+                _worldDrawGuest0 = _guestTicks;
+                _worldDrawPauseHold = false;
+            }
             PatchTicksPerFrame(m);
             return _guestTicks;
         }
@@ -414,6 +420,7 @@ public static partial class FramePacing
         WriteDrawStamp(m, GfxC2pAddr);
         WriteDrawStamp(m, GfxCurAddr);
         PublishWallFrames(m);
+        SyncWorldDraw(m);
         if (_stampLog >= 6) return;
         try
         {
