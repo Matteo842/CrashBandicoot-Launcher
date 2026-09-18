@@ -101,8 +101,8 @@ public static partial class FramePacing
     /// <summary>
     /// RWaOC wall mill (0–3) is RuiOC orbit. Slide/wiggle/pusher (10–18)
     /// CODE <c>playframes</c> the mesh in and out of the wall — Euler
-    /// finishes that in one present. Lost City / Sunset Vista TimePathProg
-    /// mill/pushers gate (see <see cref="IsRuinsTimePathPlat"/>).
+    /// finishes that in one present. Lost City / Sunset Vista pushers and
+    /// Sunset Vista's column mill stay Euler (see <see cref="IsRuinsEulerPlat"/>).
     /// Seesaw (4–5) and sensitive bob (6) stay Euler; iguana (7–9) stays
     /// on the enemy wall-time gate.
     /// </summary>
@@ -112,10 +112,7 @@ public static partial class FramePacing
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
-            // Lost City / Sunset Vista TimePathProg SETs: gate like Slippery
-            // Climb mill. Euler dt/34 of the SET is a high-FPS smear, and
-            // the visible slabs are children — they were already gated.
-            if (IsRuinsTimePathPlat(m, obj, type)) return true;
+            if (IsRuinsEulerPlat(m, obj, type)) return false;
             if (state is >= StateRwaOrbitArray and <= StateRwaSensitiveBob)
                 return false;
             return true;
@@ -128,12 +125,12 @@ public static partial class FramePacing
 
     /// <summary>
     /// Lost City / Sunset Vista share RWaOC (<c>#iflev wz</c>). Pushers
-    /// (16–18) and Sunset Vista's column mill (0–2) are <c>time()</c> +
-    /// <c>TimePathProg</c> ping-pong + <c>vectransf2</c>. Same 30 Hz gate
-    /// and display lerp as Slippery Climb mill. Pause freezes
-    /// <c>draw_count</c> on the lid so <c>time()</c> cannot teleport.
+    /// (16–18) stay Euler + plat-delta carry so pause <c>time()</c> cannot
+    /// teleport and reverse cannot slide Crash. Sunset Vista's column mill
+    /// (0–2) is the same motion: <c>time()</c> + <c>TimePathProg</c> ping-pong
+    /// + <c>vectransf2</c>. Slippery Climb mill stays gated.
     /// </summary>
-    static bool IsRuinsTimePathPlat(IMemory m, uint obj, uint type)
+    static bool IsRuinsEulerPlat(IMemory m, uint obj, uint type)
     {
         if (type != GoolTypeRWaO) return false;
         try
@@ -156,23 +153,6 @@ public static partial class FramePacing
         {
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
             return lid == LidLostCity || lid == LidSunsetVista;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    static bool IsRigidWorldPlat(IMemory m, uint obj)
-    {
-        if ((obj & 0xFF000000u) != 0x80000000u) return false;
-        try
-        {
-            if (!TryReadGoolClass(m, obj, out uint type, out uint cat))
-                return false;
-            if (type == GoolTypeBox) return false;
-            return type is GoolTypeRWaO or GoolTypeRuiO or GoolTypePoPl or GoolTypeWalO
-                || cat == GoolCategoryPlatform;
         }
         catch
         {
@@ -526,23 +506,16 @@ public static partial class FramePacing
     /// </summary>
     static void EvictDict<T>(Dictionary<uint, T> d, uint keep)
     {
-        EvictDictDown(d, keep, 96);
-    }
-
-    static void EvictDictDown<T>(Dictionary<uint, T> d, uint keep, int max)
-    {
-        while (d.Count > max)
+        if (d.Count < 96) return;
+        uint drop = 0;
+        foreach (var k in d.Keys)
         {
-            uint drop = 0;
-            foreach (var k in d.Keys)
-            {
-                if (k == keep) continue;
-                drop = k;
-                break;
-            }
-            if (drop == 0) break;
-            d.Remove(drop);
+            if (k == keep) continue;
+            drop = k;
+            break;
         }
+        if (drop != 0)
+            d.Remove(drop);
     }
 
     /// <summary>
@@ -912,7 +885,6 @@ public static partial class FramePacing
         CpuContext c, IMemory m, uint obj, uint drawn, bool crash, bool box, int itemsHint = 0)
     {
         if (crash) return;
-        if (IsRigidWorldPlat(m, obj)) return;
         if (IsPinsC(m, obj) || IsChefC(m, obj) || IsPlanC(m, obj) || IsFatsC(m, obj)) return;
         if ((drawn & 0xFF000000u) != 0x80000000u) return;
         if (GamePaused(m)) return;

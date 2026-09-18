@@ -264,7 +264,11 @@ public static partial class FramePacing
         if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
         else if (_platObj && !_platFirst && !_platChild && _haveObj)
+        {
+            if (TryReadGoolClass(m, _obj, out uint type, out _) && IsRuinsEulerPlat(m, _obj, type))
+                CaptureBound(m, _obj);
             PacePlatform(m);
+        }
         else if (!_crashObj && !_solidObj && _haveObj)
         {
             PaceSpriteAnim(m);
