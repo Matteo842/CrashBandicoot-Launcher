@@ -101,8 +101,10 @@ public static partial class FramePacing
     /// <summary>
     /// RWaOC wall mill (0–3) is RuiOC orbit. Slide/wiggle/pusher (10–18)
     /// CODE <c>playframes</c> the mesh in and out of the wall — Euler
-    /// finishes that in one present. Seesaw (4–5) and sensitive bob (6)
-    /// stay Euler; iguana (7–9) stays on the enemy wall-time gate.
+    /// finishes that in one present. Lost City / Sunset Vista pushers and
+    /// Sunset Vista's column mill stay Euler (see <see cref="IsRuinsEulerPlat"/>).
+    /// Seesaw (4–5) and sensitive bob (6) stay Euler; iguana (7–9) stays
+    /// on the enemy wall-time gate.
     /// </summary>
     static bool IsGatedRwaocMover(IMemory m, uint obj, uint type)
     {
@@ -110,7 +112,7 @@ public static partial class FramePacing
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
-            if (IsLostCityPusher(m, obj, type)) return false;
+            if (IsRuinsEulerPlat(m, obj, type)) return false;
             if (state is >= StateRwaOrbitArray and <= StateRwaSensitiveBob)
                 return false;
             return true;
@@ -121,9 +123,42 @@ public static partial class FramePacing
         }
     }
 
-    static bool IsLostCityPusher(IMemory m, uint obj, uint type) =>
-        type == GoolTypeRWaO && m.ReadU32(Catalog.LevelIdAddr) == LidLostCity
-        && m.ReadU32(obj + ObjStateOff) is >= StateRwaPusherSpawn and <= StateRwaPusherLast;
+    /// <summary>
+    /// Lost City / Sunset Vista share RWaOC (<c>#iflev wz</c>). Pushers
+    /// (16–18) stay Euler + plat-delta carry so pause <c>time()</c> cannot
+    /// teleport and reverse cannot slide Crash. Sunset Vista's column mill
+    /// (0–2) is the same motion: <c>time()</c> + <c>TimePathProg</c> ping-pong
+    /// + <c>vectransf2</c>. Slippery Climb mill stays gated.
+    /// </summary>
+    static bool IsRuinsEulerPlat(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypeRWaO) return false;
+        try
+        {
+            uint lid = m.ReadU32(Catalog.LevelIdAddr);
+            uint state = m.ReadU32(obj + ObjStateOff);
+            if (state is >= StateRwaPusherSpawn and <= StateRwaPusherLast)
+                return lid == LidLostCity || lid == LidSunsetVista;
+            return lid == LidSunsetVista && state <= StateRwaWallMove;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsRuinsPauseLid(IMemory m)
+    {
+        try
+        {
+            uint lid = m.ReadU32(Catalog.LevelIdAddr);
+            return lid == LidLostCity || lid == LidSunsetVista;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// WalOC spike logs. CODE <c>playanim</c> + <c>LogYOff</c>, trans SETs

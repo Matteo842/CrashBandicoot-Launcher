@@ -39,6 +39,22 @@ internal sealed class CheatsDevMenuSection : IDevMenuSection
         }
         ImGuiEx.TextDisabled("Unlocks the level select flag in RAM — use on the warp map.");
 
+        bool god = CheatConfig.GodMode;
+        if (ImGui.Checkbox("God Mode", ref god))
+        {
+            CheatConfig.GodMode = god;
+            CheatConfig.Save();
+        }
+        ImGuiEx.TextDisabled("Invincible: bats, TNT, water, pits. On by default.");
+
+        bool fly = CheatConfig.Fly;
+        if (ImGui.Checkbox("Fly", ref fly))
+        {
+            CheatConfig.Fly = fly;
+            CheatConfig.Save();
+        }
+        ImGuiEx.TextDisabled("No gravity. Cross / R1 up, Triangle / L2 down.");
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();

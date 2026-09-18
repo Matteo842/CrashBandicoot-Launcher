@@ -10,7 +10,7 @@ namespace CrashBandicoot.Launcher;
 
 public sealed class LauncherHost : Form
 {
-    public const string AppVersion = "1.9.3";
+    public const string AppVersion = "1.9.4";
 
     readonly ILauncherUi _ui = LauncherUiFactory.Create();
     readonly Panel _gameHost = new()
@@ -223,6 +223,8 @@ public sealed class LauncherHost : Form
             dejitter = ConfigManager.View.Dejitter,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
+            godMode = CheatConfig.GodMode,
+            fly = CheatConfig.Fly,
             mods = active,
             modsConfigured,
             discoveredMods,
@@ -595,6 +597,10 @@ public sealed class LauncherHost : Form
             CheatConfig.InfiniteLives = lives.GetBoolean();
         if (root.TryGetProperty("levelSelect", out var ls))
             CheatConfig.LevelSelect = ls.GetBoolean();
+        if (root.TryGetProperty("godMode", out var god))
+            CheatConfig.GodMode = god.GetBoolean();
+        if (root.TryGetProperty("fly", out var fly))
+            CheatConfig.Fly = fly.GetBoolean();
         ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
         PushState();
     }

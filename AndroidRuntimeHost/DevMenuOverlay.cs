@@ -249,6 +249,16 @@ sealed partial class DevMenuOverlay : FrameLayout
             CheatConfig.LevelSelect = value;
             CheatConfig.Save();
         }, "Unlocks the level select flag in RAM — use on the warp map.");
+        Toggle("God Mode", CheatConfig.GodMode, value =>
+        {
+            CheatConfig.GodMode = value;
+            CheatConfig.Save();
+        }, "Invincible: bats, TNT, water, pits. On by default.");
+        Toggle("Fly", CheatConfig.Fly, value =>
+        {
+            CheatConfig.Fly = value;
+            CheatConfig.Save();
+        }, "No gravity. Cross / R1 up, Triangle / L2 down.");
         Divider();
         FullButton("99 Lives (map)", () => CheatManager.Give99LivesOnMap());
         FullButton("2nd Mask (map)", () => CheatManager.Give2ndMaskOnMap());

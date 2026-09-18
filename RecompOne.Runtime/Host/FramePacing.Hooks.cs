@@ -265,7 +265,7 @@ public static partial class FramePacing
             FinishPacedScale(m);
         else if (_platObj && !_platFirst && !_platChild && _haveObj)
         {
-            if (TryReadGoolClass(m, _obj, out uint type, out _) && IsLostCityPusher(m, _obj, type))
+            if (TryReadGoolClass(m, _obj, out uint type, out _) && IsRuinsEulerPlat(m, _obj, type))
                 CaptureBound(m, _obj);
             PacePlatform(m);
         }

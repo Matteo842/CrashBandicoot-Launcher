@@ -7,8 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationId>io.github.matteo842.crashlauncher.runtime</ApplicationId>
-    <ApplicationVersion>13</ApplicationVersion>
-    <ApplicationDisplayVersion>1.9.3</ApplicationDisplayVersion>
+    <ApplicationVersion>14</ApplicationVersion>
+    <ApplicationDisplayVersion>1.9.4</ApplicationDisplayVersion>
     <AndroidLinkMode>None</AndroidLinkMode>
     <!-- The Mono interpreter does not lower Volatile.ReadBarrier on this path;
          Roslyn and the generated game assembly must run through the Android JIT. -->

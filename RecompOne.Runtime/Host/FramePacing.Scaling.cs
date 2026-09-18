@@ -372,7 +372,7 @@ public static partial class FramePacing
         try
         {
             if (!TryReadGoolClass(m, obj, out uint type, out _)
-                || (type != GoolTypeBox && !IsLostCityPusher(m, obj, type)))
+                || (type != GoolTypeBox && !IsRuinsEulerPlat(m, obj, type)))
                 return false;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             return (b & FlagSolidSides) != 0
@@ -385,7 +385,7 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Side-stuck in a BoxC wall or Lost City pusher. Standing on the lid is
+    /// Side-stuck in a BoxC wall or ruins pusher/mill. Standing on the lid is
     /// not a hit: Y is the shallow axis. Other scenery AABBs are ignored.
     /// </summary>
     static bool CrateWallHit(int x1, int y1, int z1, int x2, int y2, int z2,
@@ -616,7 +616,7 @@ public static partial class FramePacing
                 uint crash = m.ReadU32(CrashPtrAddr);
                 if (crash != 0 && (crash & 0xFF000000u) == 0x80000000u)
                 {
-                    if (TryReadGoolClass(m, o, out uint type, out _) && IsLostCityPusher(m, o, type))
+                    if (TryReadGoolClass(m, o, out uint type, out _) && type == GoolTypeRWaO)
                         for (int i = 0; i < 3; i++)
                             m.WriteU32(crash + ObjTransOff + (uint)i * 4u, (uint)(_platFrom[PlatSlotCrash + i]
                                 + (int)m.ReadU32(o + ObjTransOff + (uint)i * 4u) - _platFrom[PlatSlotTrans + i]));

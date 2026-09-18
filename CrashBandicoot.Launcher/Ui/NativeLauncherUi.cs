@@ -69,7 +69,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     string _status = "";
     string _statusKind = "";
     string _discPath = "";
-    string _version = "v1.9.3";
+    string _version = "v1.9.4";
     bool _disposed;
     readonly LauncherGamepad _pad = new();
 
@@ -98,6 +98,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _dejitter;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
+    ThemeCheck? _cheatGod;
+    ThemeCheck? _cheatFly;
     ThemeCheck? _frameRateHotkeys;
     readonly Dictionary<string, ThemeCheck> _modChecks = new(StringComparer.OrdinalIgnoreCase);
     JsonElement _pendingDiscoveredMods;
@@ -289,6 +291,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_dejitter, state, "dejitter");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
+        SetCheck(_cheatGod, state, "godMode");
+        SetCheck(_cheatFly, state, "fly");
         SetCheck(_frameRateHotkeys, state, "frameRateHotkeys");
 
         if (state.TryGetProperty("discoveredMods", out var dm))
@@ -1852,7 +1856,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void ShowCheat()
     {
-        var card = MakeCard(520, 340);
+        var card = MakeCard(520, 460);
         card.Controls.Add(MakeTitle("Cheat"));
         var y = 110;
         card.Controls.Add(Hint("Cheat toggles for NTSC-U. Applied while the game is running (also open in-game Developer Menu with the hotkey).", ref y));
@@ -1863,6 +1867,14 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _cheatLevel = MakeCheck("Level Select");
         _cheatLevel.Location = new Point(36, y);
         card.Controls.Add(_cheatLevel);
+        y += 40;
+        _cheatGod = MakeCheck("God Mode (on by default)");
+        _cheatGod.Location = new Point(36, y);
+        card.Controls.Add(_cheatGod);
+        y += 40;
+        _cheatFly = MakeCheck("Fly  (Cross/R1 up, Triangle/L2 down)");
+        _cheatFly.Location = new Point(36, y);
+        card.Controls.Add(_cheatFly);
         y += 40;
         card.Controls.Add(Hint("99 Lives (map) and Instant Save Menu are one-shots available in the in-game Developer Menu.", ref y));
 
@@ -1875,6 +1887,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 type = "saveCheats",
                 infiniteLives = _cheatLives?.Checked ?? false,
                 levelSelect = _cheatLevel?.Checked ?? false,
+                godMode = _cheatGod?.Checked ?? false,
+                fly = _cheatFly?.Checked ?? false,
             });
             CloseSheet();
         };

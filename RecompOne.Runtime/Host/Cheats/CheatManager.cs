@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using RecompOne.Runtime.Catalogs;
+using RecompOne.Runtime.Hardware;
+using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Host.Cheats;
 
@@ -23,9 +26,30 @@ public static class CheatManager
     const uint InstantSaveMenuAddr = 0x800A264C;
     // SCUS-94900: current level ID (cbhacks / GpuHle). Prefer Catalog.LevelIdAddr at runtime.
     public const uint LevelIdAddr = 0x80056710;
+    const uint CrashPtrAddr = 0x800566B4u;
+    const uint FramesElapsedAddr = 0x80060E04u;
+    const uint ObjStateOff = 0x2Cu;
+    const uint ObjTransOff = 0x80u;
+    const uint ObjVelYOff = 0xA8u;
+    const uint ObjStatusAOff = 0xC8u;
+    const uint ObjStatusBOff = 0xCCu;
+    const uint ObjStateFlagsOff = 0x120u;
+    const uint ObjInvincibleOff = 0x128u;
+    const uint ObjInvincibleStampOff = 0x12Cu;
+    const uint FlagGroundLand = 0x1u;
+    const uint FlagGravity = 0x20u;
+    const uint FlagStateDeathCine = 0x4000u;
+    /// <summary>WillC engine hit-block (states 2–4). Also sends EventHitInvincible to bats.</summary>
+    const uint InvincibleHit = 4u;
+    const int Meter = 0x19000;
+    const int FlyMetersPerSecond = 8;
 
     // Hold the instant-save poke for a few frames — a single write can be overwritten.
     static int _instantSaveHoldFrames;
+    static int _safeX, _safeY, _safeZ;
+    static bool _haveSafe;
+    static uint _safeLevel;
+    static long _flyTs;
 
     public static void Apply()
     {
@@ -55,7 +79,100 @@ public static class CheatManager
 
         if (CheatConfig.LevelSelect)
             mem.WriteU8(LevelSelectAddr, 0x40);
+
+        if ((CheatConfig.GodMode || CheatConfig.Fly) && !IsOnTitleMenuMap())
+            ApplyDebugMovement(mem);
     }
+
+    static void ApplyDebugMovement(IMemory mem)
+    {
+        try
+        {
+            uint crash = mem.ReadU32(CrashPtrAddr);
+            if (crash == 0 || (crash & 0xFF000000u) != 0x80000000u) return;
+            if (TryGetLevelId(out uint lid) && lid != _safeLevel)
+            {
+                _safeLevel = lid;
+                _haveSafe = false;
+            }
+
+            if (CheatConfig.GodMode)
+            {
+                mem.WriteU32(crash + ObjInvincibleOff, InvincibleHit);
+                mem.WriteU32(crash + ObjInvincibleStampOff, mem.ReadU32(FramesElapsedAddr));
+                mem.WriteU16(MapLivesAddr, 99);
+                mem.WriteU16(MapMaskAddr, 2);
+            }
+
+            int x = (int)mem.ReadU32(crash + ObjTransOff);
+            int y = (int)mem.ReadU32(crash + ObjTransOff + 4);
+            int z = (int)mem.ReadU32(crash + ObjTransOff + 8);
+            uint state = mem.ReadU32(crash + ObjStateOff);
+            uint flags = mem.ReadU32(crash + ObjStateFlagsOff);
+            uint statusA = mem.ReadU32(crash + ObjStatusAOff);
+            bool dead = (flags & FlagStateDeathCine) != 0 || IsDeathState(state);
+
+            if (CheatConfig.GodMode && dead && _haveSafe)
+            {
+                mem.WriteU32(crash + ObjTransOff, (uint)_safeX);
+                mem.WriteU32(crash + ObjTransOff + 4, (uint)_safeY);
+                mem.WriteU32(crash + ObjTransOff + 8, (uint)_safeZ);
+                mem.WriteU32(crash + ObjVelYOff, 0);
+                y = _safeY;
+            }
+            else if ((statusA & FlagGroundLand) != 0 && !dead)
+            {
+                _safeX = x;
+                _safeY = y;
+                _safeZ = z;
+                _haveSafe = true;
+            }
+
+            if (!CheatConfig.Fly)
+            {
+                _flyTs = 0;
+                return;
+            }
+
+            uint statusB = mem.ReadU32(crash + ObjStatusBOff);
+            mem.WriteU32(crash + ObjStatusBOff, statusB & ~FlagGravity);
+
+            long now = Stopwatch.GetTimestamp();
+            double sec = _flyTs == 0 ? 0 : (now - _flyTs) / (double)Stopwatch.Frequency;
+            _flyTs = now;
+            if (sec < 0) sec = 0;
+            if (sec > 0.05) sec = 0.05;
+            int step = (int)Math.Round(sec * Meter * FlyMetersPerSecond);
+            if (step < 1) step = 1;
+
+            if (Held(Controller.Cross) || Held(Controller.R1))
+            {
+                mem.WriteU32(crash + ObjTransOff + 4, (uint)(y + step));
+                mem.WriteU32(crash + ObjVelYOff, 0);
+            }
+            else if (Held(Controller.L2) || Held(Controller.Triangle))
+            {
+                mem.WriteU32(crash + ObjTransOff + 4, (uint)(y - step));
+                mem.WriteU32(crash + ObjVelYOff, 0);
+            }
+            else
+            {
+                mem.WriteU32(crash + ObjVelYOff, 0);
+            }
+        }
+        catch
+        {
+            // overlay swap / crash ptr recycled
+        }
+    }
+
+    static bool IsDeathState(uint state) =>
+        state is >= 22 and <= 31 or 40;
+
+    static bool Held(ushort button) =>
+        (Controller.State & button) == 0
+        || (Controller.VirtualButtons & button) != 0
+        || (Controller.PhysicalButtons & button) != 0;
 
     /// <summary>
     /// Finds the single active per-level lives counter. Ambiguous → false (avoid corruption).

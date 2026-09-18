@@ -125,7 +125,7 @@ public static partial class FramePacing
             return;
         }
 
-        double sec = GamePaused(m) && m.ReadU32(Catalog.LevelIdAddr) == LidLostCity
+        double sec = GamePaused(m) && IsRuinsPauseLid(m)
             ? 0 : (now - _waterTs) / (double)Stopwatch.Frequency;
         _waterTs = now;
         if (sec < 0) sec = 0;

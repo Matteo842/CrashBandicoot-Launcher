@@ -446,13 +446,17 @@ public static partial class FramePacing
     const uint StateWalSpikeLogDownActive = 8;
     /// <summary>
     /// RWaOC. Wall mill + slide/pusher gate; seesaw / sensitive / iguana Euler.
+    /// Lost City / Sunset Vista pushers and Sunset Vista column mill are Euler.
     /// </summary>
     const uint GoolTypeRWaO = 46u;
     /// <summary>RWaOC seesaw array. Inclusive start of the Euler state range.</summary>
     const uint StateRwaOrbitArray = 4;
     /// <summary>RWaOC sensitive bob. Inclusive end of the Euler state range.</summary>
     const uint StateRwaSensitiveBob = 6;
-    const uint LidLostCity = 32u, StateRwaPusherSpawn = 16u, StateRwaPusherLast = 18u;
+    const uint LidLostCity = 32u, LidSunsetVista = 35u;
+    /// <summary>RWaOC <c>Wall_Platform_Move</c>. Inclusive end of the column mill.</summary>
+    const uint StateRwaWallMove = 2u;
+    const uint StateRwaPusherSpawn = 16u, StateRwaPusherLast = 18u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
     /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>

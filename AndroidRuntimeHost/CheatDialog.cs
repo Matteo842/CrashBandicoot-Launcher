@@ -49,6 +49,12 @@ static class CheatDialog
         var levelSelect = AddSwitch(activity, root, "Level Select", CheatConfig.LevelSelect, bodyBold);
         root.AddView(Hint(activity, "Unlocks the level select flag in RAM — use on the warp map.", bodyFont));
 
+        var god = AddSwitch(activity, root, "God Mode", CheatConfig.GodMode, bodyBold);
+        root.AddView(Hint(activity, "Invincible: bats, TNT, water, pits. On by default.", bodyFont));
+
+        var fly = AddSwitch(activity, root, "Fly", CheatConfig.Fly, bodyBold);
+        root.AddView(Hint(activity, "No gravity. Cross / R1 up, Triangle / L2 down.", bodyFont));
+
         var actions = new LinearLayout(activity) { Orientation = Orientation.Horizontal };
         actions.SetGravity(GravityFlags.Center);
         var save = Button(activity, "SAVE", bodyBold, primary: true);
@@ -66,6 +72,8 @@ static class CheatDialog
             CheatConfig.InfiniteLives = lives.Checked;
             CheatConfig.InfiniteWumpa = wumpa.Checked;
             CheatConfig.LevelSelect = levelSelect.Checked;
+            CheatConfig.GodMode = god.Checked;
+            CheatConfig.Fly = fly.Checked;
             ConfigManager.SaveView(Array.Empty<IPanel>());
             dialog.Dismiss();
         };
