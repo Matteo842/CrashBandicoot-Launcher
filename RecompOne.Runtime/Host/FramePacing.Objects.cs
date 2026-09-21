@@ -38,6 +38,10 @@ public static partial class FramePacing
             // sequence can advance beyond frame 32 instead of restarting.
             if (IsLizaEntity(m, obj, type))
                 return false;
+            // A plant can expose a solid top without being an Euler mover.
+            // Classify enemies before the standing-platform opt-out.
+            if (type == GoolTypePlan || cat == GoolCategoryEnemy) return false;
+            if (IsGatedRiverObject(m, type, cat)) return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
             if (IsGatedWalocSpikeLog(m, obj, type)) return false;
             if (IsHud(m, obj)) return GamePaused(m);
@@ -65,6 +69,17 @@ public static partial class FramePacing
 
     static bool IsPlatformGoolType(uint type) =>
         type is 11 or 26 or 28 or GoolTypeWalO or 46 or 58;
+
+    static bool IsGatedRiverObject(IMemory m, uint type, uint cat)
+    {
+        uint level = m.ReadU32(Catalog.LevelIdAddr);
+        if (level != 15 && level != 24) return false; // Upstream / Up the Creek
+        // River platforms also contain bite/wobble animation and state logic.
+        // Scaling their final fields cannot undo a playframe or a reversal
+        // already executed at display rate. Keep their authored update cadence.
+        return cat == GoolCategoryPlatform || cat == GoolCategoryEnemy
+            || type == GoolTypePlan || IsPlatformGoolType(type);
+    }
 
     /// <summary>
     /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
@@ -282,6 +297,11 @@ public static partial class FramePacing
                 _pathHoppers.Add(obj);
                 return true;
             }
+            if (IsGatedRiverObject(m, type, cat))
+            {
+                _pathHoppers.Add(obj);
+                return true;
+            }
             if (IsGatedTempleSolid(m, obj, type))
             {
                 _pathHoppers.Add(obj);
@@ -347,6 +367,7 @@ public static partial class FramePacing
             if (IsPathHopper(m, obj)) return false;
             if (!TryReadGoolClass(m, obj, out uint type, out uint cat))
                 return false;
+            if (IsGatedRiverObject(m, type, cat)) return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
             if (IsGatedWalocSpikeLog(m, obj, type)) return false;
             if (!IsPlatformGoolType(type) && cat != GoolCategoryPlatform)
@@ -570,7 +591,9 @@ public static partial class FramePacing
                 Qy = (int)m.ReadU32(obj + ObjTransOff + 4),
                 Qz = (int)m.ReadU32(obj + ObjTransOff + 8),
                 FromAnim = _oanim,
-                ToAnim = (int)m.ReadU32(obj + ObjAnimFrameOff)
+                ToAnim = (int)m.ReadU32(obj + ObjAnimFrameOff),
+                FromSequence = _oanimSequence,
+                ToSequence = m.ReadU32(obj + ObjAnimSeqOff)
             };
         }
         catch
@@ -596,7 +619,7 @@ public static partial class FramePacing
         if (IsNativeWideHudObject(m, obj, out _)) return;
         if (_exactTicks >= RefTicks - 0.01) return;
 
-        if (!_simAcc.TryGetValue(obj, out double acc)) return;
+        if (!TryGetGatePhase(m, obj, out double acc)) return;
         double t = acc / RefTicks;
         int fx, fy, fz, tx, ty, tz;
         int px, py, pz, qx, qy, qz;
@@ -850,13 +873,13 @@ public static partial class FramePacing
     /// playanim — only a 50 % morph, which is the Crash 60 Hz look. 120+ has
     /// more samples and does reach 1; 30 Hz skips lerp. Wall dt, not an FPS table.
     /// </summary>
-    static double WallAnimFrac(uint obj, int idx, out int fromIdx)
+    static double WallAnimFrac(uint obj, uint sequence, int idx, out int fromIdx)
     {
         fromIdx = idx;
         long now = Stopwatch.GetTimestamp();
         double present = _exactTicks / TicksPerSecond;
         if (present < 0) present = 0;
-        if (_poseClock.TryGetValue(obj, out PoseClock p) && p.Idx == idx)
+        if (_poseClock.TryGetValue(obj, out PoseClock p) && p.Sequence == sequence && p.Idx == idx)
         {
             fromIdx = p.From;
             double sec = (now - p.Ts) / (double)Stopwatch.Frequency + present;
@@ -865,31 +888,42 @@ public static partial class FramePacing
             return sec / HitchSeconds;
         }
         int from = idx;
-        if (_poseClock.TryGetValue(obj, out p))
+        if (_poseClock.TryGetValue(obj, out p) && p.Sequence == sequence)
             from = p.Idx;
         fromIdx = from;
-        _poseClock[obj] = new PoseClock { Idx = idx, From = from, Ts = now };
+        _poseClock[obj] = new PoseClock { Sequence = sequence, Idx = idx, From = from, Ts = now };
         double t0 = present / HitchSeconds;
         if (t0 > 1) t0 = 1;
         return t0;
     }
 
-    static bool TryAnimLerpKeys(uint obj, int drawnIdx, int items,
+    static bool TryAnimLerpKeys(IMemory m, uint obj, uint sequence, int drawnIdx, int items,
         out int fromIdx, out int toIdx, out double t)
     {
         fromIdx = drawnIdx;
         toIdx = drawnIdx;
         t = 0;
-        if (_gateRot.TryGetValue(obj, out GatePose g) &&
-            _simAcc.TryGetValue(obj, out double acc))
+        if (obj == _obj && _solidObj && !_gatedSolid)
         {
+            // Transform executes before OnCallPost captures this step. Using
+            // _gateRot here would blend keys from the previous step twice.
+            if (_oanimSequence != sequence || !TryGetGatePhase(m, obj, out double phase))
+                return false;
+            fromIdx = _oanim >> 8;
+            toIdx = drawnIdx;
+            t = Math.Clamp(phase / RefTicks, 0, 1);
+        }
+        else if (_gateRot.TryGetValue(obj, out GatePose g) &&
+            TryGetGatePhase(m, obj, out double acc))
+        {
+            if (g.FromSequence != sequence || g.ToSequence != sequence) return false;
             fromIdx = g.FromAnim >> 8;
             toIdx = g.ToAnim >> 8;
             t = acc / RefTicks;
             if (t < 0) t = 0;
             if (t > 1) t = 1;
         }
-        else if (_animPose.TryGetValue(obj, out AnimPose ap) && ap.Have && ap.Holding)
+        else if (_animPose.TryGetValue(obj, out AnimPose ap) && ap.Have && ap.Holding && ap.Seq == sequence)
         {
             fromIdx = ap.Frame >> 8;
             toIdx = ap.Target >> 8;
@@ -900,7 +934,7 @@ public static partial class FramePacing
         }
         else
         {
-            t = WallAnimFrac(obj, drawnIdx, out fromIdx);
+            t = WallAnimFrac(obj, sequence, drawnIdx, out fromIdx);
             toIdx = drawnIdx;
         }
         if (fromIdx == toIdx) return false;
@@ -913,11 +947,13 @@ public static partial class FramePacing
     {
         if (crash) return;
         if (IsRigidWorldPlat(m, obj)) return;
-        if (IsPinsC(m, obj) || IsChefC(m, obj) || IsPlanC(m, obj) || IsFatsC(m, obj)) return;
+        if (TryReadGoolClass(m, obj, out uint meshType, out _)
+            && meshType is GoolTypePins or GoolTypeChef or GoolTypePlan or GoolTypeFats)
+            return;
         if ((drawn & 0xFF000000u) != 0x80000000u) return;
         if (GamePaused(m)) return;
 
-        if (!TrySvtxEntry(c, m, obj, out uint en, out _) &&
+        if (!TrySvtxEntry(c, m, obj, out uint en, out uint sequence) &&
             !TryEntryFromFrame(m, drawn, out en))
         {
             if (WantSvtxLog(crash, box))
@@ -929,7 +965,7 @@ public static partial class FramePacing
         int items = itemsHint > 0 ? itemsHint : (int)m.ReadU32(en + 12);
         int cur = FrameIndex(m, en, items, drawn);
         if (cur < 0) return;
-        if (!TryAnimLerpKeys(obj, cur, items, out int from, out int to, out double t))
+        if (!TryAnimLerpKeys(m, obj, sequence, cur, items, out int from, out int to, out double t))
             return;
         uint srcFrom = EntryItem(m, en, from);
         uint srcTo = EntryItem(m, en, to);

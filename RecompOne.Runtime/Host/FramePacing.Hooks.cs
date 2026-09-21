@@ -29,7 +29,6 @@ public static partial class FramePacing
     {
         if (_didPreUpdateObjects) return true;
         _didPreUpdateObjects = true;
-        _ticksTakenThisLoop = false;
         _crashDidScale = false;
         if (UnstickPause(m))
             c.A0 = 1;
@@ -38,7 +37,7 @@ public static partial class FramePacing
         if (IsActive(m))
         {
             EnsureGfxHook();
-            AdvanceWallClock(m);
+            EnsureFrameTime(m);
             PublishWallStamps(m);
             RefillSpawnBudget();
         }
@@ -116,7 +115,17 @@ public static partial class FramePacing
             return true;
         }
         PublishWallFrames(m);
+        // Carry belongs to the support's motion, not Crash's own dt-scaled
+        // physics. Apply it before the snapshot so wall/floor tests start at
+        // the ridden position; the later calls apply only any remaining delta.
+        if (TryReadCrash(m, out uint rider) && c.A0 == rider && !IsFirstFrame(m, rider))
+            RideAfterCrash(m);
         SnapshotObject(m, c.A0);
+        if (_haveObj && IsFirstFrame(m, c.A0))
+        {
+            ResetObjectPacing(c.A0);
+            if (_crashObj) ClearCrashScaleFrac();
+        }
         _solidObj = _haveObj && !_crashObj && !KeepRealDt(m, c.A0);
         if (_crashObj)
         {
@@ -150,8 +159,7 @@ public static partial class FramePacing
             // First frame always runs so box_link / stall init is not delayed.
             if (IsFirstFrame(m, _obj))
             {
-                _simAcc[_obj] = 0;
-                _gateTs[_obj] = Stopwatch.GetTimestamp();
+                SeedObjectGate(_obj);
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
                 SnapshotGatedCarry(m, _obj);
@@ -257,8 +265,8 @@ public static partial class FramePacing
         }
         if (_solidObj && !_gatedSolid && _haveObj)
         {
-            CaptureBound(m, _obj);
             CaptureGateRot(m, _obj);
+            CaptureBound(m, _obj);
             PaceGatedCarry(m, _obj);
         }
         if (_crashObj && !_objScaled && _haveObj)
@@ -289,8 +297,9 @@ public static partial class FramePacing
         // Crash look is patched in PreGfxTransformMesh on the real SVTX
         // pointer (A0). PreTransform is too early and a second patch here
         // made PreGfx skip the buffer Gfx actually reads.
-        if (IsActive(m) && c.A0 == _obj && !_crashObj)
-            PatchObjectMesh(c, m, c.A0);
+        // Mesh interpolation runs only in PreGfxTransformMesh, after the guest
+        // has resolved the actual frame. Looking it up here duplicated both
+        // NSLookup and vertex work, only to restore and repeat it at that hook.
         return true;
     }
 
@@ -305,26 +314,15 @@ public static partial class FramePacing
         // skip physics on that step (that stacked to ~4 Hz Force_Fall).
         if (_crashObj && IsLandLockedState(m, _obj))
             return true;
+        if (_crashObj)
+            SyncRiddenBound(m);
         WriteCrashOrObjectTicks(m);
-        // Hang trans is a 34-tick spd. Physics needs 34-tick StopAtWalls on
-        // XZ. Scale Y vel so the 34-tick Y step matches dt (else GROUNDLAND
-        // is a ceiling 0.6 m up). FinishPacedScale restores hang+gravity Y.
-        if (_crashObj && _crashAir)
+        // Keep the full XZ wall query, but give Y collision the same dt-scaled
+        // hang velocity and integer displacement that FinishPacedScale commits.
+        if (_crashObj && (_crashAir || HogNeedsJumpY(m)))
         {
-            _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
-            _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
-            _haveTransY = true;
-            int vyPhys = (int)Math.Round(_vyTrans * _exactTicks / RefTicks);
-            m.WriteU32(_obj + ObjVelYOff, (uint)vyPhys);
+            PrepareAirborneY(m);
             WriteAllTicks(m, RefTicks);
-        }
-        else if (_crashObj && HogNeedsJumpY(m))
-        {
-            _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
-            _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
-            _haveTransY = true;
-            int vyPhys = (int)Math.Round(_vyTrans * _exactTicks / RefTicks);
-            m.WriteU32(_obj + ObjVelYOff, (uint)vyPhys);
         }
         return true;
     }
@@ -360,6 +358,8 @@ public static partial class FramePacing
         RestoreNativeWideObjectFrustum(m);
         ResetNativeWideRenderer();
         _inNsInit = true;
+        _frameTimeReady = false;
+        _ticksTakenThisLoop = false;
         _levelReady = false;
         _saveUiPad = false;
         _holdLocked = 0;
@@ -403,6 +403,8 @@ public static partial class FramePacing
     {
         _inNsInit = false;
         _clockArmed = false;
+        _frameTimeReady = false;
+        _ticksTakenThisLoop = false;
         PaceLog("NSInit end");
     }
 
@@ -454,6 +456,8 @@ public static partial class FramePacing
 
             _levelReady = true;
             _clockArmed = false;
+            _frameTimeReady = false;
+            _ticksTakenThisLoop = false;
             ResetWaterClock();
             PaceLog($"unlock armed lid={id} crash=0x{crash:X8}");
         }
@@ -465,6 +469,7 @@ public static partial class FramePacing
 
     static void PaceLog(string msg)
     {
+        if (!ConfigManager.View.GetBool("Diagnostics.FramePacing")) return;
         Console.WriteLine("[FramePacing] " + msg);
         try
         {
@@ -596,8 +601,9 @@ public static partial class FramePacing
         if ((obj & 0xFF000000u) != 0x80000000u) return;
         try
         {
-            if (!TryReadGoolClass(m, obj, out uint type, out _)
-                || (type != GoolTypePoPl && !IsGatedRwaocMover(m, obj, type)))
+            if (!TryReadGoolClass(m, obj, out uint type, out uint cat)
+                || (type != GoolTypePoPl && !IsGatedRwaocMover(m, obj, type)
+                    && !IsGatedRiverObject(m, type, cat) && !IsRiverRideSurface(m, obj)))
                 return;
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) == 0) return;
@@ -631,7 +637,7 @@ public static partial class FramePacing
     static bool CrashStandingOnPlat(IMemory m, uint obj, uint crash)
     {
         if (CrashOnSolidTop(m, obj, crash)) return true;
-        if (!TryGatedSolidVisual(obj, out int vx, out int vy, out int vz))
+        if (!TryGatedSolidVisual(m, obj, out int vx, out int vy, out int vz))
             return false;
         return CrashOnPlatPos(m, obj, crash, vx, vy, vz);
     }
@@ -640,6 +646,26 @@ public static partial class FramePacing
     {
         int cy = (int)m.ReadU32(crash + ObjTransOff + 4);
         if (cy - py <= -HalfMeter) return false;
+        if (_lastBound.TryGetValue(plat, out BoundSnap bound)
+            && _gateRot.TryGetValue(plat, out GatePose pose))
+        {
+            // Use the same transformed bound as floor collision. Raw object
+            // bounds do not include the leaf's scale/rotation.
+            int dx = px - pose.Px, dy = py - pose.Py, dz = pz - pose.Pz;
+            int bottom = cy + Math.Min((int)m.ReadU32(crash + ObjBoundOff + 4),
+                (int)m.ReadU32(crash + ObjBoundOff + 16));
+            if (bottom > Math.Max(bound.Y1, bound.Y2) + dy + EmbedSlop) return false;
+            int contactX = (int)m.ReadU32(crash + ObjTransOff);
+            int contactZ = (int)m.ReadU32(crash + ObjTransOff + 8);
+            int x1 = contactX + (int)m.ReadU32(crash + ObjBoundOff);
+            int x2 = contactX + (int)m.ReadU32(crash + ObjBoundOff + 12);
+            int z1 = contactZ + (int)m.ReadU32(crash + ObjBoundOff + 8);
+            int z2 = contactZ + (int)m.ReadU32(crash + ObjBoundOff + 20);
+            return Math.Min(x1, x2) <= Math.Max(bound.X1, bound.X2) + dx
+                && Math.Max(x1, x2) >= Math.Min(bound.X1, bound.X2) + dx
+                && Math.Min(z1, z2) <= Math.Max(bound.Z1, bound.Z2) + dz
+                && Math.Max(z1, z2) >= Math.Min(bound.Z1, bound.Z2) + dz;
+        }
         int platTop = py + Math.Max((int)m.ReadU32(plat + ObjBoundOff + 4), (int)m.ReadU32(plat + ObjBoundOff + 16));
         int crashBottom = cy + Math.Min((int)m.ReadU32(crash + ObjBoundOff + 4), (int)m.ReadU32(crash + ObjBoundOff + 16));
         if (crashBottom > platTop + EmbedSlop) return false;

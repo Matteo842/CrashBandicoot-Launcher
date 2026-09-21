@@ -95,14 +95,14 @@ public static partial class FramePacing
     /// clock for this field drifted from the sim guest ticks (hitch clamp /
     /// GfxUpdateMatrices running less often) so mill plats dropped to ~10 Hz
     /// after a long session while Crash still used ticks. Same origin as
-    /// frames_elapsed. Pause on Lost City / Sunset Vista still freezes it.
+    /// frames_elapsed. Gameplay pause freezes it in every level.
     /// </summary>
     static void SyncWorldDraw(IMemory m)
     {
         if (!_waterArmed || !IsActive(m)) return;
         try
         {
-            bool pause = GamePaused(m) && IsRuinsPauseLid(m);
+            bool pause = GamePaused(m);
             if (pause)
             {
                 if (!_worldDrawPauseHold)
@@ -131,7 +131,7 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// One wall sample per game loop for ripple. draw_count follows guest ticks.
+    /// Ripple consumes the same sampled interval as camera and objects.
     /// </summary>
     static void AdvanceWater(IMemory m)
     {
@@ -147,7 +147,7 @@ public static partial class FramePacing
             return;
         }
 
-        long now = Stopwatch.GetTimestamp();
+        EnsureFrameTime(m);
         if (!_waterArmed)
         {
             try { _worldDraw = m.ReadU32(DrawCountAddr); }
@@ -157,7 +157,6 @@ public static partial class FramePacing
             _worldDrawPauseHold = false;
             _worldDrawFrac = 0;
             _rippleFrac = 0;
-            _waterTs = now;
             _waterArmed = true;
             _waterDoneThisLoop = true;
             CommitWaterDrawCount(m);
@@ -165,13 +164,7 @@ public static partial class FramePacing
             return;
         }
 
-        double sec = GamePaused(m) && IsRuinsPauseLid(m)
-            ? 0 : (now - _waterTs) / (double)Stopwatch.Frequency;
-        _waterTs = now;
-        if (sec < 0) sec = 0;
-        if (sec > HitchSeconds) sec = HitchSeconds;
-
-        double frames = sec * (TicksPerSecond / RefTicks);
+        double frames = GamePaused(m) ? 0 : _exactTicks / RefTicks;
         _worldDrawFrac += frames;
         _worldDrawFrac -= Math.Floor(_worldDrawFrac);
 
@@ -182,7 +175,7 @@ public static partial class FramePacing
         if (_waterLog < 8)
         {
             _waterLog++;
-            PaceLog($"water wall {sec * 1000:0.00}ms origFrames={frames:0.000} draw={_worldDraw}");
+            PaceLog($"water dt {frames * HitchSeconds * 1000:0.00}ms origFrames={frames:0.000} draw={_worldDraw}");
         }
     }
 
@@ -292,17 +285,28 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
-        if (!IsActive(m) || _frameTicks >= RefTicks) return true;
+        EnsureFrameTime(m);
+        if (!IsActive(m) || _exactTicks >= RefTicks - 0.01)
+        {
+            _cameraProgressFrac = 0;
+            return true;
+        }
         try
         {
             if (c.A0 != m.ReadU32(CamZoneAddr) || c.A1 != m.ReadU32(CamPathAddr))
+            {
+                _cameraProgressFrac = 0;
                 return true;
+            }
+            if (_cameraProgressZone != c.A0 || _cameraProgressPath != c.A1)
+            {
+                _cameraProgressFrac = 0;
+                _cameraProgressZone = c.A0;
+                _cameraProgressPath = c.A1;
+            }
             int cur = (int)m.ReadU32(CamProgressAddr);
             int req = (int)c.A2;
-            int d = req - cur;
-            if (d == 0) return true;
-            if (d > PathWrap || d < -PathWrap) return true;
-            c.A2 = (uint)(cur + ScaleStep(d));
+            c.A2 = (uint)KeepCrashDelta(cur, req, PathWrap, ref _cameraProgressFrac);
         }
         catch
         {
@@ -318,8 +322,13 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreCamFollow(CpuContext c, IMemory m)
     {
+        EnsureFrameTime(m);
         _inCamFollow = false;
-        if (!IsActive(m) || _frameTicks >= RefTicks) return true;
+        if (!IsActive(m) || _exactTicks >= RefTicks - 0.01)
+        {
+            _cameraSeekFrac.Clear();
+            return true;
+        }
         try
         {
             _camOffZ = (int)m.ReadU32(CamOffsetZAddr);
@@ -399,11 +408,17 @@ public static partial class FramePacing
     {
         int to = (int)m.ReadU32(addr);
         int d = to - from;
-        if (d == 0) return;
         int ad = d < 0 ? -d : d;
-        if (ad > maxStep) return;
-        int kept = ScaleStep(d);
-        m.WriteU32(addr, (uint)(from + kept));
+        if (d == 0 || ad > maxStep)
+        {
+            _cameraSeekFrac.Remove(addr);
+            return;
+        }
+        _cameraSeekFrac.TryGetValue(addr, out double fraction);
+        int result = KeepCrashDelta(from, to, maxStep, ref fraction);
+        _cameraSeekFrac[addr] = fraction;
+        int kept = result - from;
+        m.WriteU32(addr, (uint)result);
         if (_camLog < 8)
         {
             _camLog++;

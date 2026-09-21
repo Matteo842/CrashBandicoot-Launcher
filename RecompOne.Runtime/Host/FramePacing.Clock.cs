@@ -194,6 +194,7 @@ public static partial class FramePacing
         _inGpuUpdate = false;
         _didPresentThisGpu = false;
         _ticksTakenThisLoop = false;
+        _frameTimeReady = false;
         _loggedUnlockGpu = false;
         _inNsInit = false;
         _levelReady = false;
@@ -232,6 +233,7 @@ public static partial class FramePacing
     {
         _lastBound.Clear();
         _animAcc.Clear();
+        _spriteSteps.Clear();
         _animHold.Clear();
         _waitHoldTs.Clear();
         _poseClock.Clear();
@@ -245,7 +247,11 @@ public static partial class FramePacing
         _spawnAcc = 0;
         _spawnCredit.Clear();
         _simAcc.Clear();
-        _gateTs.Clear();
+        _gateFrame.Clear();
+        _cameraSeekFrac.Clear();
+        _cameraProgressFrac = 0;
+        _cameraProgressZone = 0;
+        _cameraProgressPath = 0;
         _gateStuckLog = 0;
         _pathHoppers.Clear();
         _platFrac.Clear();
@@ -308,7 +314,7 @@ public static partial class FramePacing
         // Android: GoolUpdateObjects is a direct jal, so PreUpdateObjects never
         // clears this. Reset here so AdvanceUnlocked can take the wall-clock step.
         // Windows already took dt in PreUpdateObjects — leave the flag alone.
-        if (!_didPreUpdateObjects)
+        if (!_didPreUpdateObjects && !_frameTimeReady)
             _ticksTakenThisLoop = false;
     }
 
@@ -326,6 +332,17 @@ public static partial class FramePacing
         CommitWaterDrawCount(m);
         RestoreRippleSpeed(m);
         _waterDoneThisLoop = false;
+        _frameTimeReady = false;
+        _ticksTakenThisLoop = false;
+    }
+
+    // Camera, world effects and objects consume the same wall-time interval.
+    // The first participating hook samples it; subsequent hooks only read it.
+    static void EnsureFrameTime(IMemory m)
+    {
+        if (_frameTimeReady || !IsActive(m)) return;
+        _ticksTakenThisLoop = false;
+        AdvanceWallClock(m);
     }
 
     /// <summary>
@@ -335,6 +352,12 @@ public static partial class FramePacing
     /// </summary>
     public static uint AdvanceWallClock(IMemory m)
     {
+        if (_frameTimeReady)
+        {
+            PatchTicksPerFrame(m);
+            return _guestTicks;
+        }
+        _frameTimeReady = true;
         long now = Stopwatch.GetTimestamp();
         if (!_clockArmed)
         {
@@ -369,6 +392,8 @@ public static partial class FramePacing
         if (sec < MinStepSeconds)
         {
             _exactTicks = 0;
+            _frameTicks = 0;
+            _ticksTakenThisLoop = true;
             PatchTicksPerFrame(m);
             return _guestTicks;
         }
@@ -381,7 +406,6 @@ public static partial class FramePacing
         _tickFrac += _exactTicks;
         uint dt = (uint)Math.Floor(_tickFrac);
         _tickFrac -= dt;
-        if (dt < 1) dt = 1;
         if (dt > RefTicks) dt = RefTicks;
 
         _frameTicks = dt;
@@ -445,8 +469,8 @@ public static partial class FramePacing
     static void NotePauseClock(IMemory m)
     {
         bool paused = GamePaused(m);
-        if (_wasPaused && !paused)
-            _clockArmed = false;
+        // UI keeps sampling time during pause. Re-arming here injected a full
+        // 34-tick step on resume, irrespective of the current refresh rate.
         _wasPaused = paused;
     }
 
@@ -837,7 +861,9 @@ public static partial class FramePacing
             n++;
         }
 
-        if (n == 0 && now - _irqTs > IrqPeriod * 8)
+        // Drop overdue service slots after the bounded catch-up. Keeping them
+        // queued makes later high-refresh presents fast-forward the sequencer.
+        if (now - _irqTs >= IrqPeriod)
             _irqTs = now;
     }
 

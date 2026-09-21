@@ -64,9 +64,8 @@ public static partial class FramePacing
 
     static int ScaleStep(int step)
     {
-        if (step == 0) return 0;
-        long n = (long)step * _frameTicks;
-        int s = (int)((n + (n >= 0 ? RefTicks / 2 : -(RefTicks / 2))) / RefTicks);
+        if (step == 0 || _exactTicks <= 0) return 0;
+        int s = (int)Math.Round(step * _exactTicks / RefTicks, MidpointRounding.AwayFromZero);
         if (s == 0) return step > 0 ? 1 : -1;
         return s;
     }
@@ -133,6 +132,39 @@ public static partial class FramePacing
         _crashFracRY = 0;
         _crashFracRZ = 0;
         _crashFracSp = 0;
+        ClearAirFractions();
+    }
+
+    static void ClearAirFractions()
+    {
+        _airFracY = 0;
+        _airFracHang = 0;
+        _airFracGravity = 0;
+    }
+
+    static int KeepAirStep(double step, ref double fraction)
+    {
+        if (_exactTicks <= 0) return 0;
+        double total = step + fraction;
+        int whole = (int)Math.Truncate(total);
+        fraction = total - whole;
+        return whole;
+    }
+
+    static void PrepareAirborneY(IMemory m)
+    {
+        _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
+        _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
+        _haveTransY = true;
+        _airVy = ScaleJumpVy(_ovy, _vyTrans, m, _obj);
+        _airDy = KeepAirStep(_airVy * _exactTicks / 1024.0, ref _airFracY);
+
+        // Guest displace truncates (vy * 34) / 1024 toward zero. Encode our
+        // integer displacement exactly so collision and the final Y agree,
+        // including negative motion and sub-unit steps at uncapped rates.
+        long magnitude = (Math.Abs((long)_airDy) * 1024 + RefTicks - 1) / RefTicks;
+        int vyPhys = (int)(_airDy < 0 ? -magnitude : magnitude);
+        m.WriteU32(_obj + ObjVelYOff, (uint)vyPhys);
     }
 
     /// <summary>
@@ -169,31 +201,32 @@ public static partial class FramePacing
             if (_haveTransY)
             {
                 m.WriteU32(o + ObjTransOff + 4, (uint)_yTrans);
-                m.WriteU32(o + ObjVelYOff, (uint)_vyTrans);
+                m.WriteU32(o + ObjVelYOff, (uint)_airVy);
             }
             return;
         }
 
         if (_exactTicks < RefTicks - 0.01)
         {
-            m.WriteU32(o + ObjTransOff, (uint)ScaleExact(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport));
-            m.WriteU32(o + ObjTransOff + 8, (uint)ScaleExact(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport));
-            m.WriteU32(o + ObjVelXOff, (uint)ScaleExact(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport));
-            m.WriteU32(o + ObjVelZOff, (uint)ScaleExact(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport));
+            m.WriteU32(o + ObjTransOff, (uint)KeepCrashDelta(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport, ref _crashFracTX));
+            m.WriteU32(o + ObjTransOff + 8, (uint)KeepCrashDelta(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport, ref _crashFracTZ));
+            m.WriteU32(o + ObjVelXOff, (uint)KeepCrashDelta(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport, ref _crashFracVX));
+            m.WriteU32(o + ObjVelZOff, (uint)KeepCrashDelta(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport, ref _crashFracVZ));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
             if (speedTo > 4 || speedTo < -4)
-                m.WriteU32(o + ObjSpeedOff, (uint)ScaleExact(_ospeed, speedTo, Teleport));
-            m.WriteU32(o + ObjRotOff, (uint)ScaleAng(_orx, (int)m.ReadU32(o + ObjRotOff)));
-            m.WriteU32(o + ObjRotOff + 4, (uint)ScaleAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4)));
-            m.WriteU32(o + ObjRotOff + 8, (uint)ScaleAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8)));
+                m.WriteU32(o + ObjSpeedOff, (uint)KeepCrashDelta(_ospeed, speedTo, Teleport, ref _crashFracSp));
+            else
+                _crashFracSp = 0;
+            m.WriteU32(o + ObjRotOff, (uint)KeepCrashAng(_orx, (int)m.ReadU32(o + ObjRotOff), ref _crashFracRX));
+            m.WriteU32(o + ObjRotOff + 4, (uint)KeepCrashAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4), ref _crashFracRY));
+            m.WriteU32(o + ObjRotOff + 8, (uint)KeepCrashAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8), ref _crashFracRZ));
         }
+        else
+            ClearCrashScaleFrac();
 
         if (!_haveTransY) return;
 
-        int vyHang = ScaleJumpVy(_ovy, _vyTrans, m, o);
-        int y = _yTrans + (int)Math.Round(vyHang * _exactTicks / 1024.0);
-        int vy = vyHang - (int)Math.Round(4000.0 * _exactTicks);
-        WriteAirborneY(m, y, vy, vyHang);
+        FinishAirborneY(m);
         RejectCrateEmbed(m);
     }
 
@@ -203,10 +236,13 @@ public static partial class FramePacing
     /// </summary>
     static int ScaleJumpVy(int from, int after, IMemory m, uint obj)
     {
-        int dvy = after - from;
+        long dvy = (long)after - from;
         if (IsFirstFrame(m, obj) || dvy > 0x80000 || dvy < -0x80000)
+        {
+            ClearAirFractions();
             return after;
-        return from + (int)Math.Round(dvy * _exactTicks / RefTicks);
+        }
+        return from + KeepAirStep(dvy * _exactTicks / RefTicks, ref _airFracHang);
     }
 
     /// <summary>
@@ -219,7 +255,11 @@ public static partial class FramePacing
     static void WriteAirborneY(IMemory m, int y, int vy, int vyBeforeGravity)
     {
         uint o = _obj;
-        if (vy < -0x2EE000) vy = -0x2EE000;
+        if (vy < -0x2EE000)
+        {
+            vy = -0x2EE000;
+            _airFracGravity = 0;
+        }
         int yPhys = (int)m.ReadU32(o + ObjTransOff + 4);
         uint statusA = m.ReadU32(o + ObjStatusAOff);
         bool hitCeil = (statusA & FlagHitCeiling) != 0;
@@ -227,6 +267,7 @@ public static partial class FramePacing
         bool rising = vyBeforeGravity > 0;
         if (hitCeil)
         {
+            ClearAirFractions();
             m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
             if (vy > 0)
             {
@@ -245,6 +286,7 @@ public static partial class FramePacing
         }
         else if (landed)
         {
+            ClearAirFractions();
             m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
             m.WriteU32(o + ObjVelYOff, 0);
             return;
@@ -280,7 +322,8 @@ public static partial class FramePacing
             }
             if (_crashAir)
             {
-                ClearCrashScaleFrac();
+                _crashFracTY = 0;
+                _crashFracVY = 0;
                 FinishJumpScale(m);
                 RideAfterCrash(m);
                 return;
@@ -310,7 +353,7 @@ public static partial class FramePacing
                 Array.Clear(_hogMemFrac);
                 ClearCrashScaleFrac();
                 if (_haveTransY)
-                    FinishHogJumpY(m);
+                    FinishAirborneY(m);
                 RejectCrateEmbed(m);
                 return;
             }
@@ -318,9 +361,24 @@ public static partial class FramePacing
             m.WriteU32(o + ObjTransOff + 8, (uint)KeepCrashDelta(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport, ref _crashFracTZ));
 
             bool hogJumpY = _crashHog && _haveTransY;
+            if (!hogJumpY) ClearAirFractions();
             int yTo = (int)m.ReadU32(o + ObjTransOff + 4);
             if (!hogJumpY)
-                m.WriteU32(o + ObjTransOff + 4, (uint)KeepCrashDelta(_oy, yTo, VelTeleport, ref _crashFracTY));
+            {
+                if (_rideObj == 0) TryAttachRiverRide(m, o);
+                bool onRiverFloor = _rideObj != 0 && IsRiverRideSurface(m, _rideObj)
+                    && (m.ReadU32(o + ObjStatusAOff) & FlagGroundLand) != 0
+                    && (int)m.ReadU32(o + ObjVelYOff) <= 0;
+                if (onRiverFloor)
+                {
+                    // Floor resolution is a contact constraint, not velocity.
+                    // Scaling it by dt/34 leaves the feet behind the leaf.
+                    _crashFracTY = 0;
+                    m.WriteU32(o + ObjTransOff + 4, (uint)yTo);
+                }
+                else
+                    m.WriteU32(o + ObjTransOff + 4, (uint)KeepCrashDelta(_oy, yTo, VelTeleport, ref _crashFracTY));
+            }
             m.WriteU32(o + ObjVelXOff, (uint)KeepCrashDelta(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport, ref _crashFracVX));
             int vyTo = (int)m.ReadU32(o + ObjVelYOff);
             if (!hogJumpY)
@@ -337,7 +395,7 @@ public static partial class FramePacing
             if (_crashHog)
                 FinishWarthogScale(m);
             if (hogJumpY)
-                FinishHogJumpY(m);
+                FinishAirborneY(m);
 
             if (_crashObj && !hogJumpY)
             {
@@ -515,29 +573,43 @@ public static partial class FramePacing
     /// </summary>
     static void PaceSpriteAnim(IMemory m)
     {
-        if (!_haveObj || _crashObj || _frameTicks >= RefTicks) return;
+        if (!_haveObj || _crashObj) return;
         try
         {
             uint seq = m.ReadU32(_obj + ObjAnimSeqOff);
-            if ((seq & 0xFF000000u) != 0x80000000u) return;
-            if (m.ReadU8(seq) != AnimTypeSprite) return;
+            if ((seq & 0xFF000000u) != 0x80000000u || m.ReadU8(seq) != AnimTypeSprite)
+            {
+                _spriteSteps.Remove(_obj);
+                return;
+            }
 
             int to = (int)m.ReadU32(_obj + ObjAnimFrameOff);
             int from = _oanim;
             if (to > AnimFrameCap || from > AnimFrameCap)
             {
+                _spriteSteps.Remove(_obj);
                 m.WriteU32(_obj + ObjAnimFrameOff, 0);
                 return;
             }
             int d = to - from;
-            if (d > 0x180 || d < -0x180) return;
+            if (d > 0x180 || d < -0x180 || IsFirstFrame(m, _obj))
+            {
+                _spriteSteps.Remove(_obj);
+                return;
+            }
             if (d == 0) return;
-            int s = (int)Math.Round(d * _exactTicks / RefTicks);
-            if (s == 0) return;
+            double fraction = 0;
+            if (_spriteSteps.TryGetValue(_obj, out var previous)
+                && previous.Sequence == seq && previous.Last == from)
+                fraction = previous.Fraction;
+            double step = d * (GamePaused(m) ? 0 : _exactTicks / RefTicks) + fraction;
+            int s = (int)Math.Truncate(step);
             int n = from + s;
             if (n > AnimFrameCap) n = AnimFrameCap;
             if (n < 0) n = 0;
             m.WriteU32(_obj + ObjAnimFrameOff, (uint)n);
+            _spriteSteps[_obj] = (seq, n, n == from + s ? step - s : 0);
+            EvictDictDown(_spriteSteps, _obj, ObjectPoolMax);
         }
         catch
         {
@@ -755,18 +827,14 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Hog jump trans did a 34-tick hang <c>spd(vely)</c> and physics a
-    /// 34-tick displace. ScaleExact on Y is two half-steps at 60. Takeoff
-    /// / bounce is a SET (keep vy). Hang is dt/34 of that spd add. Then
-    /// y += vy×dt/1024, gravity 4000×dt — same order as the guest, any fps.
+    /// Crash and hog use the Y step prepared before collision, then apply
+    /// fractional gravity. Never recompute hang after the collision query.
     /// </summary>
-    static void FinishHogJumpY(IMemory m)
+    static void FinishAirborneY(IMemory m)
     {
-        uint o = _obj;
-        int vyHang = ScaleJumpVy(_ovy, _vyTrans, m, o);
-        int y = _yTrans + (int)Math.Round(vyHang * _exactTicks / 1024.0);
-        int vy = vyHang - (int)Math.Round(4000.0 * _exactTicks);
-        WriteAirborneY(m, y, vy, vyHang);
+        int y = _yTrans + _airDy;
+        int vy = _airVy - KeepAirStep(4000.0 * _exactTicks, ref _airFracGravity);
+        WriteAirborneY(m, y, vy, _airVy);
     }
 
     static int KeepHogPath(int from, int to)
@@ -871,6 +939,7 @@ public static partial class FramePacing
             _ovz = (int)m.ReadU32(obj + ObjVelZOff);
             _ospeed = (int)m.ReadU32(obj + ObjSpeedOff);
             _oanim = (int)m.ReadU32(obj + ObjAnimFrameOff);
+            _oanimSequence = m.ReadU32(obj + ObjAnimSeqOff);
             _crashHog = _crashObj && CrashOnWarthog(m, obj);
             if (_crashHog)
             {
@@ -904,14 +973,25 @@ public static partial class FramePacing
         {
             uint type = m.ReadU32(obj);
             if (type is 0 or 2) return;
-            TryReadGoolClass(m, obj, out uint goolType, out _);
-            // LizaC's left/right jump is a valid vertex sequence longer than
-            // 32 frames. Resetting frame 33 to zero loops only its takeoff.
-            if (IsLizaEntity(m, obj, goolType)) return;
             int anim = (int)m.ReadU32(obj + ObjAnimFrameOff);
-            // GoolObjectTransform: svtx/sprite[anim_frame >> 8]. Do not wrap
-            // by GOOL length — that byte is not valid on every seq during load.
-            if (anim > AnimFrameCap || anim < 0)
+            if (anim < 0)
+            {
+                m.WriteU32(obj + ObjAnimFrameOff, 0);
+                return;
+            }
+            // Plant/lizard attack and jump sequences can exceed 32 frames.
+            // Validate against a resolved mesh entry, never an arbitrary cap
+            // or the ambiguous GOOL sequence length byte. Unresolved assets
+            // are left for the normal draw-time lookup; no extra NSLookup here.
+            uint seq = m.ReadU32(obj + ObjAnimSeqOff);
+            if ((seq & 0xFF000000u) != 0x80000000u || m.ReadU8(seq) != AnimTypeVtx)
+                return;
+            uint entry = EntryFromRef(m, m.ReadU32(seq + 4));
+            if (entry == 0) return;
+            uint entryType = m.ReadU32(entry + 8);
+            if (entryType != SvtxEntryType && entryType != CvtxEntryType) return;
+            uint frames = m.ReadU32(entry + 12);
+            if (frames > 0 && frames <= 4096 && (uint)(anim >> 8) >= frames)
                 m.WriteU32(obj + ObjAnimFrameOff, 0);
         }
         catch

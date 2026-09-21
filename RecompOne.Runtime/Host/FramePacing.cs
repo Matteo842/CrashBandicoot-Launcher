@@ -520,10 +520,12 @@ public static partial class FramePacing
         public int Fx, Fy, Fz, Tx, Ty, Tz;
         public int Px, Py, Pz, Qx, Qy, Qz;
         public int FromAnim, ToAnim;
+        public uint FromSequence, ToSequence;
     }
 
     struct PoseClock
     {
+        public uint Sequence;
         public int Idx;
         public int From;
         public long Ts;
@@ -560,6 +562,7 @@ public static partial class FramePacing
     static bool _inGpuUpdate;
     static bool _didPresentThisGpu;
     static bool _ticksTakenThisLoop;
+    static bool _frameTimeReady;
     static bool _loggedUnlockGpu;
     static bool _inNsInit;
     /// <summary>Unlocked VSync only after a gameplay GpuUpdate with Crash spawned.</summary>
@@ -578,6 +581,7 @@ public static partial class FramePacing
 
     static uint _obj;
     static int _ox, _oy, _oz, _orx, _ory, _orz, _oanim;
+    static uint _oanimSequence;
     static int _ovy, _ovx, _ovz, _ospeed;
     static int _opath, _otrotX, _otrotY, _otrotZ;
     static double _hogPathFrac, _hogTrotFracX, _hogTrotFracY, _hogTrotFracZ;
@@ -596,9 +600,14 @@ public static partial class FramePacing
     static bool _objScaled;
     static bool _crashAir;
     static int _yTrans, _vyTrans;
+    static int _airVy, _airDy;
+    static double _airFracY, _airFracHang, _airFracGravity;
     static bool _haveTransY;
+    static bool _rideWasStanding;
+    static double _ridePhase;
     static readonly Dictionary<uint, BoundSnap> _lastBound = new();
     static readonly Dictionary<uint, double> _animAcc = new();
+    static readonly Dictionary<uint, (uint Sequence, int Last, double Fraction)> _spriteSteps = new();
     static readonly HashSet<uint> _animHold = new();
     static readonly Dictionary<uint, long> _waitHoldTs = new();
     static readonly Dictionary<uint, PoseClock> _poseClock = new();
@@ -626,8 +635,11 @@ public static partial class FramePacing
     static double _spawnAcc;
     static readonly Dictionary<uint, double> _spawnCredit = new();
     static readonly Dictionary<uint, double> _simAcc = new();
-    /// <summary>Last real 30 Hz interpret for a gated object. Watchdog if skip hangs.</summary>
-    static readonly Dictionary<uint, long> _gateTs = new();
+    /// <summary>World tick consumed by each already-gated object.</summary>
+    static readonly Dictionary<uint, uint> _gateFrame = new();
+    static readonly Dictionary<uint, double> _cameraSeekFrac = new();
+    static double _cameraProgressFrac;
+    static uint _cameraProgressZone, _cameraProgressPath;
     static int _gateStuckLog;
     static bool _wasPaused;
     static readonly Dictionary<uint, double[]> _platFrac = new();
@@ -661,7 +673,6 @@ public static partial class FramePacing
     static double _rippleFrac;
     static int _savedRippleSpeed;
     static bool _ripplePatched;
-    static long _waterTs;
     static bool _waterArmed;
     static bool _waterDoneThisLoop;
     static int _waterLog;
