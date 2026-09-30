@@ -121,8 +121,9 @@ namespace RecompOne.Runtime.Host;
 /// is not lerped — blending WillC keys tears the face (eyes/brows) and
 /// a signed 8-bit take exploded the whole model. PinsC (Pinstripe),
 /// ChefC (Papu Papu), PlanC (Temple Ruins / Jaws cobras — jungle plants
-/// share the exe), and FatsC (Toxic Waste barrel thrower) are the same
-/// SVTX wrap: unsigned lerp of signed xyz flies the mesh apart. Still
+/// share the exe), FatsC (Toxic Waste barrel thrower), and MonkC
+/// (Native Fortress monkeys) are the same SVTX wrap: unsigned lerp of
+/// signed xyz flies the mesh apart. Still
 /// gated as an enemy (one original interpret per 34 wall ticks); extra
 /// presents draw the authored key.
 /// HoldAnimWait still steps Crash's pose at 30 Hz; extra presents
@@ -423,6 +424,8 @@ public static partial class FramePacing
     const uint GoolTypePlan = 25u;
     /// <summary>FatsC Toxic Waste barrel thrower. Enemy cat 0x300; SVTX skip like PinsC.</summary>
     const uint GoolTypeFats = 17u;
+    /// <summary>MonkC Native Fortress monkeys. Enemy cat 0x300; SVTX skip like PinsC.</summary>
+    const uint GoolTypeMonk = 1u;
     /// <summary>RooOC Ripper Roo objects. BIG TNT hops/rocks here, not BoxsC.</summary>
     const uint GoolTypeRooO = 39u;
     /// <summary>JunOC jungle objects. Decimal 22 — not BoxC 0x22.</summary>
