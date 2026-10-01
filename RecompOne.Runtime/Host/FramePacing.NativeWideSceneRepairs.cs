@@ -56,15 +56,14 @@ public static partial class FramePacing
         bool hog = level == 17 && world.PolyCount == 1232 && world.VertexCount == 1382
             && m.ReadU32(world.Header) == 8383 && m.ReadU32(world.Header + 4) == 7163
             && m.ReadU32(world.Header + 8) == 122966;
-        // Sunset Vista's climbing shaft: lower and upper WGEO meshes.
+        // Sunset Vista's temple interior: climbing shafts and the rooms between them.
+        // The outdoor opening and its corridor are not included.
         bool sunset = level == 35 && world.PolyCount == 3463 && world.VertexCount == 3183
             && m.ReadU32(world.Header) == 110000 && (int)m.ReadU32(world.Header + 4) == -82800
             && (int)m.ReadU32(world.Header + 8) == -4400;
-        bool sunsetUpper = level == 35 && world.PolyCount == 2627 && world.VertexCount == 2040
-            && m.ReadU32(world.Header) == 113200 && (int)m.ReadU32(world.Header + 4) == -64800
-            && (int)m.ReadU32(world.Header + 8) == -4400;
+        bool temple = NativeWideSunsetTemple(m, world);
         bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
-            || sunset || sunsetUpper;
+            || temple;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -92,6 +91,34 @@ public static partial class FramePacing
                 var edge = swap ? new NativeWideEdge(pb, pa) : new NativeWideEdge(pa, pb);
                 edges[edge] = edges.TryGetValue(edge, out var owner)
                     ? owner with { Count = owner.Count + 1 } : new NativeWideEdgeOwner(pi, ei, 1);
+            }
+        }
+
+        // Temple walls are axis aligned: side walls in X planes, back walls in Z planes.
+        Dictionary<float, List<int>>? xPlanes = null, zPlanes = null;
+        Dictionary<float, float>? wallBack = null;
+        if (temple)
+        {
+            xPlanes = []; zPlanes = [];
+            for (int pi = 0; pi < world.PolyCount; pi++)
+            {
+                var t0 = triangles[pi * 3]; var t1 = triangles[pi * 3 + 1]; var t2 = triangles[pi * 3 + 2];
+                if (t0.X == t1.X && t1.X == t2.X) AddNativeWidePlane(xPlanes, t0.X, pi);
+                if (t0.Z == t1.Z && t1.Z == t2.Z) AddNativeWidePlane(zPlanes, t0.Z, pi);
+            }
+            // Planes whose walls end toward the camera; their back walls also stop there.
+            wallBack = [];
+            foreach (var owner in edges.Values)
+            {
+                if (owner.Count != 1) continue;
+                int o = owner.Polygon * 3;
+                var a = triangles[o + owner.Edge];
+                if (!NativeWideWallNearEdge(a, triangles[o + (owner.Edge + 1) % 3], triangles[o + (owner.Edge + 2) % 3])
+                    || wallBack.ContainsKey(a.X)) continue;
+                float back = float.MaxValue;
+                foreach (int pi in xPlanes[a.X])
+                    for (int k = 0; k < 3; k++) back = Math.Min(back, triangles[pi * 3 + k].Z);
+                wallBack[a.X] = back;
             }
         }
 
@@ -218,30 +245,33 @@ public static partial class FramePacing
                 distance = 2400;
                 if (roofLeft || roofRight || canopy) direction = Math.Sign(a.X) * Vector3.UnitX;
             }
-            if (sunset || sunsetUpper)
+            if (temple)
             {
-                // The side walls lie in the planes x = cut and end at the camera's
-                // 4:3 edge, as does the back wall (constant Z) behind them. Continue
-                // each wall's near contour toward the camera and the back wall
-                // outward. The bridge front below the lower right wall also stops short.
-                float right = sunset ? 7200 : 4000;
-                bool onCut = a.X == b.X && (a.X == right
-                    || (sunset ? a.X == 1200 : a.X == -2000 || a.X == -3600));
+                // Side walls end at the camera's 4:3 edge; continue their near
+                // contour toward the camera. Back walls behind them also stop at
+                // the wall plane; continue those outward. Coplanar faces beyond
+                // an edge mean a window or doorway, which must stay open. The
+                // bridge front below the first shaft's right wall also stops short.
+                distance = 3200;
+                float yLow = Math.Min(a.Y, b.Y), yHigh = Math.Max(a.Y, b.Y);
                 bool bridge = sunset && a.X == 6800 && b.X == 6800 && a.Z == 6000 && b.Z == 6000
-                    && c.Z == 6000 && Math.Max(a.Y, b.Y) <= 0;
+                    && c.Z == 6000 && yHigh <= 0;
                 if (bridge) direction = Vector3.UnitX;
-                else if (!onCut) continue;
-                else if (c.X == a.X)
+                else if (NativeWideWallNearEdge(a, b, c))
                 {
-                    Vector3 pa = Position(a), edge = Position(b) - pa, outward = pa - Position(c);
-                    outward -= edge * (Vector3.Dot(outward, edge) / Vector3.Dot(edge, edge));
-                    if (outward.Z <= 1) continue;
+                    if (a.Z == b.Z && NativeWidePlaneContinues(triangles, xPlanes![a.X], 2, a.Z, 1,
+                        yLow, yHigh, distance)) continue;
                     direction = Vector3.UnitZ;
                 }
-                else if (a.Z == b.Z && b.Z == c.Z)
-                    direction = (a.X == right ? 1 : -1) * Vector3.UnitX;
+                else if (a.X == b.X && a.Z == b.Z && b.Z == c.Z
+                    && wallBack!.TryGetValue(a.X, out float back) && a.Z <= back + 16)
+                {
+                    float sign = Math.Sign(a.X - c.X);
+                    if (sign == 0 || NativeWidePlaneContinues(triangles, zPlanes![a.Z], 0, a.X, sign,
+                        yLow, yHigh, distance)) continue;
+                    direction = sign * Vector3.UnitX;
+                }
                 else continue;
-                distance = 3200;
             }
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
@@ -298,6 +328,65 @@ public static partial class FramePacing
         }
         _nativeWideBridgeSkies[key] = repairs;
         return repairs;
+    }
+
+    static bool NativeWideSunsetTemple(IMemory m, NativeWideWorld world) =>
+        m.ReadU32(Catalogs.Catalog.LevelIdAddr) == 35
+        && ((int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 4), world.PolyCount, world.VertexCount) is
+            (110000, -82800, 3463, 3183) or (113200, -64800, 2627, 2040) or (91200, -60400, 2742, 2093)
+            or (81600, -42400, 3144, 2845) or (103600, -41600, 2250, 2011) or (142400, -41600, 2143, 1968)
+            or (158400, -38423, 2805, 2238) or (151235, -16761, 3259, 2860) or (175200, -16600, 2113, 2038);
+
+    // The temple's generic wall continuation cannot tell a level boundary from a
+    // wall that ends inside an open room. Draw it behind all real scenery so it
+    // only fills pixels nothing else covers. Depth is 1 - 64/Z; the remap keeps
+    // the additions' own order but places them beyond the loaded rooms.
+    static void NativeWideBehindScenery(List<NativeWideTriangle> triangles, int start)
+    {
+        static HleVertex Far(HleVertex v)
+        {
+            v.Z = Math.Min(40000f + v.Z * 0.3f, 65000f);
+            return v;
+        }
+        for (int i = start; i < triangles.Count; i++)
+        {
+            var t = triangles[i];
+            triangles[i] = t with { A = Far(t.A), B = Far(t.B), C = Far(t.C) };
+        }
+    }
+
+    static void AddNativeWidePlane(Dictionary<float, List<int>> planes, float plane, int polygon)
+    {
+        if (!planes.TryGetValue(plane, out var list)) planes[plane] = list = [];
+        list.Add(polygon);
+    }
+
+    // Open edge of a face lying in an X plane whose surface ends toward the camera (+Z).
+    static bool NativeWideWallNearEdge(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c)
+    {
+        if (a.X != b.X || b.X != c.X) return false;
+        Vector3 pa = Position(a), edge = Position(b) - pa, outward = pa - Position(c);
+        outward -= edge * (Vector3.Dot(outward, edge) / Vector3.Dot(edge, edge));
+        return outward.Z > 1;
+    }
+
+    // True when another face in the same plane lies beyond the edge (axis 0 = X,
+    // 2 = Z) within the extension distance and overlaps its height.
+    static bool NativeWidePlaneContinues(NativeWideClipVertex[] triangles, List<int> plane, int axis,
+        float start, float sign, float yLow, float yHigh, float distance)
+    {
+        foreach (int pi in plane)
+        {
+            var t0 = triangles[pi * 3]; var t1 = triangles[pi * 3 + 1]; var t2 = triangles[pi * 3 + 2];
+            if (Math.Min(yHigh, Math.Max(t0.Y, Math.Max(t1.Y, t2.Y)))
+                - Math.Max(yLow, Math.Min(t0.Y, Math.Min(t1.Y, t2.Y))) <= 0) continue;
+            float d0 = ((axis == 0 ? t0.X : t0.Z) - start) * sign;
+            float d1 = ((axis == 0 ? t1.X : t1.Z) - start) * sign;
+            float d2 = ((axis == 0 ? t2.X : t2.Z) - start) * sign;
+            float near = Math.Min(d0, Math.Min(d1, d2));
+            if (near >= 0 && Math.Max(d0, Math.Max(d1, d2)) > 0 && near < distance) return true;
+        }
+        return false;
     }
 
     static Vector3 Position(NativeWideClipVertex v) => new((float)v.X, (float)v.Y, (float)v.Z);
