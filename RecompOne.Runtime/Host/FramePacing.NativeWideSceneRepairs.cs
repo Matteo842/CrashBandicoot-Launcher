@@ -25,7 +25,7 @@ public static partial class FramePacing
         if (level is 20 or 22 && world.PolyCount == 12 && world.VertexCount == 14
             && m.ReadU32(world.Header + 0x1C) == 1)
             return NativeWideBridgeSkyRepairs(m, world);
-        if (level is not (9 or 12 or 15 or 17 or 18 or 24 or 26 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (level is not (9 or 12 or 15 or 17 or 18 or 24 or 26 or 35 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -56,7 +56,15 @@ public static partial class FramePacing
         bool hog = level == 17 && world.PolyCount == 1232 && world.VertexCount == 1382
             && m.ReadU32(world.Header) == 8383 && m.ReadU32(world.Header + 4) == 7163
             && m.ReadU32(world.Header + 8) == 122966;
-        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog;
+        // Sunset Vista's climbing shaft: lower and upper WGEO meshes.
+        bool sunset = level == 35 && world.PolyCount == 3463 && world.VertexCount == 3183
+            && m.ReadU32(world.Header) == 110000 && (int)m.ReadU32(world.Header + 4) == -82800
+            && (int)m.ReadU32(world.Header + 8) == -4400;
+        bool sunsetUpper = level == 35 && world.PolyCount == 2627 && world.VertexCount == 2040
+            && m.ReadU32(world.Header) == 113200 && (int)m.ReadU32(world.Header + 4) == -64800
+            && (int)m.ReadU32(world.Header + 8) == -4400;
+        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
+            || sunset || sunsetUpper;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -209,6 +217,31 @@ public static partial class FramePacing
                 direction = new Vector3(Math.Sign(a.X), 0.5f, 0.4f);
                 distance = 2400;
                 if (roofLeft || roofRight || canopy) direction = Math.Sign(a.X) * Vector3.UnitX;
+            }
+            if (sunset || sunsetUpper)
+            {
+                // The side walls lie in the planes x = cut and end at the camera's
+                // 4:3 edge, as does the back wall (constant Z) behind them. Continue
+                // each wall's near contour toward the camera and the back wall
+                // outward. The bridge front below the lower right wall also stops short.
+                float right = sunset ? 7200 : 4000;
+                bool onCut = a.X == b.X && (a.X == right
+                    || (sunset ? a.X == 1200 : a.X == -2000 || a.X == -3600));
+                bool bridge = sunset && a.X == 6800 && b.X == 6800 && a.Z == 6000 && b.Z == 6000
+                    && c.Z == 6000 && Math.Max(a.Y, b.Y) <= 0;
+                if (bridge) direction = Vector3.UnitX;
+                else if (!onCut) continue;
+                else if (c.X == a.X)
+                {
+                    Vector3 pa = Position(a), edge = Position(b) - pa, outward = pa - Position(c);
+                    outward -= edge * (Vector3.Dot(outward, edge) / Vector3.Dot(edge, edge));
+                    if (outward.Z <= 1) continue;
+                    direction = Vector3.UnitZ;
+                }
+                else if (a.Z == b.Z && b.Z == c.Z)
+                    direction = (a.X == right ? 1 : -1) * Vector3.UnitX;
+                else continue;
+                distance = 3200;
             }
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
