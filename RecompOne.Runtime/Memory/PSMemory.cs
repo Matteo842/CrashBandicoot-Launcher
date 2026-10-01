@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Hardware;
@@ -10,6 +12,8 @@ public sealed class PSMemory : IMemory
     private readonly byte[] _scratchpad = new byte[MemoryMap.ScratchpadSize];
     private readonly byte[] _hwregs = new byte[MemoryMap.HwRegsSize];
     private readonly byte[] _bios = new byte[MemoryMap.BiosSize];
+    // RAM sizes are powers of two: mask instead of % (a hardware divide per access).
+    private readonly uint _ramMask;
 
     private readonly Gpu _gpu = new();
     private readonly Spu _spu = new();
@@ -23,6 +27,7 @@ public sealed class PSMemory : IMemory
 
     public PSMemory()
     {
+        _ramMask = (uint)_ram.Length - 1;
         _dma = new Dma(this, _gpu, _spu, _mdec, () => Runtime.DispatchIrq(3));
         Runtime.Gpu = _gpu;
         Runtime.Spu = _spu;
@@ -52,8 +57,8 @@ public sealed class PSMemory : IMemory
     {
         if (phys < MemoryMap.RamWindow)
         {
-            uint off = phys % (uint)_ram.Length;
-            Runtime.RamLog.RecordWrite(phys % (uint)_ram.Length, size);
+            uint off = phys & _ramMask;
+            Runtime.RamLog.RecordWrite(off, size);
             Dispatcher.NotifyWrite(off);
         }
 
@@ -62,7 +67,7 @@ public sealed class PSMemory : IMemory
     private void TrackRead(uint phys, int size)
     {
         if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
-            Runtime.RamLog.RecordRead(phys % (uint)_ram.Length, size);
+            Runtime.RamLog.RecordRead(phys & _ramMask, size);
     }
 
     // Crash SCUS-94900: .sbss global pointer. Geom jump-table stubs temporarily load
@@ -72,13 +77,31 @@ public sealed class PSMemory : IMemory
 
     int _memYield = 65536;
 
-    private Span<byte> Resolve(uint address, int size)
+    /// <summary>
+    /// Every guest access counts toward a VBlank catch-up check, so busy-wait loops
+    /// polling RAM still see VBlank IRQs. The RAM fast paths must call this too.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void CountAccess()
     {
         if (--_memYield <= 0)
         {
             _memYield = 65536;
             Sdk.LibEtc.MaybeCatchUpVBlank();
         }
+    }
+
+    /// <summary>Offset into main RAM if <paramref name="phys"/> is RAM and the access fits.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryRamOffset(uint phys, uint size, out uint off)
+    {
+        off = phys & _ramMask;
+        return phys < MemoryMap.RamWindow && off <= (uint)_ram.Length - size;
+    }
+
+    private Span<byte> Resolve(uint address, int size)
+    {
+        CountAccess();
         if (TryMap(address, size, out var span))
             return span;
 
@@ -97,7 +120,7 @@ public sealed class PSMemory : IMemory
 
         if (phys < MemoryMap.RamWindow)
         {
-            span = _ram.AsSpan((int)(phys % (uint)_ram.Length), size);
+            span = _ram.AsSpan((int)(phys & _ramMask), size);
             return true;
         }
 
@@ -185,10 +208,18 @@ public sealed class PSMemory : IMemory
     private static bool IsCd(uint phys) => phys >= 0x1F801800u && phys <= 0x1F801803u;
     private static bool IsSpu(uint phys) => phys >= 0x1F801C00u && phys < 0x1F801E80u;
 
+    // Fast paths: ~99% of accesses are main RAM. Skip the MMIO compare chain and
+    // Span resolve, but keep TrackRead/TrackWrite + CountAccess exactly as Resolve did.
+
     public byte ReadU8(uint address)
     {
         uint phys = MemoryMap.ToPhysical(address);
         TrackRead(phys, 1);
+        if (TryRamOffset(phys, 1, out uint off))
+        {
+            CountAccess();
+            return _ram[off];
+        }
         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
         return Resolve(address, 1)[0];
     }
@@ -197,6 +228,11 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         TrackRead(phys, 2);
+        if (TryRamOffset(phys, 2, out uint off))
+        {
+            CountAccess();
+            return BinaryPrimitives.ReadUInt16LittleEndian(_ram.AsSpan((int)off));
+        }
         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
         if (IsSpu(phys)) return _spu.ReadReg16(phys);
         if (Timers.InRange(phys) && _timers.TryRead(phys, out uint tv)) return (ushort)tv;
@@ -208,6 +244,11 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         TrackRead(phys, 4);
+        if (TryRamOffset(phys, 4, out uint off))
+        {
+            CountAccess();
+            return BinaryPrimitives.ReadUInt32LittleEndian(_ram.AsSpan((int)off));
+        }
         if (phys == 0x1F801810u) return _gpu.ReadData();
         if (phys == 0x1F801814u) return _gpu.ReadStat();
         if (phys == 0x1F801820u) return _mdec.ReadData();
@@ -224,6 +265,12 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         TrackWrite(phys, 1);
+        if (TryRamOffset(phys, 1, out uint off))
+        {
+            CountAccess();
+            _ram[off] = value;
+            return;
+        }
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, value); return; }
         Resolve(address, 1)[0] = value;
     }
@@ -232,6 +279,12 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         TrackWrite(phys, 2);
+        if (TryRamOffset(phys, 2, out uint off))
+        {
+            CountAccess();
+            BinaryPrimitives.WriteUInt16LittleEndian(_ram.AsSpan((int)off), value);
+            return;
+        }
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
         if (IsSpu(phys)) { _spu.WriteReg16(phys, value); return; }
         if (_timers.TryWrite(phys, value)) return;
@@ -244,6 +297,12 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         TrackWrite(phys, 4);
+        if (TryRamOffset(phys, 4, out uint off))
+        {
+            CountAccess();
+            BinaryPrimitives.WriteUInt32LittleEndian(_ram.AsSpan((int)off), value);
+            return;
+        }
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
         if (phys == 0x1F801814u) { _gpu.WriteGp1(value); return; }
         if (phys == 0x1F801820u) { _mdec.Write0(value); return; }
