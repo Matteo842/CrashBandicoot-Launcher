@@ -193,3 +193,6 @@ keystore.properties
 /_phone-*
 /_spu-*
 /_uidump.xml
+docs/TIMING_RECOVERY_PLAN.md
+docs/issue-triage-2026-09-20.json
+tools/CrashBandicoot.TimingProbe/README.md
