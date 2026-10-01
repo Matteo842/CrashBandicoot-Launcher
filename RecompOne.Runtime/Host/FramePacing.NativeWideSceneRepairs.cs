@@ -10,8 +10,10 @@ public static partial class FramePacing
     // complete its exposed surfaces in world space; no rendered pixels move.
     // Repairs are deliberately asset-specific. A boundary can also be a real
     // cliff, doorway or hole, so extending every mesh boundary would be wrong.
+    // Boundary repairs keep their true depth even where the scene would
+    // otherwise draw its additions behind all real scenery.
     readonly record struct NativeWideRepair(int Polygon, NativeWideClipVertex A,
-        NativeWideClipVertex B, NativeWideClipVertex C);
+        NativeWideClipVertex B, NativeWideClipVertex C, bool Boundary = false);
     readonly record struct NativeWideEdge(Vector3 A, Vector3 B);
     readonly record struct NativeWideEdgeOwner(int Polygon, int Edge, int Count);
     readonly record struct NativeWideSceneryKey(uint Level, uint X, uint Y, uint Z, int Polygons, int Vertices);
@@ -62,6 +64,14 @@ public static partial class FramePacing
             && m.ReadU32(world.Header) == 110000 && (int)m.ReadU32(world.Header + 4) == -82800
             && (int)m.ReadU32(world.Header + 8) == -4400;
         bool temple = NativeWideSunsetTemple(m, world);
+        // The first two shafts share the temple's outer left wall (absolute X
+        // 111200). Rooms and forest lie beyond it, so its continuation must hide them.
+        float outerWall = !temple ? float.NaN : ((int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 4)) switch
+        {
+            (110000, -82800) => 1200,
+            (113200, -64800) => -2000,
+            _ => float.NaN,
+        };
         bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
             || temple;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
@@ -276,8 +286,11 @@ public static partial class FramePacing
             if (!TryNativeWideMaterial(m, world, owner.Polygon, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
             Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
+            int added = repairs.Count;
             AddNativeWideSceneryStrip(repairs, owner.Polygon, a, b, c,
                 uv[owner.Edge], uv[(owner.Edge + 1) % 3], uv[(owner.Edge + 2) % 3], direction, endDirection, distance);
+            if (a.X == outerWall && b.X == outerWall && a.Z == 6000 && b.Z == 6000 && direction == Vector3.UnitZ)
+                for (int i = added; i < repairs.Count; i++) repairs[i] = repairs[i] with { Boundary = true };
         }
         if (hog)
         {

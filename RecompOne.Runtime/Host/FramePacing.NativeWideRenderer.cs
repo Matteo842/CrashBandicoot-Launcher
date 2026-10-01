@@ -367,7 +367,7 @@ public static partial class FramePacing
         for (int wi = 0; wi < worldCount; wi++)
         {
             var world = worlds[wi];
-            int opaqueStart = _nativeWideOpaque.Count, transparentStart = _nativeWideTransparent.Count;
+            bool temple = world.PolyCount > 0 && NativeWideSunsetTemple(m, world);
             foreach (var repair in NativeWideSceneRepairs(m, world))
             {
                 PrimFlags repairFlags;
@@ -383,14 +383,15 @@ public static partial class FramePacing
                 repairVertices[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
                 repairVertices[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
                 repairVertices[2] = NativeWideRepairToCamera(m, repair.C, world, matrix);
+                int opaqueStart = _nativeWideOpaque.Count, transparentStart = _nativeWideTransparent.Count;
                 AddNativeWideClippedTriangle(repairVertices, projection, screenX, screenY,
                     gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
                     repairFlags, true, _nativeWideOpaque, _nativeWideTransparent);
-            }
-            if (world.PolyCount > 0 && NativeWideSunsetTemple(m, world))
-            {
-                NativeWideBehindScenery(_nativeWideOpaque, opaqueStart);
-                NativeWideBehindScenery(_nativeWideTransparent, transparentStart);
+                if (temple && !repair.Boundary)
+                {
+                    NativeWideBehindScenery(_nativeWideOpaque, opaqueStart);
+                    NativeWideBehindScenery(_nativeWideTransparent, transparentStart);
+                }
             }
             if (world.PolyCount == 0) continue;
             if (!NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
