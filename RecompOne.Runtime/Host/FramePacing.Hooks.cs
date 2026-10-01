@@ -376,6 +376,7 @@ public static partial class FramePacing
         _stampLog = 0;
         _platLog = 0;
         _rideLog = 0;
+        _wallEscapeLog = 0;
         _wasPaused = false;
         ClearObjectPacing();
         try

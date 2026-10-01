@@ -208,6 +208,13 @@ public static partial class FramePacing
 
         if (_exactTicks < RefTicks - 0.01)
         {
+            if (CrashAirWallEscape(m))
+            {
+                m.WriteU32(o + ObjTransOff, (uint)_ox);
+                m.WriteU32(o + ObjTransOff + 8, (uint)_oz);
+                _crashFracTX = 0;
+                _crashFracTZ = 0;
+            }
             m.WriteU32(o + ObjTransOff, (uint)KeepCrashDelta(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport, ref _crashFracTX));
             m.WriteU32(o + ObjTransOff + 8, (uint)KeepCrashDelta(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport, ref _crashFracTZ));
             m.WriteU32(o + ObjVelXOff, (uint)KeepCrashDelta(_ovx, (int)m.ReadU32(o + ObjVelXOff), VelTeleport, ref _crashFracVX));
@@ -228,6 +235,55 @@ public static partial class FramePacing
 
         FinishAirborneY(m);
         RejectCrateEmbed(m);
+    }
+
+    /// <summary>
+    /// Airborne at uncapped, Y is dt-scaled so Crash visits heights 30 FPS
+    /// never samples (feet a hair inside a crate lid, head in a low roof).
+    /// PlotWalls then marks his own cell solid and StopAtWalls jumps to the
+    /// free cell nearest the 34-tick target — in a narrow niche (Lost City
+    /// bounce crate) that is behind the back wall. Original 30 FPS never
+    /// starts the step inside a wall there. Keep XZ for this present; Y
+    /// still moves, so the next step starts clear.
+    /// </summary>
+    static bool CrashAirWallEscape(IMemory m)
+    {
+        try
+        {
+            uint zone = m.ReadU32(CamZoneAddr);
+            if ((zone & 0xFF000000u) != 0x80000000u) return false;
+            uint header = m.ReadU32(zone + 0x10);
+            if ((header & 0xFF000000u) != 0x80000000u) return false;
+            if ((m.ReadU32(header + 0x2FC) & ZoneNoWallsFlag) != 0) return false;
+            uint bitmap = m.ReadU32(WallBitmapPtrAddr);
+            if ((bitmap & 0xFF000000u) != 0x80000000u) return false;
+            if ((m.ReadU32(bitmap + 16 * 4) & (0x80000000u >> 16)) == 0) return false;
+
+            int mx = (int)m.ReadU32(_obj + ObjTransOff) - _ox;
+            int mz = (int)m.ReadU32(_obj + ObjTransOff + 8) - _oz;
+            if (Math.Abs(mx) <= 2 * WallCell && Math.Abs(mz) <= 2 * WallCell) return false;
+            if (mx > Teleport || mx < -Teleport || mz > Teleport || mz < -Teleport) return false;
+
+            // Single sub-step: the guest moved to its desired cell, so that
+            // cell was free — normal motion out of a wall, not a search hop.
+            long dx = (long)(int)m.ReadU32(_obj + ObjVelXOff) * RefTicks / 1024;
+            long dz = (long)(int)m.ReadU32(_obj + ObjVelZOff) * RefTicks / 1024;
+            if (Math.Abs(dx) < WallSubStepMax && Math.Abs(dz) < WallSubStepMax
+                && mx / WallCell == (int)((dx << 2) / 8192)
+                && mz / WallCell == (int)((dz << 2) / 8192))
+                return false;
+
+            if (_wallEscapeLog < 32)
+            {
+                _wallEscapeLog++;
+                PaceLog($"air wall escape blocked move=({mx},{mz}) want=({dx},{dz}) pos=({_ox},{_oy},{_oz})");
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>

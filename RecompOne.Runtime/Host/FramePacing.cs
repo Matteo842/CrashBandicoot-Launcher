@@ -505,6 +505,14 @@ public static partial class FramePacing
     const int Teleport = 0x80000;
     /// <summary>Jump takeoff vely is larger than <see cref="Teleport"/>; still scale it.</summary>
     const int VelTeleport = 0x800000;
+    /// <summary>
+    /// StopAtWalls 32x32 bitmap (gp+0x2F8). Bit (16,16) is Crash's own cell;
+    /// one cell is 2048 units. Zone header flag 0x100000 = no walls.
+    /// </summary>
+    const uint WallBitmapPtrAddr = 0x800566F4u;
+    const uint ZoneNoWallsFlag = 0x100000u;
+    const int WallCell = 2048;
+    const int WallSubStepMax = 25600;
     const int PathWrap = 0x8000;
     const int AnimFrameCap = 32 << 8;
     const byte AnimTypeSprite = 2;
@@ -598,6 +606,7 @@ public static partial class FramePacing
     static readonly double[] _hogMemFrac = new double[HogMemCount];
     static bool _crashHog;
     static int _paceLog;
+    static int _wallEscapeLog;
     static bool _haveObj;
     static bool _crashObj;
     static bool _solidObj;
