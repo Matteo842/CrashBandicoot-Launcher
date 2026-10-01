@@ -443,7 +443,9 @@ public static partial class FramePacing
     /// <see cref="IsGatedWalocSpikeLog"/>).
     /// </summary>
     const uint GoolTypeWalO = 33u;
-    /// <summary>WalOC <c>Spike_Log_Up_Spawn</c>. Inclusive start of the spike-log gate.</summary>
+    /// <summary>WalOC <c>Wall_Platform_Spawn</c>. Inclusive start of the gate (spin plats 0–2).</summary>
+    const uint StateWalWallPlatSpawn = 0;
+    /// <summary>WalOC <c>Spike_Log_Up_Spawn</c>. Spike logs are 3–8.</summary>
     const uint StateWalSpikeLogUpSpawn = 3;
     /// <summary>WalOC <c>Spike_Log_Down_Active</c>. Inclusive end of the spike-log gate.</summary>
     const uint StateWalSpikeLogDownActive = 8;

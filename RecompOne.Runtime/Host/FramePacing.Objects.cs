@@ -202,6 +202,11 @@ public static partial class FramePacing
     /// standing plat, then Pace dt/34 of the SET crawled Y at uncapped.
     /// Not <see cref="IsGatedTempleSolid"/>: that path is ride carry, and
     /// these only EventHit / push X.
+    /// Spin wall plats (0–2) only rotate: physics <c>rotz</c> approach
+    /// <c>trotz</c> at <c>yzapproach</c>. Flat Active ORs SOLID_TOP, so Euler
+    /// gave physics wall ticks (approach × 2/1024 rounds to 0) and Pace kept
+    /// dt/34 of the CODE SETs <c>trotz = 90deg</c> / <c>yzapproach = 90deg</c>
+    /// on the last flat step — target ~7° and a 10deg crawl back up at 400.
     /// </summary>
     static bool IsGatedWalocSpikeLog(IMemory m, uint obj, uint type)
     {
@@ -209,7 +214,7 @@ public static partial class FramePacing
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
-            return state is >= StateWalSpikeLogUpSpawn and <= StateWalSpikeLogDownActive;
+            return state is >= StateWalWallPlatSpawn and <= StateWalSpikeLogDownActive;
         }
         catch
         {
