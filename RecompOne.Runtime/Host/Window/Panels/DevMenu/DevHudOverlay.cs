@@ -56,10 +56,47 @@ internal static class DevHudOverlay
         if (ImGui.Begin("##dev-hud", HudFlags))
         {
             ImGui.TextUnformatted($"{HostDiagnostics.Fps:0.00} fps");
+            ImGui.TextUnformatted($"{HostDiagnostics.DrawnFps:0.00} drawn/s");
+            DrawFrameTimes(ui);
             ImGui.TextUnformatted($"WS {HostDiagnostics.FormatBytes(HostDiagnostics.WorkingSetBytes)}");
         }
         ImGui.End();
         ImGui.PopStyleVar(3);
+    }
+
+    /// <summary>Average ms per phase over the last 0.5 s, plus the slowest frame (hitches).</summary>
+    static void DrawFrameTimes(float ui)
+    {
+        float col = 64 * ui;
+        void Row(string label, double ms)
+        {
+            ImGui.TextUnformatted(label);
+            ImGui.SameLine(col);
+            ImGui.TextUnformatted($"{ms,6:0.00} ms");
+        }
+
+        Row("frame", FrameTimer.AverageFrameMs);
+        Row("worst", FrameTimer.WorstFrameMs);
+        // Held 5 s: biggest hitch and how much of it was JIT / GC.
+        Row("peak 5s", FrameTimer.PeakFrameMs);
+        Row("  jit", FrameTimer.PeakJitMs);
+        Row("  gc", FrameTimer.PeakGcMs);
+        ImGui.Separator();
+        Row("game", FrameTimer.Average(FrameTimer.Phase.Game));
+        Row("events", FrameTimer.Average(FrameTimer.Phase.Events));
+        Row("render", FrameTimer.Average(FrameTimer.Phase.Render));
+        Row("ui", FrameTimer.Average(FrameTimer.Phase.Ui));
+        Row("swap", FrameTimer.Average(FrameTimer.Phase.Swap));
+        Row("wait", FrameTimer.Average(FrameTimer.Phase.Wait));
+        ImGui.Separator();
+        // Batches = GL draw submissions; cpu reads stall the game until the GPU catches up.
+        if (Hle.GpuHle.Backend is Hle.GlBackend gl)
+        {
+            ImGui.TextUnformatted($"batches {gl.LastFrameFlushes}  verts {gl.LastFrameVertices}");
+            ImGui.TextUnformatted($"cpu reads {gl.LastFrameCpuReads}  rt copies {gl.LastFrameWritebacks}");
+            ImGui.Separator();
+        }
+        ImGui.TextUnformatted($"jit warmup {JitWarmup.Status}");
     }
 
     static void PushHudStyle(float ui)

@@ -252,7 +252,9 @@ internal static class HostWindow
             PanelManager.Get<PauseMenuPopup>()?.IsOpen == true && !ExitToMapInjector.Active;
         ExitToMapInjector.Tick();
         Cheats.CheatManager.Apply();
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Events);
         _window.DoRender();
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Swap);
         // Pause menu may request leave during Draw — end only after ImGui finishes.
         if (_endSessionRequested || _window.IsClosing)
             EndSession();
@@ -605,10 +607,12 @@ internal static class HostWindow
 
     static void OnRender(double dt)
     {
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Events);
         var gl = _gl!;
         _imgui!.Update((float)dt);
         ApplyUiScale();
-    
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Ui);
+
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         var fbDef = _window!.FramebufferSize;
         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
@@ -657,6 +661,7 @@ internal static class HostWindow
             QueueRamConvert();
             if (_ramReady) FlushRamTexture(gl);
         }
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Render);
 
         if (!ConfigManager.View.HideTopBar)
             MainMenuBar.Draw();
@@ -671,6 +676,7 @@ internal static class HostWindow
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
         _imgui.Render();
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Ui);
     }
 
     static void DrawDockspace()

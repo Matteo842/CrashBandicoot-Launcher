@@ -97,6 +97,9 @@ public static class GameLoader
             var run = entry.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)
                       ?? throw new InvalidOperationException("Entry.Run not found.");
 
+            // Pre-JIT game + runtime code so first-time functions don't hitch mid-level.
+            RecompOne.Runtime.Host.JitWarmup.Start(_asm, typeof(PSMemory).Assembly);
+
             run.Invoke(null, [new PSMemory(), cuePath]);
         }
         catch (TargetInvocationException ex) when (ex.InnerException is GameSessionEndedException)

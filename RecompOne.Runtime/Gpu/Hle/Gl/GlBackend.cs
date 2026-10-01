@@ -58,6 +58,11 @@ public sealed class GlBackend : IGpuBackend
     public int LastFrameFlushes { get; private set; }
     public int LastFrameWritebacks { get; private set; }
     public int LastFrameVertices { get; private set; }
+    /// <summary>Blocking GPU→CPU VRAM reads last frame (each one stalls the game thread).</summary>
+    public int LastFrameCpuReads { get; private set; }
+    int _frameCpuReads;
+    /// <summary>Presents that carried new geometry (vs. repeats of the last image).</summary>
+    public long DrawnFrames { get; private set; }
     public GlesFramebufferFetchPath FramebufferFetchPath => _glesFramebufferFetchPath;
 
     public GlBackend(GL gl) { _gl = gl; _vram = new GlVram(gl); }
@@ -720,6 +725,7 @@ public sealed class GlBackend : IGpuBackend
     {
         Flush();
         WritebackDirtyIntersecting(x, y, w, h);
+        _frameCpuReads++;
         _vram.ReadRect(x, y, w, h, px);
     }
 
@@ -1153,12 +1159,20 @@ public sealed class GlBackend : IGpuBackend
         }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
-        LastFrameFlushes = _frameFlushes;
-        LastFrameWritebacks = _frameWritebacks;
-        LastFrameVertices = _frameVertices;
-        _frameFlushes = 0;
-        _frameWritebacks = 0;
-        _frameVertices = 0;
+        // Uncapped pacing re-presents the same image between game draws. Only
+        // publish stats for presents that carried new geometry, or the HUD reads 0.
+        if (_frameFlushes > 0)
+        {
+            DrawnFrames++;
+            LastFrameFlushes = _frameFlushes;
+            LastFrameWritebacks = _frameWritebacks;
+            LastFrameVertices = _frameVertices;
+            LastFrameCpuReads = _frameCpuReads;
+            _frameCpuReads = 0;
+            _frameFlushes = 0;
+            _frameWritebacks = 0;
+            _frameVertices = 0;
+        }
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return (_presentTex, fbW, fbH, aspect);

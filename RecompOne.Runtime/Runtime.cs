@@ -127,6 +127,7 @@ public static class Runtime
 
     public static void PresentFrame()
     {
+        Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Game);
         if (_platformHost != null)
         {
             _platformHost.Present(Gpu);
@@ -138,6 +139,8 @@ public static class Runtime
             Audio.Attach(Spu);
         }
         FrameClock.Throttle();
+        Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Wait);
+        Host.Diagnostics.FrameTimer.EndFrame();
         Sdk.LibCd.Tick();
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); }
         Host.FramePacing.OnHostPresent(Mem);

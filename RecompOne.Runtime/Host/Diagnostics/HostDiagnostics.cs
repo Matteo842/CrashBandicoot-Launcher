@@ -21,6 +21,10 @@ internal static class HostDiagnostics
     public const uint GuestPads0 = 0x8005E71C;
 
     public static double Fps => _fps;
+    /// <summary>Presents per second that showed a newly drawn image.</summary>
+    public static double DrawnFps => _drawnFps;
+    static double _drawnFps;
+    static long _lastDrawnFrames;
 
     public static void TickFrame()
     {
@@ -30,6 +34,9 @@ internal static class HostDiagnostics
         if (elapsed >= 500)
         {
             _fps = _frames * 1000.0 / elapsed;
+            long drawn = (GpuHle.Backend as GlBackend)?.DrawnFrames ?? 0;
+            _drawnFps = (drawn - _lastDrawnFrames) * 1000.0 / elapsed;
+            _lastDrawnFrames = drawn;
             _frames = 0;
             _lastFpsSampleMs = now;
         }
@@ -39,7 +46,7 @@ internal static class HostDiagnostics
     {
         get
         {
-            _process.Refresh();
+            RefreshProcess();
             return _process.WorkingSet64;
         }
     }
@@ -48,9 +55,21 @@ internal static class HostDiagnostics
     {
         get
         {
-            _process.Refresh();
+            RefreshProcess();
             return _process.PrivateMemorySize64;
         }
+    }
+
+    static double _lastProcessRefreshMs = double.NegativeInfinity;
+
+    // Process.Refresh re-queries every process on Windows (~1 ms). The HUD reads
+    // it each frame, which used to inflate the very frame times it shows.
+    static void RefreshProcess()
+    {
+        double now = _fpsClock.Elapsed.TotalMilliseconds;
+        if (now - _lastProcessRefreshMs < 500) return;
+        _lastProcessRefreshMs = now;
+        _process.Refresh();
     }
 
     public static long GcHeapBytes => GC.GetTotalMemory(false);
