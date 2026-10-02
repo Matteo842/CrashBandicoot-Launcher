@@ -682,6 +682,8 @@ public static partial class FramePacing
     static uint _cameraProgressZone, _cameraProgressPath;
     static int _gateStuckLog;
     static bool _wasPaused;
+    /// <summary>Host guest ticks at the Start press; resume rewinds to it.</summary>
+    static uint _pauseGuestTicks;
     static readonly Dictionary<uint, double[]> _platFrac = new();
     static readonly int[] _platFrom = new int[PlatSlotCount];
     static bool _platObj;

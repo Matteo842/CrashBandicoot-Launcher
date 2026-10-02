@@ -364,6 +364,7 @@ public static partial class FramePacing
         {
             try { _guestTicks = m.ReadU32(TicksElapsedAddr); }
             catch { _guestTicks = 0; }
+            _pauseGuestTicks = _guestTicks;
             _simTs = now;
             _tickFrac = 0;
             // Full original step so the first unlocked frame does not keep
@@ -389,6 +390,7 @@ public static partial class FramePacing
             return _guestTicks;
         }
 
+        NotePauseClock(m);
         double sec = (now - _simTs) / (double)Stopwatch.Frequency;
         if (sec < MinStepSeconds)
         {
@@ -467,11 +469,25 @@ public static partial class FramePacing
         catch { /* overlay swap */ }
     }
 
+    /// <summary>
+    /// CoreLoop rewinds ticks_elapsed and draw_stamp to the Start press on
+    /// resume, so frames_elapsed (<c>frametime</c>, playanim waits) skips the
+    /// paused time. PublishWallStamps rewrote that from the host clock every
+    /// present: Cortex bullets (<c>frametime - start &lt; 1.5s</c>) jumped
+    /// ahead by the whole pause. Rewind the host clock the same way. The pause
+    /// DispC still sees wall time while paused. Callers that publish ticks or
+    /// release the draw_count hold run this first, so the rewind always lands
+    /// before them.
+    /// </summary>
     static void NotePauseClock(IMemory m)
     {
         bool paused = GamePaused(m);
         // UI keeps sampling time during pause. Re-arming here injected a full
         // 34-tick step on resume, irrespective of the current refresh rate.
+        if (paused && !_wasPaused)
+            _pauseGuestTicks = _guestTicks;
+        else if (!paused && _wasPaused)
+            _guestTicks = _pauseGuestTicks;
         _wasPaused = paused;
     }
 

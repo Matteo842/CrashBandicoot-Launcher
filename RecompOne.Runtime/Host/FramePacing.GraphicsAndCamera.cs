@@ -129,6 +129,7 @@ public static partial class FramePacing
         if (!_waterArmed || !IsActive(m)) return;
         try
         {
+            NotePauseClock(m);
             bool pause = GamePaused(m);
             if (pause)
             {
