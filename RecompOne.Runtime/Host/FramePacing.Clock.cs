@@ -248,6 +248,7 @@ public static partial class FramePacing
         _spawnCredit.Clear();
         _simAcc.Clear();
         _gateFrame.Clear();
+        _crateFlight.Clear();
         _cameraSeekFrac.Clear();
         _cameraProgressFrac = 0;
         _cameraProgressZone = 0;

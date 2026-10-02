@@ -422,6 +422,9 @@ public static partial class FramePacing
     const uint GoolTypeDisp = 4u;
     /// <summary>BoxC / crate GOOL header type (NTSC-U entity type 0x22).</summary>
     const uint GoolTypeBox = 0x22u;
+    /// <summary>BoxsC <c>Box_Break</c> / <c>Box_Break_Reward</c> (same index in every region).</summary>
+    const uint StateBoxBreak = 23;
+    const uint StateBoxBreakReward = 24;
     /// <summary>PinsC Pinstripe. Enemy cat 0x300; SVTX skip like WillC.</summary>
     const uint GoolTypePins = 15u;
     /// <summary>ChefC Papu Papu. Enemy cat 0x300; SVTX skip like WillC / PinsC.</summary>

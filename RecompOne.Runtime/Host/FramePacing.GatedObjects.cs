@@ -30,6 +30,177 @@ public static partial class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// A crate hit by SpinHit / Event23 / JumpedOn changes state inside
+    /// Crash's update (FIRST_FRAME is set). Original runs that break CODE
+    /// (BoxBreak → StackBreak, crate above gets gravity) on the next 30 Hz
+    /// frame. Running it on the next present compressed the stack chain
+    /// into a few ms while Crash still sends SpinHit every present. Same
+    /// object, so keep its gate and AABB — wait for the next gate frame.
+    /// </summary>
+    static bool IsCrateBreakStep(IMemory m, uint obj)
+    {
+        if (!_gateFrame.ContainsKey(obj)) return false;
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeBox)
+                return false;
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state is StateBoxBreak or StateBoxBreakReward;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>NTSC-U <c>pads[0]</c>: tapped, held, held_prev, tapped_prev.</summary>
+    const uint PadsAddr = 0x8005E71Cu;
+    /// <summary>Square | Circle — WillC <c>PAD_SQUARE|PAD_O</c> spin.</summary>
+    const uint PadSpinMask = 0xA0u;
+    const uint ObjInterrupterOff = 0x7Cu;
+    /// <summary>Crate in the air (GRAVITY): wall tick it took off.</summary>
+    static readonly Dictionary<uint, uint> _crateFlight = new();
+    /// <summary>Inside Crash's GoolObjectUpdate (his trans sends SpinHit).</summary>
+    static bool _inCrashUpdate;
+    static bool _padSpinMasked;
+    static uint _padSaveTapped, _padSaveHeld, _padSaveTappedPrev;
+
+    static bool IsBoxObj(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try { return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypeBox; }
+        catch { return false; }
+    }
+
+    static void NoteCrateFlight(IMemory m, uint obj)
+    {
+        try
+        {
+            if ((m.ReadU32(obj + ObjStatusBOff) & FlagGravity) == 0)
+            {
+                _crateFlight.Remove(obj);
+                return;
+            }
+            if (_crateFlight.ContainsKey(obj)) return;
+            _crateFlight[obj] = _guestTicks;
+            EvictDictDown(_crateFlight, obj, ObjectPoolMax);
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    /// <summary>
+    /// BoxCheckSpinEvent: a crate in the air with no BoxBelow uses the
+    /// −2 m spin range while Square/Circle is held. That is how the crate
+    /// above a spun one falls into range. Original asks it one full frame
+    /// after the hit (touch and break CODE are each a 30 Hz frame), so a
+    /// normal tap is already released. At high FPS the crate above was asked
+    /// ~10 ms after the hit with the button still down (Generator Room:
+    /// middle broke, top then landed on Crash's head). Hide the spin bits
+    /// from that crate's ESR for its first original frame of flight; a long
+    /// hold after that still breaks it, like 30 FPS.
+    /// </summary>
+    static void MaskSpinForYoungCrate(IMemory m, uint obj)
+    {
+        if (_padSpinMasked || !_inCrashUpdate || !IsBoxObj(m, obj)) return;
+        try
+        {
+            if (!TryReadCrash(m, out uint crash)
+                || m.ReadU32(obj + ObjInterrupterOff) != crash)
+                return;
+            NoteCrateFlight(m, obj);
+            if (!_crateFlight.TryGetValue(obj, out uint takeoff)
+                || unchecked(_guestTicks - takeoff) >= RefTicks)
+                return;
+            _padSaveTapped = m.ReadU32(PadsAddr);
+            _padSaveHeld = m.ReadU32(PadsAddr + 4);
+            _padSaveTappedPrev = m.ReadU32(PadsAddr + 12);
+            if (((_padSaveTapped | _padSaveHeld | _padSaveTappedPrev) & PadSpinMask) == 0)
+                return;
+            m.WriteU32(PadsAddr, _padSaveTapped & ~PadSpinMask);
+            m.WriteU32(PadsAddr + 4, _padSaveHeld & ~PadSpinMask);
+            m.WriteU32(PadsAddr + 12, _padSaveTappedPrev & ~PadSpinMask);
+            _padSpinMasked = true;
+        }
+        catch
+        {
+            // pad / object unmapped
+        }
+    }
+
+    static void RestorePadSpin(IMemory m)
+    {
+        if (!_padSpinMasked) return;
+        _padSpinMasked = false;
+        try
+        {
+            m.WriteU32(PadsAddr, _padSaveTapped);
+            m.WriteU32(PadsAddr + 4, _padSaveHeld);
+            m.WriteU32(PadsAddr + 12, _padSaveTappedPrev);
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
+    static void PostGoolInterpret(CpuContext c, IMemory m) => RestorePadSpin(m);
+
+    /// <summary>gool_process.anim_stamp (frames_elapsed of the last Update).</summary>
+    const uint ObjAnimStampOff = 0xFCu;
+    static bool _crashStampLagged;
+    static uint _crashStampSave;
+
+    /// <summary>
+    /// GoolObjectUpdate: <c>anim_stamp == crash->anim_stamp</c> takes the
+    /// Bound-before-trans path, and that Bound calls GoolCollide which sets
+    /// <c>crash->collider</c> to the crate unconditionally. Crates are in an
+    /// earlier handle than Crash, so at 30 FPS Crash's stamp is always last
+    /// frame's: crates bound in physics (no GoolCollide) and Crash picks the
+    /// nearest crate himself in PlotObjWalls. At high FPS Crash already ran
+    /// in this 30 Hz frame (and the gate clock can be offset from
+    /// frames_elapsed), so the last crate of a stack — the top one — became
+    /// his collider. SpinHit then went to the top, each crate forwarded it
+    /// down, the bottom accepted, and <c>eventaccepted</c> after the forward
+    /// broke all three in one present (Generator Room). Give a running
+    /// crate the original view: Crash's stamp is the previous frame.
+    /// </summary>
+    static void LagCrashStampForBox(IMemory m, uint obj)
+    {
+        if (_crashStampLagged || !IsBoxObj(m, obj) || !TryReadCrash(m, out uint crash)) return;
+        try
+        {
+            uint fe = m.ReadU32(FramesElapsedAddr);
+            uint stamp = m.ReadU32(crash + ObjAnimStampOff);
+            if (stamp != fe) return;
+            _crashStampSave = stamp;
+            m.WriteU32(crash + ObjAnimStampOff, unchecked(fe - 1));
+            _crashStampLagged = true;
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
+    static void RestoreCrashStamp(IMemory m)
+    {
+        if (!_crashStampLagged) return;
+        _crashStampLagged = false;
+        if (!TryReadCrash(m, out uint crash)) return;
+        try
+        {
+            m.WriteU32(crash + ObjAnimStampOff, _crashStampSave);
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
     static uint CurrentGateFrame(out double phase)
     {
         uint elapsed = _waterArmed
@@ -72,6 +243,7 @@ public static partial class FramePacing
         _spawnCredit.Remove(obj);
         _simAcc.Remove(obj);
         _gateFrame.Remove(obj);
+        _crateFlight.Remove(obj);
         _pathHoppers.Remove(obj);
         _platFrac.Remove(obj);
         if (_rideObj == obj) ClearGatedRide();

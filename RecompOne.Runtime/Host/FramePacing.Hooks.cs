@@ -105,6 +105,9 @@ public static partial class FramePacing
         _platFirst = false;
         _platChild = false;
         _platCarry = false;
+        RestorePadSpin(m);
+        RestoreCrashStamp(m);
+        _inCrashUpdate = false;
         // Hold / NSInit run GOOL with pacing off. Hoppers Wait then Jump
         // (may OR SOLID_TOP). If we do not record them here, unlock treats
         // them as pillars and i+=1 runs every present until Crash dies and
@@ -121,7 +124,11 @@ public static partial class FramePacing
         if (TryReadCrash(m, out uint rider) && c.A0 == rider && !IsFirstFrame(m, rider))
             RideAfterCrash(m);
         SnapshotObject(m, c.A0);
-        if (_haveObj && IsFirstFrame(m, c.A0))
+        _inCrashUpdate = _crashObj;
+        if (_haveObj && !_crashObj && IsBoxObj(m, c.A0))
+            NoteCrateFlight(m, c.A0);
+        bool crateBreak = _haveObj && IsCrateBreakStep(m, c.A0);
+        if (_haveObj && IsFirstFrame(m, c.A0) && !crateBreak)
         {
             ResetObjectPacing(c.A0);
             if (_crashObj) ClearCrashScaleFrac();
@@ -160,8 +167,10 @@ public static partial class FramePacing
             // in trans are per-call not per-tick — 34+scale cannot fix that.
             // Run one original 34-tick update per 34 wall ticks; still draw.
             // First frame always runs so box_link / stall init is not delayed.
-            if (IsFirstFrame(m, _obj))
+            // A crate break waits for the next gate (see IsCrateBreakStep).
+            if (IsFirstFrame(m, _obj) && !crateBreak)
             {
+                LagCrashStampForBox(m, _obj);
                 SeedObjectGate(_obj);
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
@@ -185,6 +194,7 @@ public static partial class FramePacing
             }
             else
             {
+                LagCrashStampForBox(m, _obj);
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
                 SnapshotGatedCarry(m, _obj);
@@ -255,7 +265,13 @@ public static partial class FramePacing
                 RestoreSvtx(m);
                 RestoreNativeWideObjectFrustum(m);
                 return;
+            case GoolObjectInterpretAddr:
+                RestorePadSpin(m);
+                return;
             case GoolObjectUpdateAddr:
+                RestorePadSpin(m);
+                RestoreCrashStamp(m);
+                _inCrashUpdate = false;
                 break;
             default:
                 return;
@@ -308,6 +324,7 @@ public static partial class FramePacing
 
     public static bool PrePhysics(CpuContext c, IMemory m)
     {
+        RestorePadSpin(m);
         if (!IsActive(m)) return true;
         // CODE may have Warp_In → hog spawn (calcpath) or EventHit → death.
         // Snapshot ran on the previous state, so re-read the ride flag.
@@ -494,7 +511,7 @@ public static partial class FramePacing
         _gfxHookTried = true;
         TryHookGfx(GfxTransformSvtxAddr, "func_80018964");
         TryHookGfx(GfxTransformCvtxAddr, "func_80018A40");
-        TryHookNamed(GoolObjectInterpretAddr, "func_800201DC", PreGoolInterpret);
+        TryHookNamed(GoolObjectInterpretAddr, "func_800201DC", PreGoolInterpret, PostGoolInterpret);
         TryHookNamed(GoolObjectChangeStateAddr, "func_8001D698", PreChangeState);
         try
         {
@@ -547,7 +564,8 @@ public static partial class FramePacing
         PaceLog($"hook gfx {mi.DeclaringType?.Name}.{mi.Name}");
     }
 
-    static void TryHookNamed(uint addr, string name, Func<CpuContext, IMemory, bool> pre)
+    static void TryHookNamed(uint addr, string name, Func<CpuContext, IMemory, bool> pre,
+        Action<CpuContext, IMemory>? post = null)
     {
         MethodInfo? mi = null;
         foreach (var ov in Dispatcher.Overlays.Values)
@@ -584,6 +602,8 @@ public static partial class FramePacing
             return;
         }
         HookManager.AddPre(mi, pre);
+        if (post != null)
+            HookManager.AddPost(mi, post);
         PaceLog($"hook {mi.DeclaringType?.Name}.{mi.Name}");
     }
 
@@ -596,6 +616,7 @@ public static partial class FramePacing
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
     {
         if (!IsActive(m)) return true;
+        MaskSpinForYoungCrate(m, c.A0);
         TryFillTemplePlatCollider(m, c.A0);
         return true;
     }
