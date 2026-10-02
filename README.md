@@ -3,7 +3,9 @@
 [![Downloads](https://img.shields.io/github/downloads/Matteo842/CrashBandicoot-Launcher/total.svg)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/V7V61GBYAX)
 
-# Crash Bandicoot Launcher (unofficial)
+# Crash Bandicoot Launcher
+
+*Unofficial fan project.*
 
 **The 1996 classic, running natively on PC and Android. In widescreen, at 240 FPS, in 4K.**
 
