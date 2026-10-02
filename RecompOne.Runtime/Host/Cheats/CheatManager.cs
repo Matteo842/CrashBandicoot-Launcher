@@ -23,6 +23,9 @@ public static class CheatManager
     const uint MapLivesAddr = 0x800618EC;
     const uint MapMaskAddr = 0x800618F0;
     const uint LevelSelectAddr = 0x80061948;
+    // GOOL counters are 24.8 fixed-point (HUD prints value >> 8): 99 lives = 0x6300.
+    const uint One = 0x100u;
+    const uint Count99 = 99u * One;
     const uint InstantSaveMenuAddr = 0x800A264C;
     // SCUS-94900: current level ID (cbhacks / GpuHle). Prefer Catalog.LevelIdAddr at runtime.
     public const uint LevelIdAddr = 0x80056710;
@@ -64,16 +67,16 @@ public static class CheatManager
         if (CheatConfig.InfiniteLives)
         {
             // Map / continue stock.
-            mem.WriteU16(MapLivesAddr, 99);
+            mem.WriteU32(MapLivesAddr, Count99);
             if (TryFindActiveLevelLives(mem, out uint livesAddr))
-                mem.WriteU16(livesAddr, 99);
+                mem.WriteU32(livesAddr, Count99);
         }
 
         if (CheatConfig.InfiniteWumpa)
         {
             // GameShark: Wumpa is typically 4 bytes before the per-level lives field.
             if (TryFindActiveLevelLives(mem, out uint livesAddr))
-                mem.WriteU16(livesAddr - 4, 99);
+                mem.WriteU32(livesAddr - 4, Count99);
         }
 
         if (CheatConfig.LevelSelect)
@@ -97,7 +100,7 @@ public static class CheatManager
             // Keeping it on through a drown/fall cine loops the death anim forever.
             bool cine = (flags & FlagStateDeathCine) != 0 || IsDeathOrWarpState(state);
             if (CheatConfig.GodMode)
-                mem.WriteU16(MapLivesAddr, 99);
+                mem.WriteU32(MapLivesAddr, Count99);
             if (cine)
             {
                 _flyTs = 0;
@@ -216,9 +219,10 @@ public static class CheatManager
 
         foreach (var candidate in LevelLivesAddrs)
         {
-            ushort v = mem.ReadU16(candidate);
-            // Active lives are a small count; 99 means we already froze this slot.
-            int rank = v <= 10 ? 2 : v == 99 ? 1 : 0;
+            uint v = mem.ReadU32(candidate);
+            // 99.0 means we already froze this slot (Willy also spawns with the frozen
+            // map stock); otherwise accept only a whole count of lives below 99.
+            int rank = v == Count99 ? 2 : v != 0 && v < Count99 && v % One == 0 ? 1 : 0;
             if (rank == 0) continue;
             if (rank > bestRank)
             {
@@ -239,13 +243,13 @@ public static class CheatManager
 
     public static void Give99LivesOnMap()
     {
-        Runtime.Mem?.WriteU16(MapLivesAddr, 99);
+        Runtime.Mem?.WriteU32(MapLivesAddr, Count99);
     }
 
     /// <summary>Reset to 2nd Aku Aku mask on the warp map (GameShark 800618F0 0200).</summary>
     public static void Give2ndMaskOnMap()
     {
-        Runtime.Mem?.WriteU16(MapMaskAddr, 2);
+        Runtime.Mem?.WriteU32(MapMaskAddr, 2u * One);
     }
 
     /// <summary>
@@ -256,7 +260,7 @@ public static class CheatManager
         var mem = Runtime.Mem;
         if (mem == null) return false;
         if (!TryFindActiveLevelLives(mem, out uint livesAddr)) return false;
-        mem.WriteU16(livesAddr - 4, 99);
+        mem.WriteU32(livesAddr - 4, Count99);
         return true;
     }
 
