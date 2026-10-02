@@ -499,8 +499,13 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Side-stuck in a BoxC wall or ruins pusher/mill. Standing on the lid is
-    /// not a hit: Y is the shallow axis. Other scenery AABBs are ignored.
+    /// Side-stuck in a BoxC wall or ruins pusher/mill. Y as the shallow axis
+    /// is a vertical contact, not a hit: feet on the lid, or head under the
+    /// bottom. StopAtCeil only clamps when the step starts below the roof, so
+    /// jump hang (X held) leaves the head a hair inside the crate above for a
+    /// few presents. Ejecting that along X/Z threw Crash off the arrow crate
+    /// under a fruit crate (Jungle Rollers bounce loop). Other scenery AABBs
+    /// are ignored.
     /// </summary>
     static bool CrateWallHit(int x1, int y1, int z1, int x2, int y2, int z2,
         int bx1, int by1, int bz1, int bx2, int by2, int bz2)
@@ -512,11 +517,7 @@ public static partial class FramePacing
         int penZ = Math.Min(z2 - bz1, bz2 - z1);
         if (penX <= EmbedSlop || penY <= 0 || penZ <= EmbedSlop)
             return false;
-        int penU = by2 - y1;
-        int penD = y2 - by1;
-        if (penY <= penX && penY <= penZ && penU <= penD)
-            return false;
-        return true;
+        return penY > penX || penY > penZ;
     }
 
     static bool CrashInCrateWall(IMemory m, int x, int y, int z)
