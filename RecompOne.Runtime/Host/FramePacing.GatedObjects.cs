@@ -451,8 +451,15 @@ public static partial class FramePacing
         {
             if ((m.ReadU32(obj + ObjStatusBOff) & FlagSolidTop) == 0)
                 return true;
-            if (CrashAirborne(m, crash) && (int)m.ReadU32(crash + ObjVelYOff) > 0)
+            bool airborne = CrashAirborne(m, crash);
+            if (airborne && (int)m.ReadU32(crash + ObjVelYOff) > 0)
                 return true; // Jump takeoff, not a platform reversal.
+            // Grounded on a path plat / gem: stay on the ride (1.9.4 rule).
+            // The support test below is for wobbling river leaves; on Temple
+            // Ruins PoPlC descending steeply it failed with Crash grounded,
+            // dropped the carry mid-ride and the plat slid out from under him.
+            if (!airborne && !IsRiverRideSurface(m, obj))
+                return false;
             if (_rideObj == obj && _gateRot.TryGetValue(obj, out GatePose pose))
             {
                 // The clock has advanced, but carry has not been applied yet.

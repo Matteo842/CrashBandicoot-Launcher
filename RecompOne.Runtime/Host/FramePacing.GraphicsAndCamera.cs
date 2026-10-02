@@ -306,14 +306,21 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Same path: scale the progress step so CamFollow / auto-cam move at 30 Hz
-    /// wall speed. ZonePathProgressToLoc then builds a consistent pose — no Euler lerp.
-    /// Zone/path changes are teleports; leave those alone.
+    /// Same path: scale the progress step so CamAdjustProgress catch-up and
+    /// auto-cam (+0x100 per call) move at 30 Hz wall speed. ZonePathProgressToLoc
+    /// then builds a consistent pose — no Euler lerp. Zone/path changes are
+    /// teleports; leave those alone.
+    /// CamFollow's direct LevelUpdate is not a step: it SETs progress to Crash's
+    /// projection (delta_dist &lt;= 30000), so the camera is locked to him every
+    /// frame. dt/34 of it chased Crash and trailed ~one original frame, right at
+    /// the 30000 threshold; a wobble then fell into the halved/capped catch-up
+    /// branch and the cam trailed by seconds (Great Hall, look-ahead pans).
     /// </summary>
     public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
+        CamTraceLevelUpdate(c);
         EnsureFrameTime(m);
-        if (!IsActive(m) || _exactTicks >= RefTicks - 0.01)
+        if (!IsActive(m) || _exactTicks >= RefTicks - 0.01 || c.RA == CamFollowSnapRa)
         {
             _cameraProgressFrac = 0;
             return true;
@@ -349,6 +356,7 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreCamFollow(CpuContext c, IMemory m)
     {
+        CamTraceBegin(m);
         EnsureFrameTime(m);
         _inCamFollow = false;
         if (!IsActive(m) || _exactTicks >= RefTicks - 0.01)
@@ -373,7 +381,11 @@ public static partial class FramePacing
 
     public static void PostCamFollow(CpuContext c, IMemory m)
     {
-        if (!_inCamFollow) return;
+        if (!_inCamFollow)
+        {
+            CamTraceEnd(m);
+            return;
+        }
         _inCamFollow = false;
         try
         {
@@ -386,6 +398,7 @@ public static partial class FramePacing
         {
             // overlay swap
         }
+        CamTraceEnd(m);
     }
 
     /// <summary>

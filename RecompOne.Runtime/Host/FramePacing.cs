@@ -301,6 +301,11 @@ public static partial class FramePacing
     /// <summary>CamFollow (NTSC-U). Look-behind / side-look seek lives here.</summary>
     const uint CamFollowAddr = 0x8002A82Cu;
     const uint CamUpdateAddr = 0x8002B2BCu;
+    /// <summary>
+    /// RA of CamFollow's direct <c>LevelUpdate</c> (delta_dist &lt;= 30000): a SET to
+    /// Crash's projected progress. CamAdjustProgress catch-up returns to 0x8002A0B4.
+    /// </summary>
+    const uint CamFollowSnapRa = 0x8002B210u;
     const uint CamOffsetZAddr = 0x800564A4u;
     const uint CamZoomAddr = 0x800564A8u;
     const uint CamOffsetYAddr = 0x800564B4u;

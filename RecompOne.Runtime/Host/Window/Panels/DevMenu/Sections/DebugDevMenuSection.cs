@@ -34,6 +34,13 @@ internal sealed class DebugDevMenuSection : IDevMenuSection
         TogglePanel<ConsolePanel>("Console");
 
         ImGui.Spacing();
+        ImGui.TextUnformatted("Frame pacing");
+        bool camTrace = FramePacing.CameraTrace;
+        if (ImGui.Checkbox("Camera trace", ref camTrace))
+            FramePacing.CameraTrace = camTrace;
+        ImGuiEx.TextDisabled("One line per frame to logs/camtrace.txt (overwritten each time it is enabled).");
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
         if (ImGui.Button("Reset View"))
