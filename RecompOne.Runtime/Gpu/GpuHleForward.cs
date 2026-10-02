@@ -177,6 +177,44 @@ public sealed partial class Gpu
         return true;
     }
 
+    bool HleWideRainTile(ReadOnlySpan<Vert> vertices, int clut)
+    {
+        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default
+            || Runtime.Mem?.ReadU32(Catalogs.Catalog.LevelIdAddr) is not 46 || _blendMode != 1)
+            return false;
+        var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
+        // Slippery Climb's rain is the screen-fog object drawing a fixed grid of
+        // grey, additive, axis-aligned FT4 tiles that all repeat one scrolling
+        // texture (#56). The grid stops at the 4:3 edges.
+        int tileW = b.X - a.X, tileH = c.Y - a.Y;
+        if (a.R != a.G || a.R != a.B || a.R > 128
+            || a.Y != b.Y || c.Y != d.Y || a.X != c.X || b.X != d.X
+            || tileW is < 96 or > 192 || tileH < 64) return false;
+
+        var backend = GpuHle.Backend!;
+        backend.SetDrawEnv(CurEnv());
+        var flags = PrimOf(true, true, false, clut);
+        bool sub = a.Subpixel && b.Subpixel && c.Subpixel && d.Subpixel;
+        var ha = HV(a, sub, false); var hb = HV(b, sub, false);
+        var hc = HV(c, sub, false); var hd = HV(d, sub, false);
+        void Draw(float shift, WidePrimitiveMode mode)
+        {
+            flags.WideMode = mode;
+            var p = ha; var q = hb; var r = hc; var s = hd;
+            p.X += shift; q.X += shift; r.X += shift; s.X += shift;
+            backend.DrawTri(p, q, r, flags);
+            backend.DrawTri(q, r, s, flags);
+        }
+        Draw(0, WidePrimitiveMode.CoreOnly);
+        // Rain is composited at its original position in the ordering table,
+        // without scene depth. The grid's outer tiles already reach past the
+        // 4:3 edges; one more tile beside each of them fills the 16:9 bands.
+        Draw(0, WidePrimitiveMode.OverlaySides);
+        if (a.X <= _drawAreaLeft) Draw(-tileW, WidePrimitiveMode.OverlaySides);
+        if (b.X > _drawAreaRight) Draw(tileW, WidePrimitiveMode.OverlaySides);
+        return true;
+    }
+
     /// <summary>Semi-transparency mode of the screen fog in this level, or -1 when it has none.</summary>
     static int WideFogBlendMode(uint level) => level switch
     {
