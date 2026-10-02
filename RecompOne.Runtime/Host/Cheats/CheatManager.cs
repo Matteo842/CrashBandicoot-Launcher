@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using RecompOne.Runtime.Catalogs;
+using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Memory;
 
@@ -61,6 +62,19 @@ public static class CheatManager
     const uint CheckpointIdAddr = 0x800619A0u;
     const uint DeathCountAddr = 0x80061A3Cu;
     const uint TitleStateMap = 15u;
+    // Stormy Ascent: cut level, still on the disc. Map slots 32–39 have no map node
+    // (IsldC GotoIslandProg skips them) and no gem of their own, so finishing it
+    // neither unlocks levels nor takes another level's gem.
+    public const uint LidStormyAscent = 34u;
+    public const uint StormyAscentMapLevel = 34u;
+    const uint LidMap = 25u;
+    const uint LidLevelEnd = 45u;
+    // Its Cortex tokens have no round in DispC SelectBonusRound: use Slippery Climb's
+    // Brio round (BonoC layout 20) — no save, key or progress attached.
+    const uint LidBonusBrio = 37u;
+    const uint StormyBonusRound = 20u;
+    // c1 level.c: a new game starts the map at 99 (IsldC turns it into slot 1).
+    const uint NewGameMapLevel = 99u;
     const uint CrashPtrAddr = 0x800566B4u;
     const uint FramesElapsedAddr = 0x80060E04u;
     const uint ObjStateOff = 0x2Cu;
@@ -87,12 +101,15 @@ public static class CheatManager
     static bool _warpPending;
     static uint _warpLevelId;
     static uint _warpMapLevel;
+    static uint _warpLoadLid = uint.MaxValue;
+    static uint _returnMapLevel = NewGameMapLevel;
 
     public static bool WarpPending => _warpPending;
 
     /// <summary>
     /// Queue a direct level load. <paramref name="mapLevel"/> is the warp-map slot
-    /// (IsldC MapSetLevelParams: 1–31, 40 Fumbling in the Dark, 50 Whole Hog).
+    /// (IsldC MapSetLevelParams: 1–31, 40 Fumbling in the Dark, 50 Whole Hog,
+    /// <see cref="StormyAscentMapLevel"/> for the cut level).
     /// </summary>
     public static void RequestWarp(uint levelId, uint mapLevel)
     {
@@ -148,6 +165,11 @@ public static class CheatManager
         if (mem.ReadU32(NextLevelIdAddr) != uint.MaxValue) return;
         _warpPending = false;
 
+        // Where to put Willy back when leaving a level that has no map node.
+        uint fromMapLevel = mem.ReadU32(CurMapLevelAddr);
+        if (!IsNodelessMapLevel(fromMapLevel))
+            _returnMapLevel = fromMapLevel;
+
         // Same bookkeeping as the warp map's confirm button (SAVEDSCREEN = GAMESCREEN,
         // GLOBAL_48 = CURRENTLEVEL = slot); title_state 15 = map, so leaving the level
         // lands on the map at this slot even when warping from the title menu.
@@ -166,8 +188,40 @@ public static class CheatManager
         mem.WriteU32(TawnaCountAddr, 0);
         mem.WriteU32(BonusRoundAddr, 0);
 
+        _warpLoadLid = _warpLevelId;
         mem.WriteU32(NextLevelIdAddr, _warpLevelId);
     }
+
+    /// <summary>
+    /// NSInit pre-hook: A1 is the level about to load, cur_lid still the one being left.
+    /// </summary>
+    public static void OnLevelLoad(CpuContext c, IMemory m)
+    {
+        uint lid = c.A1;
+        // Kept on a match: the hook may run twice for one NSInit (jal + dispatcher).
+        bool warp = lid == _warpLoadLid;
+        if (!warp)
+            _warpLoadLid = uint.MaxValue;
+
+        // Third Cortex token in Stormy Ascent: SelectBonusRound has no branch for it,
+        // so loadlevel(BonusLevel) reads a stale field (NSInit on garbage = retail crash).
+        // Map, level end and a restart are the only loads the level makes on its own.
+        if (m.ReadU32(LevelIdAddr) == LidStormyAscent && !warp
+            && lid is not (LidMap or LidLevelEnd or LidStormyAscent))
+        {
+            c.A1 = LidBonusBrio;
+            m.WriteU32(BonusRoundAddr, StormyBonusRound);
+        }
+
+        // The level end screen still needs slot 34 (gem bit); the map does not.
+        if (lid == LidMap && IsNodelessMapLevel(m.ReadU32(CurMapLevelAddr)))
+        {
+            m.WriteU32(CurMapLevelAddr, _returnMapLevel);
+            m.WriteU32(MapLevelEnteredAddr, _returnMapLevel);
+        }
+    }
+
+    static bool IsNodelessMapLevel(uint mapLevel) => mapLevel is >= 32 and <= 39;
 
     static void ApplyDebugMovement(IMemory mem)
     {

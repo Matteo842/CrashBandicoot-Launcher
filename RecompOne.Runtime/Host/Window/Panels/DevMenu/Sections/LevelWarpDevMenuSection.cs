@@ -12,10 +12,15 @@ internal sealed class LevelWarpDevMenuSection : IDevMenuSection
     public string Title => "Warp to Level";
     public int Order => 6;
 
-    readonly record struct Entry(uint MapSlot, uint LevelId, bool Secret = false);
+    readonly record struct Entry(uint MapSlot, uint LevelId, string? Note = null);
     sealed record Island(string Name, Entry[] Levels);
 
+    const string Secret = "secret";
+
     // Warp-map order (IsldC MapSetLevelParams); IDs from levels.scus94900.json.
+    // The goocdump IsldC is NTSC-J, which swaps Sunset Vista and Slippery Climb:
+    // on NTSC-U slot 16 is Sunset Vista (GamOC gives its key at slot 16) and
+    // slot 24 Slippery Climb (red gem).
     static readonly Island[] Islands =
     [
         new("N. SANITY ISLAND",
@@ -26,13 +31,17 @@ internal sealed class LevelWarpDevMenuSection : IDevMenuSection
         new("WUMPA ISLAND",
         [
             new(10, 24), new(11, 23), new(12, 32), new(13, 28), new(14, 20),
-            new(15, 19), new(50, 30, Secret: true), new(16, 46), new(17, 33),
+            new(15, 19), new(50, 30, Secret), new(16, 35), new(17, 33),
         ]),
         new("CORTEX ISLAND",
         [
             new(18, 6), new(19, 3), new(20, 5), new(21, 7), new(22, 8),
-            new(23, 22), new(24, 35), new(25, 40), new(40, 42, Secret: true),
+            new(23, 22), new(24, 46), new(25, 40), new(40, 42, Secret),
             new(26, 29), new(27, 55), new(28, 27), new(29, 41), new(30, 44), new(31, 31),
+        ]),
+        new("CUT CONTENT",
+        [
+            new(CheatManager.StormyAscentMapLevel, CheatManager.LidStormyAscent, "cut level"),
         ]),
     ];
 
@@ -61,8 +70,8 @@ internal sealed class LevelWarpDevMenuSection : IDevMenuSection
             foreach (var e in island.Levels)
             {
                 string name = Catalog.Levels.TryGet(e.LevelId, out var info) ? info.Name : $"Level {e.LevelId}";
-                if (e.Secret)
-                    name += "  (secret)";
+                if (e.Note != null)
+                    name += $"  ({e.Note})";
                 bool isCurrent = hasCurrent && current == e.LevelId;
                 if (ImGui.Selectable($"  {name}##warp{e.LevelId}", isCurrent))
                     CheatManager.RequestWarp(e.LevelId, e.MapSlot);

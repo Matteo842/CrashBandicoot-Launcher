@@ -376,6 +376,8 @@ public static partial class FramePacing
 
     public static bool PreNsInit(CpuContext c, IMemory m)
     {
+        // May redirect A1 (Stormy Ascent bonus) — before the log below.
+        Cheats.CheatManager.OnLevelLoad(c, m);
         RestoreNativeWideObjectFrustum(m);
         ResetNativeWideRenderer();
         _inNsInit = true;

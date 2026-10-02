@@ -37,7 +37,7 @@
     { "id": 31, "slug": "dr-neo-cortex", "name": "Dr. Neo Cortex (Boss 6)", "kind": "gameplay", "code": "v" },
     { "id": 32, "slug": "the-lost-city", "name": "The Lost City", "kind": "gameplay", "code": "w" },
     { "id": 33, "slug": "koala-kong", "name": "Koala Kong (Boss 3)", "kind": "gameplay", "code": "x" },
-    { "id": 34, "slug": "unused-stormy-ascent", "name": "(unused) Stormy Ascent", "kind": "unused", "code": "y" },
+    { "id": 34, "slug": "unused-stormy-ascent", "name": "Stormy Ascent", "kind": "gameplay", "code": "y" },
     { "id": 35, "slug": "sunset-vista", "name": "Sunset Vista", "kind": "gameplay", "code": "z" },
     { "id": 36, "slug": "bonus-tawna-short", "name": "Bonus Round (Tawna - short)", "kind": "bonus", "code": "A" },
     { "id": 37, "slug": "bonus-nitrus-brio", "name": "Bonus Round (Nitrus Brio)", "kind": "bonus", "code": "B" },
