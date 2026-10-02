@@ -129,13 +129,14 @@ public sealed partial class Gpu
     bool HleWideFogQuad(ReadOnlySpan<Vert> vertices, int clut)
     {
         if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default
-            || Runtime.Mem?.ReadU32(Catalogs.Catalog.LevelIdAddr) is not (20 or 22) || _blendMode != 1)
+            || _blendMode != WideFogBlendMode(Runtime.Mem?.ReadU32(Catalogs.Catalog.LevelIdAddr) ?? 0))
             return false;
         var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
         int width = _drawAreaRight - _drawAreaLeft + 1;
-        // The bridges' two fog layers are grey, additive, screen-wide FT4
-        // billboards. Identify their geometry as well as the scene/material;
-        // ordinary particles, HUD icons and the world must keep their size.
+        // The same screen-fog object (GOOL type 29) draws grey, screen-wide FT4
+        // billboards: additive mist on the bridges, subtractive dark smoke in
+        // Generator Room (#56). Identify their geometry as well as the
+        // scene/material; ordinary particles, HUD icons and the world must keep their size.
         if (a.R != a.G || a.R != a.B || a.R > 128
             || b.X - a.X < width - 16 || d.X - c.X < width - 16
             || Math.Abs(b.Y - a.Y) > 32 || Math.Abs(d.Y - c.Y) > 32
@@ -175,6 +176,14 @@ public sealed partial class Gpu
         backend.DrawTri(rightTop, hd, rightBottom, flags);
         return true;
     }
+
+    /// <summary>Semi-transparency mode of the screen fog in this level, or -1 when it has none.</summary>
+    static int WideFogBlendMode(uint level) => level switch
+    {
+        20 or 22 => 1,
+        5 => 2,
+        _ => -1,
+    };
 
     void HleLine(int x0, int y0, int r0, int g0, int b0, int x1, int y1, int r1, int g1, int b1, bool semi, bool gouraud)
     {
