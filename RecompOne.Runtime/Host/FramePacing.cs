@@ -20,6 +20,10 @@ namespace RecompOne.Runtime.Host;
 /// never left playframe wait=1 / FadeToBlack. wait=1 is next Update, so
 /// every present is FALL_KILL at 30 Hz × fps. Physics on those 30 Hz
 /// steps is original 34 ticks — not 34+scale, and not a second skip.
+/// Crash's Update starts with PadUpdate, the only pad sample per loop. A
+/// skipped present still runs it: otherwise CoreLoop reads the same Start
+/// tap every present and pause flips on/off (and a pause opened at native
+/// FPS can never close once unlocked).
 /// HoldCrashStall is walk-only: Update still runs every present, so it
 /// adds back anim_counter until 34 wall ticks. Death already skips extra
 /// Updates. On the 30 Hz step _exactTicks is still the slice (~2 at 400
@@ -210,6 +214,8 @@ public static partial class FramePacing
     const uint GoolUpdateObjectsAddr = 0x8001D5ECu;
     const uint GoolObjectChangeStateAddr = 0x8001D698u;
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
+    /// <summary>NTSC-U <c>PadUpdate</c>. GoolObjectUpdate calls it first, for Crash only.</summary>
+    const uint PadUpdateAddr = 0x800167A4u;
     const uint GoolObjectTransformAddr = 0x8001DE78u;
     const uint GoolObjectPhysicsAddr = 0x8001F30Cu;
     /// <summary>GoolObjectInterpret. Trans jal after Bound, before physics.</summary>

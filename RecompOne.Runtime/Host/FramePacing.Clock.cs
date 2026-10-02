@@ -673,6 +673,34 @@ public static partial class FramePacing
     }
 
     /// <summary>
+    /// GoolObjectUpdate(crash) begins with PadUpdate; skipping the Update
+    /// skipped the pad too. CoreLoop then kept seeing the same Start tap
+    /// (pause on, off, on… for one frame at death / Warp_In), and paused
+    /// in land-lock the pad never refreshed, so Start could not unpause.
+    /// </summary>
+    static void RunSkippedCrashPad(CpuContext c, IMemory m)
+    {
+        uint a0 = c.A0, a1 = c.A1, a2 = c.A2, a3 = c.A3, v0 = c.V0, v1 = c.V1;
+        try
+        {
+            Dispatcher.Call(c, m, PadUpdateAddr);
+        }
+        catch
+        {
+            // overlay swap
+        }
+        finally
+        {
+            c.A0 = a0;
+            c.A1 = a1;
+            c.A2 = a2;
+            c.A3 = a3;
+            c.V0 = v0;
+            c.V1 = v1;
+        }
+    }
+
+    /// <summary>
     /// GpuUpdate adds fade_step every present. Death_Fall waits
     /// <c>FADECONTROL == -1</c> on the 30 Hz Crash interpret. At 400 Hz that
     /// hits 0 in 8 presents; if DISPLAY_UNK is set it stays 0 and never

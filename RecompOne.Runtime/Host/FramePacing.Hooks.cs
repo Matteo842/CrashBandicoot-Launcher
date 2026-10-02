@@ -140,7 +140,10 @@ public static partial class FramePacing
                 _simAcc.Remove(_obj);
             }
             else if (!CrashLandShouldUpdate(m, c))
+            {
+                RunSkippedCrashPad(c, m);
                 return false;
+            }
             else
             {
                 WriteAllTicks(m, RefTicks);
