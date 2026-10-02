@@ -22,12 +22,17 @@ public static partial class FramePacing
     static readonly List<NativeWideTriangle> _nativeWideTransparent = new(128);
     static readonly List<NativeWideTriangle> _nativeWideExtensions = new(256);
     static readonly short[] _nativeWideMatrix = new short[9];
+    // Eight meshes of the current zone plus resident meshes of its neighbours.
+    const int NativeWideMaxWorlds = 16;
+    const uint NativeWideCamTransAddr = 0x80057864u;
+    const uint NativeWideWorldMatrixAddr = 0x80057804u;
+    const uint NativeWideZdatType = 7;
+    const uint NativeWideWgeoType = 3;
+    const uint NativeWideShaderMask = 0x710u;
     static readonly NativeWideWorld[] _nativeWideWorldPool =
-    [
-        new(), new(), new(), new(), new(), new(), new(), new(),
-    ];
-    static readonly NativeWideClipVertex[][] _nativeWideCameraVertices = new NativeWideClipVertex[8][];
-    static readonly bool[][] _nativeWideVertexShaded = new bool[8][];
+        [.. Enumerable.Range(0, NativeWideMaxWorlds).Select(_ => new NativeWideWorld())];
+    static readonly NativeWideClipVertex[][] _nativeWideCameraVertices = new NativeWideClipVertex[NativeWideMaxWorlds][];
+    static readonly bool[][] _nativeWideVertexShaded = new bool[NativeWideMaxWorlds][];
     static byte[]? _nativeWideRam;
     static int _nativeWideRamMask;
     public static double LastNativeWideCpuMs { get; private set; }
@@ -56,6 +61,10 @@ public static partial class FramePacing
         public int Z;
         public int FogFar;
         public int FogShift;
+        // Neighbour meshes are not in the zone's world list, so their texture
+        // page words are resolved here instead of read from the zone.
+        public bool Neighbor;
+        public readonly uint[] NeighborTpages = new uint[8];
         public NativeWideClipVertex[]? CameraVertices;
         public bool[]? VertexShaded;
     }
@@ -268,6 +277,7 @@ public static partial class FramePacing
         for (int wi = 0; wi < worldCount; wi++)
         {
             var slot = worlds[wi];
+            slot.Neighbor = false;
             uint world = zone + 4u + (uint)wi * 0x40u;
             uint header = FastU32(m, world + 0x10u);
             uint polygons = FastU32(m, world + 0x14u);
@@ -311,6 +321,7 @@ public static partial class FramePacing
             slot.FogShift = (int)(fog >> 16) & 31;
             slot.CameraVertices = null;
         }
+        int drawWorldCount = AddNativeWideNeighborWorlds(m, zone, worldCount, ref totalPolygons);
 
         var matrix = _nativeWideMatrix;
         for (int i = 0; i < matrix.Length; i++)
@@ -340,7 +351,7 @@ public static partial class FramePacing
         float viewCenterY = gpu.DrawOffsetY + screenY;
         float near = projection * 0.5f + 1f;
 
-        for (int wi = 0; wi < worldCount; wi++)
+        for (int wi = 0; wi < drawWorldCount; wi++)
         {
             var world = worlds[wi];
             var vertices = _nativeWideCameraVertices[wi];
@@ -364,11 +375,13 @@ public static partial class FramePacing
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
         int clippedPolygons = 0;
         int candidates = 0;
-        for (int wi = 0; wi < worldCount; wi++)
+        for (int wi = 0; wi < drawWorldCount; wi++)
         {
             var world = worlds[wi];
             bool temple = world.PolyCount > 0 && NativeWideSunsetTemple(m, world);
-            foreach (var repair in NativeWideSceneRepairs(m, world))
+            // Repairs were tuned with each mesh's own zone; neighbours draw only authored polygons.
+            var repairs = world.Neighbor ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world);
+            foreach (var repair in repairs)
             {
                 PrimFlags repairFlags;
                 if (repair.Polygon < 0)
@@ -464,6 +477,131 @@ public static partial class FramePacing
             if (LastNativeWideCpuMs > LastNativeWideCpuPeakMs)
                 LastNativeWideCpuPeakMs = LastNativeWideCpuMs;
         }
+    }
+
+    /// <summary>
+    /// The game draws only the WGEO meshes listed by the current zone. Near a
+    /// zone boundary the next zone's meshes are outside the 4:3 frustum but
+    /// already inside the 16:9 side bands, so they popped in only once the
+    /// camera crossed into that zone (#51). Append the meshes listed by the
+    /// neighbouring zones when they and their texture pages are already
+    /// resident; nothing is paged in from disc here. Backdrops stay with the
+    /// current zone. Sunset Vista's temple repairs are drawn behind all real
+    /// scenery, so its zones and meshes keep the current-zone list only.
+    /// </summary>
+    static int AddNativeWideNeighborWorlds(IMemory m, uint zone, int worldCount, ref int totalPolygons)
+    {
+        var worlds = _nativeWideWorldPool;
+        int fogFar = 0xFFFF, fogShift = 0;
+        bool fogFound = false;
+        for (int wi = 0; wi < worldCount; wi++)
+        {
+            var world = worlds[wi];
+            if (world.PolyCount == 0) continue;
+            if (NativeWideSunsetTemple(m, world)) return worldCount;
+            if (!fogFound && FastU32(m, world.Header + 0x1Cu) == 0)
+            {
+                fogFar = world.FogFar;
+                fogShift = world.FogShift;
+                fogFound = true;
+            }
+        }
+        int neighborCount = (int)m.ReadU32(zone + 0x210u);
+        if (neighborCount is <= 0 or > 8) return worldCount;
+        uint shader = m.ReadU32(zone + 0x2FCu) & NativeWideShaderMask;
+        // Same origin as GfxLoadWorlds: (header trans - cam_trans >> 8) by ms_cam_rot2.
+        int camX = (int)m.ReadU32(NativeWideCamTransAddr) >> 8;
+        int camY = (int)m.ReadU32(NativeWideCamTransAddr + 4u) >> 8;
+        int camZ = (int)m.ReadU32(NativeWideCamTransAddr + 8u) >> 8;
+        Span<int> rotation = stackalloc int[9];
+        for (int i = 0; i < rotation.Length; i++)
+            rotation[i] = (short)m.ReadU16(NativeWideWorldMatrixAddr + (uint)i * 2u);
+
+        int count = worldCount;
+        for (int ni = 0; ni < neighborCount && count < NativeWideMaxWorlds; ni++)
+        {
+            uint neighbor = NativeWideResidentEntry(m, m.ReadU32(zone + 0x214u + (uint)ni * 4u), NativeWideZdatType);
+            if (neighbor == 0) continue;
+            uint header = EntryItem(m, neighbor, 0);
+            if (header == zone || !NativeWideGuestPointer(header)) continue;
+            // Every mesh is shaded with the current zone's mode.
+            if ((m.ReadU32(header + 0x2FCu) & NativeWideShaderMask) != shader) continue;
+            int neighborWorlds = (int)m.ReadU32(header);
+            if (neighborWorlds is <= 0 or > 8) continue;
+            for (int wj = 0; wj < neighborWorlds && count < NativeWideMaxWorlds; wj++)
+            {
+                uint wgeo = NativeWideResidentEntry(m, m.ReadU32(header + 4u + (uint)wj * 0x40u), NativeWideWgeoType);
+                if (wgeo == 0) continue;
+                uint wgeoHeader = EntryItem(m, wgeo, 0);
+                uint polygons = EntryItem(m, wgeo, 1);
+                uint vertices = EntryItem(m, wgeo, 2);
+                if (!NativeWideGuestPointer(wgeoHeader) || !NativeWideGuestPointer(polygons)
+                    || !NativeWideGuestPointer(vertices))
+                    continue;
+                if (FastU32(m, wgeoHeader + 0x1Cu) != 0) continue;
+                bool listed = false;
+                for (int k = 0; k < count && !listed; k++)
+                    listed = worlds[k].PolyCount > 0 && worlds[k].Header == wgeoHeader;
+                if (listed) continue;
+                int polyCount = (int)FastU32(m, wgeoHeader + 0x0Cu);
+                int vertexCount = (int)FastU32(m, wgeoHeader + 0x10u);
+                int texinfoCount = (int)FastU32(m, wgeoHeader + 0x14u);
+                int tpageCount = (int)FastU32(m, wgeoHeader + 0x18u);
+                if (polyCount is <= 0 or > 4096 || vertexCount is <= 0 or > 4096
+                    || texinfoCount is <= 0 or > 4096 || tpageCount is <= 0 or > 8)
+                    continue;
+                var slot = worlds[count];
+                bool textures = true;
+                for (int ti = 0; ti < tpageCount && textures; ti++)
+                {
+                    slot.NeighborTpages[ti] = NativeWideTpageWord(m, FastU32(m, wgeoHeader + 0x20u + (uint)ti * 4u));
+                    textures = slot.NeighborTpages[ti] != 0;
+                }
+                if (!textures) continue;
+                slot.Neighbor = true;
+                slot.PolyCount = polyCount;
+                slot.VertexCount = vertexCount;
+                slot.TexinfoCount = texinfoCount;
+                slot.TpageCount = tpageCount;
+                slot.Header = wgeoHeader;
+                slot.Polygons = polygons;
+                slot.Vertices = vertices;
+                slot.Texinfos = wgeoHeader + 0x40u;
+                slot.Tpages = 0;
+                int dx = (int)FastU32(m, wgeoHeader) - camX;
+                int dy = (int)FastU32(m, wgeoHeader + 4u) - camY;
+                int dz = (int)FastU32(m, wgeoHeader + 8u) - camZ;
+                slot.X = (rotation[0] * dx + rotation[1] * dy + rotation[2] * dz) >> 12;
+                slot.Y = (rotation[3] * dx + rotation[4] * dy + rotation[5] * dz) >> 12;
+                slot.Z = (rotation[6] * dx + rotation[7] * dy + rotation[8] * dz) >> 12;
+                slot.FogFar = fogFar;
+                slot.FogShift = fogShift;
+                slot.CameraVertices = null;
+                if (NativeWideSunsetTemple(m, slot)) continue;
+                totalPolygons += polyCount;
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // NSLookup would page a missing entry in from disc. Read the reference
+    // (EID or page table entry) instead and skip anything not resident.
+    static uint NativeWideResidentEntry(IMemory m, uint reference, uint type)
+    {
+        uint entry = EntryFromRef(m, reference);
+        if (entry == 0) entry = ProbeEidEntry(m, reference);
+        return entry != 0 && m.ReadU32(entry + 8u) == type ? entry : 0;
+    }
+
+    // A texture page in VRAM leaves its GPU page word (0x80000002 | CLUT and
+    // page bits) in the page table entry. An odd page id means it is not loaded.
+    static uint NativeWideTpageWord(IMemory m, uint reference)
+    {
+        uint pte = (reference & 1u) != 0 ? ProbeEidPte(m, reference) : reference;
+        if (!NativeWideGuestPointer(pte)) return 0;
+        uint word = m.ReadU32(pte);
+        return (word & 0xFF000003u) == 0x80000002u ? word : 0;
     }
 
     public static double ConsumeNativeWideCpuPeakMs()
@@ -960,7 +1098,8 @@ public static partial class FramePacing
         int anim = mask == 0 ? 0 : (phase + (int)(drawCount >> period)) & ((mask << 1) | 1);
         uint rgn = FastU32(m, texinfo + 4u + (uint)anim * 4u);
         // The zone stores a resolved GPU page word, not a guest pointer.
-        uint tpageInfo = FastU32(m, world.Tpages + (uint)tpagIndex * 4u);
+        uint tpageInfo = world.Neighbor ? world.NeighborTpages[tpagIndex]
+            : FastU32(m, world.Tpages + (uint)tpagIndex * 4u);
         int colorMode = (int)((rgn >> 20) & 3u);
         int segment = (int)((rgn >> 18) & 3u);
         int baseU = (int)((rgn >> 10) & 0xF8u) >> colorMode;

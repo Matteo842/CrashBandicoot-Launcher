@@ -781,6 +781,18 @@ public static partial class FramePacing
 
     static uint ProbeEidEntry(IMemory m, uint eid)
     {
+        uint pte = ProbeEidPte(m, eid);
+        if (pte == 0) return 0;
+        uint v = m.ReadU32(pte);
+        if ((v & 1u) != 0) return 0;
+        if ((v & 0xFF000000u) != 0x80000000u) return 0;
+        if (m.ReadU32(v) != EntryMagic) return 0;
+        return v;
+    }
+
+    /// <summary>NSProbe without NSResolve: the page table entry, never a disc load.</summary>
+    static uint ProbeEidPte(IMemory m, uint eid)
+    {
         if ((eid & 1u) == 0) return 0;
         uint buckets = m.ReadU32(NsPteBucketsAddr);
         uint pageTable = m.ReadU32(NsPageTableAddr);
@@ -801,11 +813,7 @@ public static partial class FramePacing
             if ((pte & 0xFF000000u) != 0x80000000u) break;
             if (tableEnd != 0 && pte >= tableEnd) break;
             if (m.ReadU32(pte + 4) != eid) continue;
-            uint v = m.ReadU32(pte);
-            if ((v & 1u) != 0) return 0;
-            if ((v & 0xFF000000u) != 0x80000000u) return 0;
-            if (m.ReadU32(v) != EntryMagic) return 0;
-            return v;
+            return pte;
         }
         return 0;
     }
