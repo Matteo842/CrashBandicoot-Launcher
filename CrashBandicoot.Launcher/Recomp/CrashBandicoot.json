@@ -61,7 +61,8 @@
     { "address": "80025A60", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreLevelUpdate" },
     { "address": "8002A82C", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreCamFollow" },
     { "address": "8002A82C", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostCamFollow" },
-    { "address": "8002BAB4", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreCamDeath" }
+    { "address": "8002BAB4", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreCamDeath" },
+    { "address": "8002EC68", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreShaderParams" }
   ],
   "overlays": []
 }

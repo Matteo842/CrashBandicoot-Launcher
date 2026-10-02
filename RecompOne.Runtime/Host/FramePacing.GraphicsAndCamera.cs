@@ -75,6 +75,33 @@ public static partial class FramePacing
         return true;
     }
 
+    /// <summary>
+    /// ShaderParamsUpdate steps one light-sequence entry per call: Slippery
+    /// Climb / Stormy Ascent / Brio lightning, hot pipes, torches, Lights Out
+    /// fade. Per-present calls play the flash N× faster and roll the 25/1000
+    /// strike chance N× as often (strobe). Keep the original 30 Hz cadence.
+    /// A0 != 0 is level init.
+    /// </summary>
+    public static bool PreShaderParams(CpuContext c, IMemory m)
+    {
+        if (c.A0 != 0 || !IsActive(m))
+        {
+            _shaderAcc = 0;
+            return true;
+        }
+        EnsureFrameTime(m);
+        if (_exactTicks >= RefTicks - 0.01)
+        {
+            _shaderAcc = 0;
+            return true;
+        }
+        _shaderAcc += _exactTicks;
+        if (_shaderAcc < RefTicks)
+            return false;
+        _shaderAcc -= RefTicks;
+        return true;
+    }
+
     static void ResetWaterClock()
     {
         _waterArmed = false;

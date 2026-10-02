@@ -248,6 +248,11 @@ public static partial class FramePacing
     const uint GfxTransformWorldsDarkAddr = 0x8001A0CCu;
     const uint GfxTransformWorldsDark2Addr = 0x8001A2E0u;
     /// <summary>
+    /// NTSC-U <c>ShaderParamsUpdate</c>. CoreLoop calls it with A0=0 in
+    /// DARK2 / LIGHTNING zones; each call steps one light-sequence entry.
+    /// </summary>
+    const uint ShaderParamsUpdateAddr = 0x8002EC68u;
+    /// <summary>
     /// NTSC-U <c>draw_count</c>: GpuUpdate does ++, worlds pass it as A3 for
     /// wgeo UV. 0x80060E04 is a different GOOL stamp, not this counter.
     /// </summary>
@@ -713,6 +718,7 @@ public static partial class FramePacing
     static bool _dcamArmed;
     static double _dcamAcc;
     static int _dcamLog;
+    static double _shaderAcc;
 
     public static bool ForceOriginal { get; set; }
 

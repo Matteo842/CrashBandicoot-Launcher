@@ -82,6 +82,7 @@ public static partial class FramePacing
         GoolSeekAddr => PreGoolSeek(c, m),
         CamFollowAddr or CamUpdateAddr => PreCamFollow(c, m),
         CamDeathAddr => PreCamDeath(c, m),
+        ShaderParamsUpdateAddr => PreShaderParams(c, m),
         GoolObjectChangeStateAddr => PreChangeState(c, m),
         GoolObjectUpdateAddr => PreGoolObjectUpdate(c, m),
         GoolObjectInterpretAddr => PreGoolInterpret(c, m),
