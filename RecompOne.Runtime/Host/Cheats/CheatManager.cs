@@ -23,6 +23,11 @@ public static class CheatManager
     const uint MapLivesAddr = 0x800618EC;
     const uint MapMaskAddr = 0x800618F0;
     const uint LevelSelectAddr = 0x80061948;
+    // GOOL globals (wurlyfox/c1 globals.h): item_pool2 holds the map keys,
+    // map_key_links only draws the key paths and is copied from item_pool2 on map spawn.
+    const uint ItemPool2Addr = 0x800619AC;
+    const uint MapKeyLinksAddr = 0x800619B8;
+    const uint KeyBits = 1u << 10 | 1u << 20; // Jaws of Darkness key | Sunset Vista key
     // GOOL counters are 24.8 fixed-point (HUD prints value >> 8): 99 lives = 0x6300.
     const uint One = 0x100u;
     const uint Count99 = 99u * One;
@@ -80,7 +85,12 @@ public static class CheatManager
         }
 
         if (CheatConfig.LevelSelect)
+        {
             mem.WriteU8(LevelSelectAddr, 0x40);
+            // Secret levels (Fumbling in the Dark, Whole Hog) are gated by the keys, not by the unlock count.
+            mem.WriteU32(ItemPool2Addr, mem.ReadU32(ItemPool2Addr) | KeyBits);
+            mem.WriteU32(MapKeyLinksAddr, mem.ReadU32(MapKeyLinksAddr) | KeyBits);
+        }
 
         if ((CheatConfig.GodMode || CheatConfig.Fly) && !IsOnTitleMenuMap())
             ApplyDebugMovement(mem);
