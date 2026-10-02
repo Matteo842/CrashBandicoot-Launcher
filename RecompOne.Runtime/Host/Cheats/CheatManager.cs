@@ -34,6 +34,22 @@ public static class CheatManager
     const uint InstantSaveMenuAddr = 0x800A264C;
     // SCUS-94900: current level ID (cbhacks / GpuHle). Prefer Catalog.LevelIdAddr at runtime.
     public const uint LevelIdAddr = 0x80056710;
+    // c1 ns.c next_lid: GOOL loadlevel writes it, the main loop loads it when != -1.
+    const uint NextLevelIdAddr = 0x80056714u;
+    // GOOL globals the warp map sets before loadlevel (IsldC) and the engine
+    // resets when loading LID_TITLE (c1 main.c) — a direct warp skips both.
+    const uint RespawnCountAddr = 0x800618A0u;
+    const uint TitleStateAddr = 0x800618D4u;
+    const uint SavedTitleStateAddr = 0x800618D8u;
+    const uint CurMapLevelAddr = 0x800618DCu;
+    const uint CortexCountAddr = 0x800618F8u;
+    const uint BrioCountAddr = 0x800618FCu;
+    const uint TawnaCountAddr = 0x80061900u;
+    const uint MapLevelEnteredAddr = 0x8006194Cu;
+    const uint BonusRoundAddr = 0x8006197Cu;
+    const uint CheckpointIdAddr = 0x800619A0u;
+    const uint DeathCountAddr = 0x80061A3Cu;
+    const uint TitleStateMap = 15u;
     const uint CrashPtrAddr = 0x800566B4u;
     const uint FramesElapsedAddr = 0x80060E04u;
     const uint ObjStateOff = 0x2Cu;
@@ -57,11 +73,30 @@ public static class CheatManager
     // Hold the instant-save poke for a few frames — a single write can be overwritten.
     static int _instantSaveHoldFrames;
     static long _flyTs;
+    static bool _warpPending;
+    static uint _warpLevelId;
+    static uint _warpMapLevel;
+
+    public static bool WarpPending => _warpPending;
+
+    /// <summary>
+    /// Queue a direct level load. <paramref name="mapLevel"/> is the warp-map slot
+    /// (IsldC MapSetLevelParams: 1–31, 40 Fumbling in the Dark, 50 Whole Hog).
+    /// </summary>
+    public static void RequestWarp(uint levelId, uint mapLevel)
+    {
+        _warpLevelId = levelId;
+        _warpMapLevel = mapLevel;
+        _warpPending = true;
+    }
 
     public static void Apply()
     {
         var mem = Runtime.Mem;
         if (mem == null) return;
+
+        if (_warpPending)
+            ApplyWarp(mem);
 
         if (_instantSaveHoldFrames > 0)
         {
@@ -94,6 +129,33 @@ public static class CheatManager
 
         if ((CheatConfig.GodMode || CheatConfig.Fly) && !IsOnTitleMenuMap())
             ApplyDebugMovement(mem);
+    }
+
+    static void ApplyWarp(IMemory mem)
+    {
+        // Another load is already queued (death, level end, map) — retry next frame.
+        if (mem.ReadU32(NextLevelIdAddr) != uint.MaxValue) return;
+        _warpPending = false;
+
+        // Same bookkeeping as the warp map's confirm button (SAVEDSCREEN = GAMESCREEN,
+        // GLOBAL_48 = CURRENTLEVEL = slot); title_state 15 = map, so leaving the level
+        // lands on the map at this slot even when warping from the title menu.
+        mem.WriteU32(TitleStateAddr, TitleStateMap);
+        mem.WriteU32(SavedTitleStateAddr, TitleStateMap);
+        mem.WriteU32(MapLevelEnteredAddr, _warpMapLevel);
+        mem.WriteU32(CurMapLevelAddr, _warpMapLevel);
+
+        // Level → level never passes the map: a stale checkpoint would respawn Crash
+        // at the previous level's checkpoint coordinates after a death.
+        mem.WriteU32(CheckpointIdAddr, uint.MaxValue);
+        mem.WriteU32(RespawnCountAddr, 0);
+        mem.WriteU32(DeathCountAddr, 0);
+        mem.WriteU32(CortexCountAddr, 0);
+        mem.WriteU32(BrioCountAddr, 0);
+        mem.WriteU32(TawnaCountAddr, 0);
+        mem.WriteU32(BonusRoundAddr, 0);
+
+        mem.WriteU32(NextLevelIdAddr, _warpLevelId);
     }
 
     static void ApplyDebugMovement(IMemory mem)

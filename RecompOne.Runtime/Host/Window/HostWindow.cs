@@ -565,6 +565,7 @@ internal static class HostWindow
 
         DevMenuRegistry.Register(new CheatsDevMenuSection());
         DevMenuRegistry.Register(new LevelsDevMenuSection());
+        DevMenuRegistry.Register(new LevelWarpDevMenuSection());
         DevMenuRegistry.Register(new DisplayDevMenuSection());
         DevMenuRegistry.Register(new RenderingDevMenuSection());
         DevMenuRegistry.Register(new AudioDevMenuSection());
