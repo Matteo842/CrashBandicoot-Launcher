@@ -60,6 +60,11 @@ internal sealed class RenderingDevMenuSection : IDevMenuSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
 
+        bool dejitterDebug = Hle.GpuHle.DejitterDebug;
+        if (ImGui.Checkbox("Show uncorrected polygons", ref dejitterDebug))
+            Hle.GpuHle.DejitterDebug = dejitterDebug;
+        ImGuiEx.TextDisabled("Magenta = Dejitter could not fix it");
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();

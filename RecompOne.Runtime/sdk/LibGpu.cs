@@ -36,7 +36,10 @@ public static class LibGpu
                     GpuHle.CurrentPrimitiveKind = hud >= 0 ? GpuHle.PrimitiveKind.Hud : GpuHle.PrimitiveKind.Default;
                 }
                 for (uint i = 0; i < count; i++)
-                    gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
+                {
+                    uint wordAddr = addr + 4u + i * 4u;
+                    gpu.WriteGp0(m.ReadU32(wordAddr), wordAddr);
+                }
                 uint next = header & 0xFFFFFFu;
                 if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
                 addr = next & 0x1FFFFCu;

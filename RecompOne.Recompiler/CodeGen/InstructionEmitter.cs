@@ -156,7 +156,7 @@ public static class InstructionEmitter
             43 => $"m.WriteU32({Addr(rs, imm)}, {RT});",
             46 => $"m.WriteWordRight({Addr(rs, imm)}, {RT});",
             50 => $"RecompOne.Runtime.Gte.LoadWord({rt}, m.ReadU32({Addr(rs, imm)}));",
-            58 => $"m.WriteU32({Addr(rs, imm)}, RecompOne.Runtime.Gte.StoreWord({rt}));",
+            58 => $"RecompOne.Runtime.Gte.StoreWord(m, {Addr(rs, imm)}, {rt});",
             _ =>  UnknownInstr(i, $"op=0x{op:X2}")
         };
     }

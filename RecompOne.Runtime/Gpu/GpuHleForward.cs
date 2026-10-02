@@ -46,6 +46,21 @@ public sealed partial class Gpu
 
         // All-or-nothing: mixed int/float verts warp UVs every frame (texture flicker).
         bool sub = a.Subpixel && b.Subpixel && c.Subpixel;
+        if (!sub && GpuHle.DejitterDebug && GpuHle.DejitterActive)
+        {
+            // Dev view: magenta marks triangles left on the integer grid (still jittering).
+            Vert ta = a, tb = b, tc = c;
+            ta.R = tb.R = tc.R = 255;
+            ta.G = tb.G = tc.G = 0;
+            ta.B = tb.B = tc.B = 255;
+            HleTriCore(ta, tb, tc, tex, gouraud, semi, false, clut, sub);
+            return;
+        }
+        HleTriCore(a, b, c, tex, gouraud, semi, raw, clut, sub);
+    }
+
+    void HleTriCore(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut, bool sub)
+    {
         bool depth = GpuHle.NativeWideRendererActive && a.HasGteZ && b.HasGteZ && c.HasGteZ;
         var flags = PrimOf(tex, semi, raw, clut, gouraud);
         var be = GpuHle.Backend!;

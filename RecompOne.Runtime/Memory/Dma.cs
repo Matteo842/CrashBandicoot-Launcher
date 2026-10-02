@@ -79,7 +79,10 @@ public sealed class Dma
                 uint header = _mem.ReadU32(addr);
                 uint count = header >> 24;
                 for (uint i = 0; i < count; i++)
-                    _gpu.WriteGp0(_mem.ReadU32(addr + 4u + i * 4u));
+                {
+                    uint wordAddr = addr + 4u + i * 4u;
+                    _gpu.WriteGp0(_mem.ReadU32(wordAddr), wordAddr);
+                }
                 uint next = header & 0xFFFFFFu;
                 if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
                 addr = next & 0x1FFFFCu;
@@ -89,7 +92,10 @@ public sealed class Dma
         {
             uint words = WordCount(bcr);
             for (uint i = 0; i < words; i++)
-                _gpu.WriteGp0(_mem.ReadU32(madr + i * 4u));
+            {
+                uint wordAddr = madr + i * 4u;
+                _gpu.WriteGp0(_mem.ReadU32(wordAddr), wordAddr);
+            }
         }
         else
         {

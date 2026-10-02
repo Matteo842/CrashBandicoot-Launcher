@@ -31,7 +31,22 @@ internal static class GlShaders
         out vec4 oColor;
         void main() {
             vec2 t = (uOrigin + vUv * uSize) / uTexSize;
-            oColor = vec4(texture(uVram, t).rgb, 1.0);
+            // Source texels behind one output pixel. A high internal resolution on
+            // a smaller window must average them: keeping one and dropping the rest
+            // lets subpixel motion (dejitter) shimmer through fine distant detail.
+            vec2 span = vec2(abs(dFdx(t).x), abs(dFdy(t).y));
+            ivec2 n = clamp(ivec2(ceil(span * vec2(textureSize(uVram, 0)) - 0.01)), ivec2(1), ivec2(8));
+            if (n.x * n.y == 1) {
+                oColor = vec4(texture(uVram, t).rgb, 1.0);
+                return;
+            }
+            vec2 stepUv = span / vec2(n);
+            vec2 first = t - 0.5 * span + 0.5 * stepUv;
+            vec3 sum = vec3(0.0);
+            for (int y = 0; y < n.y; y++)
+                for (int x = 0; x < n.x; x++)
+                    sum += texture(uVram, first + stepUv * vec2(float(x), float(y))).rgb;
+            oColor = vec4(sum / float(n.x * n.y), 1.0);
         }
         """;
 

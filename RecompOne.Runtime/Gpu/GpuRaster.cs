@@ -48,6 +48,7 @@ public sealed partial class Gpu
             }
             v[i].R = cr; v[i].G = cg; v[i].B = cb;
 
+            uint vsrc = _fifoSrc[idx];
             uint vw = _fifo[idx++];
             int gx = CoordX(vw);
             int gy = CoordY(vw);
@@ -57,7 +58,7 @@ public sealed partial class Gpu
             v[i].HasGteZ = false;
             v[i].GteZ = 0f;
             if ((HleOn || Hle.GpuHle.DejitterActive) &&
-                GteScreenCache.TryFind(gx, gy, out float fx, out float fy, out float gz))
+                GteScreenCache.TryFindVertex(vsrc, vw, gx, gy, out float fx, out float fy, out float gz))
             {
                 if (gz > 0f)
                 {

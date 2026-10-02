@@ -40,6 +40,11 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
         }
         ImGuiEx.TextDisabled("Less polygon wobble");
 
+        bool dejitterDebug = Hle.GpuHle.DejitterDebug;
+        if (ImGui.Checkbox("Show uncorrected polygons", ref dejitterDebug))
+            Hle.GpuHle.DejitterDebug = dejitterDebug;
+        ImGuiEx.TextDisabled("Magenta = Dejitter could not fix it");
+
         ImGui.Spacing();
         FrameRateSetting.DrawCombo("dev-display");
 

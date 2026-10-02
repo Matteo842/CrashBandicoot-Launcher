@@ -31,7 +31,12 @@ public sealed partial class Gpu
     bool _hres368, _vres480, _pal, _disp24, _interlace, _displayDisabled = true;
     int _dmaDir;
 
+    /// <summary>Source of a GP0 word that was not fetched from RAM (CPU port write).</summary>
+    public const uint NoSource = uint.MaxValue;
+
     readonly List<uint> _fifo = new(16);
+    // RAM address each queued command word was fetched from (dejitter vertex match).
+    readonly uint[] _fifoSrc = new uint[16];
     int _need;
     bool _polyline;
 
@@ -116,7 +121,10 @@ public sealed partial class Gpu
         return (uint)(lo | (hi << 16));
     }
 
-    public void WriteGp0(uint word)
+    public void WriteGp0(uint word) => WriteGp0(word, NoSource);
+
+    /// <param name="source">RAM address the word was read from (DMA / DrawOTag), or <see cref="NoSource"/>.</param>
+    public void WriteGp0(uint word, uint source)
     {
         if (_loadImage) { StoreImageHalfword((ushort)word); StoreImageHalfword((ushort)(word >> 16)); return; }
         if (_polyline)
@@ -127,6 +135,7 @@ public sealed partial class Gpu
         }
 
         _fifo.Add(word);
+        if (_fifo.Count <= _fifoSrc.Length) _fifoSrc[_fifo.Count - 1] = source;
         if (_fifo.Count == 1)
         {
             _need = CommandLength(word);

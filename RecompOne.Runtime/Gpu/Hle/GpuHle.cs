@@ -63,6 +63,9 @@ public static class GpuHle
     public static bool Dedither { get; set; }
     public static bool Dejitter { get; set; }
 
+    /// <summary>Dev view: tint triangles dejitter could not place at subpixel precision.</summary>
+    public static bool DejitterDebug { get; set; }
+
     /// <summary>Force nearest filtering on the present texture (crisp pixels when upscaled).</summary>
     public static bool PresentNearest { get; set; }
 

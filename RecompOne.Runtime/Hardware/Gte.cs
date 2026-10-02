@@ -9,6 +9,11 @@ public static class Gte
     static readonly short[] SX = new short[3];
     static readonly short[] SY = new short[3];
     static readonly ushort[] SZ = new ushort[4];
+    // Subpixel XY + depth shadowing the SXY FIFO; swc2 tags the primitive word with it (dejitter).
+    static readonly float[] SXf = new float[3];
+    static readonly float[] SYf = new float[3];
+    static readonly float[] SZf = new float[3];
+    static readonly bool[] SxyPrecise = new bool[3];
     static readonly uint[] RGB = new uint[3];
     static uint RES1;
     static int MAC0, MAC1, MAC2, MAC3;
@@ -163,6 +168,13 @@ public static class Gte
         return res > 0x1FFFF ? 0x1FFFFu : (uint)res;
     }
 
+    static void PushSubpixel(bool precise, float fx, float fy, float z)
+    {
+        SXf[0] = SXf[1]; SYf[0] = SYf[1]; SZf[0] = SZf[1]; SxyPrecise[0] = SxyPrecise[1];
+        SXf[1] = SXf[2]; SYf[1] = SYf[2]; SZf[1] = SZf[2]; SxyPrecise[1] = SxyPrecise[2];
+        SXf[2] = fx; SYf[2] = fy; SZf[2] = z; SxyPrecise[2] = precise;
+    }
+
     static void Rtp(int vx, int vy, int vz, int sf, bool lm, bool last)
     {
         long m1 = ((long)TR[0] << 12) + (long)RT[0] * vx + (long)RT[1] * vy + (long)RT[2] * vz;
@@ -186,15 +198,20 @@ public static class Gte
         int nx = SatX((int)(sx >> 16));
         int ny = SatY((int)(sy >> 16));
         // Always cache when HLE is up — needed for perspective-correct UVs even if dejitter is off.
-        if (Hle.GpuHle.Active)
+        bool precise = Hle.GpuHle.Active;
+        float fx = 0f, fy = 0f, z = 0f;
+        if (precise)
         {
-            float fx = Math.Clamp((float)(sx / 65536.0), -1024f, 1023f);
-            float fy = Math.Clamp((float)(sy / 65536.0), -1024f, 1023f);
-            float z = Math.Max(sz, 1);
-            GteScreenCache.Store(nx, ny, fx, fy, z);
+            fx = Math.Clamp((float)(sx / 65536.0), -1024f, 1023f);
+            fy = Math.Clamp((float)(sy / 65536.0), -1024f, 1023f);
+            z = Math.Max(sz, 1);
+            // Code recompiled without swc2 addresses still needs the screen-XY lookup.
+            if (!GteScreenCache.AddressTagged)
+                GteScreenCache.Store(nx, ny, fx, fy, z);
         }
         SX[0] = SX[1]; SX[1] = SX[2]; SX[2] = (short)nx;
         SY[0] = SY[1]; SY[1] = SY[2]; SY[2] = (short)ny;
+        PushSubpixel(precise, fx, fy, z);
 
         if (last)
         {
@@ -386,12 +403,13 @@ public static class Gte
             case 9: IR1 = (short)val; break;
             case 10: IR2 = (short)val; break;
             case 11: IR3 = (short)val; break;
-            case 12: SX[0] = (short)val; SY[0] = (short)(val >> 16); break;
-            case 13: SX[1] = (short)val; SY[1] = (short)(val >> 16); break;
-            case 14: SX[2] = (short)val; SY[2] = (short)(val >> 16); break;
+            case 12: SX[0] = (short)val; SY[0] = (short)(val >> 16); SxyPrecise[0] = false; break;
+            case 13: SX[1] = (short)val; SY[1] = (short)(val >> 16); SxyPrecise[1] = false; break;
+            case 14: SX[2] = (short)val; SY[2] = (short)(val >> 16); SxyPrecise[2] = false; break;
             case 15:
                 SX[0] = SX[1]; SY[0] = SY[1]; SX[1] = SX[2]; SY[1] = SY[2];
                 SX[2] = (short)val; SY[2] = (short)(val >> 16);
+                PushSubpixel(false, 0f, 0f, 0f);
                 break;
             case 16: SZ[0] = (ushort)val; break;
             case 17: SZ[1] = (ushort)val; break;
@@ -501,5 +519,21 @@ public static class Gte
 
     public static void LoadWord(int reg, uint val) => Write(reg, val);
     public static uint StoreWord(int reg) => Read(reg);
+
+    /// <summary>
+    /// swc2 with its target address. A projected vertex written into a
+    /// primitive keeps its subpixel position keyed by that RAM word, so the
+    /// GPU never borrows the position of other geometry on the same pixel (#66).
+    /// </summary>
+    public static void StoreWord(Memory.IMemory m, uint address, int reg)
+    {
+        uint val = Read(reg);
+        m.WriteU32(address, val);
+        if (reg < 12 || reg > 15) return;
+        int slot = reg >= 14 ? 2 : reg - 12;
+        if (SxyPrecise[slot])
+            GteScreenCache.StoreAt(address, val, SXf[slot], SYf[slot], SZf[slot]);
+    }
+
     public static bool GetCondition() => false;
 }
