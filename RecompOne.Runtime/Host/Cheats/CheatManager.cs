@@ -28,6 +28,17 @@ public static class CheatManager
     const uint ItemPool2Addr = 0x800619AC;
     const uint MapKeyLinksAddr = 0x800619B8;
     const uint KeyBits = 1u << 10 | 1u << 20; // Jaws of Darkness key | Sunset Vista key
+    // goolstdlib ITEM_GEM1..26: item_pool1 holds 24 of them (colored: green 12, red 24,
+    // orange 20, blue 21, purple 25, yellow 29), item_pool2 the last two clear gems.
+    const uint ItemPool1Addr = 0x80061988u;
+    const uint GemBits1 =
+        1u << 1 | 1u << 2 | 1u << 3 | 1u << 4 | 1u << 5 | 1u << 7 | 1u << 8 | 1u << 9
+        | 1u << 10 | 1u << 12 | 1u << 13 | 1u << 14 | 1u << 15 | 1u << 16 | 1u << 18 | 1u << 19
+        | 1u << 20 | 1u << 21 | 1u << 23 | 1u << 24 | 1u << 25 | 1u << 26 | 1u << 27 | 1u << 29;
+    const uint GemBits2 = 1u << 8 | 1u << 18;
+    // Checkpoint copies of the pools (c1 globals.h) — restored on death.
+    const uint SavedItemPool1Addr = 0x80061A1Cu;
+    const uint SavedItemPool2Addr = 0x80061A20u;
     // GOOL counters are 24.8 fixed-point (HUD prints value >> 8): 99 lives = 0x6300.
     const uint One = 0x100u;
     const uint Count99 = 99u * One;
@@ -334,6 +345,26 @@ public static class CheatManager
         if (!TryFindActiveLevelLives(mem, out uint livesAddr)) return false;
         mem.WriteU32(livesAddr - 4, Count99);
         return true;
+    }
+
+    /// <summary>
+    /// Sets or clears every gem bit. Gem objects read the pools when they spawn
+    /// (GemsC Gem_Spawn), so reload the level to see the change.
+    /// </summary>
+    public static void SetAllGems(bool owned)
+    {
+        var mem = Runtime.Mem;
+        if (mem == null) return;
+        SetBits(mem, ItemPool1Addr, GemBits1, owned);
+        SetBits(mem, ItemPool2Addr, GemBits2, owned);
+        SetBits(mem, SavedItemPool1Addr, GemBits1, owned);
+        SetBits(mem, SavedItemPool2Addr, GemBits2, owned);
+    }
+
+    static void SetBits(IMemory mem, uint addr, uint bits, bool on)
+    {
+        uint v = mem.ReadU32(addr);
+        mem.WriteU32(addr, on ? v | bits : v & ~bits);
     }
 
     public static void OpenInstantSaveMenu()

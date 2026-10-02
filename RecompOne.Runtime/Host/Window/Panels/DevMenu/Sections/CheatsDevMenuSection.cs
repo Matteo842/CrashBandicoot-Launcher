@@ -72,6 +72,12 @@ internal sealed class CheatsDevMenuSection : IDevMenuSection
                 NoticePopup.Show("No unique active level slot — try mid-level.");
         }
 
+        if (ImGui.Button("All Gems", new Vector2(-1, 0)))
+            CheatManager.SetAllGems(true);
+        if (ImGui.Button("Remove All Gems", new Vector2(-1, 0)))
+            CheatManager.SetAllGems(false);
+        ImGuiEx.TextDisabled("All 26 gems (clear + colored). Reload the level to apply — e.g. warp to The Great Hall.");
+
         if (ImGui.Button("Instant Save Menu", new Vector2(-1, 0)))
             CheatManager.OpenInstantSaveMenu();
     }
