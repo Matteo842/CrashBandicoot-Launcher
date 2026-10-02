@@ -68,7 +68,7 @@ public static partial class FramePacing
     }
 
     static bool IsPlatformGoolType(uint type) =>
-        type is 11 or 26 or 28 or GoolTypeWalO or 46 or 58;
+        type is 11 or 26 or 28 or GoolTypeWalO or 46 or GoolTypeGems;
 
     static bool IsGatedRiverObject(IMemory m, uint type, uint cat)
     {
@@ -91,11 +91,21 @@ public static partial class FramePacing
     /// flips the bob every present (Generator Room freeze on step). Wait /
     /// Spawn stay Euler so Bound can arm the 0.8 s start. First ride is
     /// Active; after death the disc is already gated.
+    /// GemsC Gem_Active too: the bob (<c>vely</c>) and the Great Hall
+    /// ping-pong path (<c>pathprog</c>) are <c>loopseek</c>, which flips the
+    /// stored var from +max to a negative value at the turn. Pace dt/34 of
+    /// that flip left it near max, so it re-turned every present (gem stuck
+    /// at the end of its path, vibrating; bob stutter).
     /// </summary>
     static bool IsGatedTempleSolid(IMemory m, uint obj, uint type)
     {
         if (type == GoolTypeRuiO) return true;
         if (IsGatedRwaocMover(m, obj, type)) return true;
+        if (type == GoolTypeGems)
+        {
+            try { return m.ReadU32(obj + ObjStateOff) == StateGemActive; }
+            catch { return false; }
+        }
         if (type != GoolTypePoPl) return false;
         try
         {

@@ -488,6 +488,13 @@ public static partial class FramePacing
     /// <summary>NTSC-U <c>s</c> / <c>t</c> — only lids with PoPlC 70deg + 0.985 carry.</summary>
     const uint LidTempleRuins = 28u;
     const uint LidJawsOfDarkness = 29u;
+    /// <summary>
+    /// GemsC gem platforms (Great Hall, colored gem paths). Category 0x400,
+    /// in <see cref="IsPlatformGoolType"/>; <c>Gem_Active</c> is gated.
+    /// </summary>
+    const uint GoolTypeGems = 58u;
+    /// <summary>GemsC <c>Gem_Active</c> (owned gem: bob, ride path, or ping-pong path).</summary>
+    const uint StateGemActive = 2;
     /// <summary>JunOC <c>Butterfly_Fly</c> / <c>Butterfly_Pose</c>.</summary>
     const uint StateButterflyFly = 1;
     const uint StateButterflyPose = 2;
