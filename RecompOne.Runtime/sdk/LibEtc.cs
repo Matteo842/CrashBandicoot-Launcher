@@ -17,6 +17,13 @@ public static class LibEtc
     const uint VBlankCountAddr = 0x800549F0u;
     const uint TicksElapsedAddr = 0x80034520u;
     const uint TicksPerVBlank = 17u;
+    /// <summary>
+    /// GpuUpdate's 30 FPS limiter: <c>if (ticks_elapsed - c2_p-&gt;draw_stamp &lt; 25) VSync(0)</c>.
+    /// Return address of that second VSync(0) (the first returns to 0x800170FC).
+    /// </summary>
+    const uint GpuLimiterVSyncRa = 0x8001712Cu;
+    /// <summary>PsyQ VSync (0x8003E4F0) does SP -= 0x20 and saves its RA at SP+0x18.</summary>
+    const uint PsyqVSyncRaSlot = 0x18u;
 
     /// <summary>
     /// HLE for the PsyQ vblank wait at 0x8003E638 (not the public VSync entry).
@@ -25,6 +32,14 @@ public static class LibEtc
     /// </summary>
     public static void VSync(CpuContext c, IMemory m)
     {
+        // Unlocked: the limiter wait was a second present + throttle per loop,
+        // so every preset simulated half its rate ("60 FPS" = 30 Hz loop with
+        // dt≈34 flapping on the RefTicks-0.01 gates; 240 = 120 Hz).
+        if (FramePacing.IsActive(m) && IsGpuLimiterWait(c, m))
+        {
+            c.V0 = 0;
+            return;
+        }
         FramePacing.NoteSoftwareVblank();
         if (FramePacing.IsActive(m))
         {
@@ -37,6 +52,13 @@ public static class LibEtc
         while (count < target)
             count = AdvanceVBlank(c, m);
         c.V0 = 0;
+    }
+
+    static bool IsGpuLimiterWait(CpuContext c, IMemory m)
+    {
+        if ((c.SP & 0xFF000000u) != 0x80000000u) return false;
+        try { return m.ReadU32(c.SP + PsyqVSyncRaSlot) == GpuLimiterVSyncRa; }
+        catch { return false; }
     }
 
     static void UnlockedVSync(CpuContext c, IMemory m)
