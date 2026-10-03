@@ -77,6 +77,9 @@ public static class CheatManager
     const uint NewGameMapLevel = 99u;
     const uint CrashPtrAddr = 0x800566B4u;
     const uint FramesElapsedAddr = 0x80060E04u;
+    // c1 level.c cur_zone: the camera's zone entry, always resident.
+    const uint CurZoneAddr = 0x80057914u;
+    const uint ObjZoneOff = 0x28u;
     const uint ObjStateOff = 0x2Cu;
     const uint ObjTransOff = 0x80u;
     const uint ObjRotOff = 0x8Cu;
@@ -255,6 +258,13 @@ public static class CheatManager
                 _flyTs = 0;
                 return;
             }
+
+            // Zero velocity skips StopAtZone, the only code that re-homes Crash's zone:
+            // it stays on the zone the flight began in, and once the camera moves on its
+            // page is reused — ShadC projectzoneshadow then reads colors from garbage.
+            uint curZone = mem.ReadU32(CurZoneAddr);
+            if ((curZone & 0xFF000000u) == 0x80000000u)
+                mem.WriteU32(crash + ObjZoneOff, curZone);
 
             uint statusB = mem.ReadU32(crash + ObjStatusBOff);
             // Own XZ: GOOL air states barely strafe, and death cine clears DPAD.
