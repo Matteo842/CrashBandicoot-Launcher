@@ -350,6 +350,8 @@ public static partial class FramePacing
     /// <summary>gool_process.state_flags. Death_Fall / Death_Warthog set 0x4000.</summary>
     const uint ObjStateFlagsOff = 0x120u;
     const uint ObjSpeedOff = 0x124u;
+    /// <summary>gool_process.floor_impact_velocity (GOOL <c>groundvel</c>).</summary>
+    const uint ObjGroundVelOff = 0x134u;
     const uint ObjColliderOff = 0x78u;
     const uint ObjParentOff = 0x64u;
     const uint ObjTrotOff = 0xB0u;
@@ -483,6 +485,8 @@ public static partial class FramePacing
     const uint StateRwaPusherSpawn = 16u, StateRwaPusherLast = 18u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;
+    /// <summary>PoPlC <c>Power_Platform_Drop</c> (idle; trans sees collider → Touched).</summary>
+    const uint StatePoPlDrop = 1;
     /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>
     const uint StatePoPlSpawn = 5;
     const uint StatePoPlWait = 6;
@@ -642,6 +646,11 @@ public static partial class FramePacing
     static int _yTrans, _vyTrans;
     static int _airVy, _airDy;
     static double _airFracY, _airFracHang, _airFracGravity;
+    /// <summary>GROUNDLAND was clear before this present's physics (a real touchdown).</summary>
+    static bool _airFromAir;
+    /// <summary>Crash's unscaled fall speed on the last touchdown, and its wall tick.</summary>
+    static int _crashLandVy;
+    static uint _crashLandTicks;
     static bool _haveTransY;
     static bool _rideWasStanding;
     static double _ridePhase;

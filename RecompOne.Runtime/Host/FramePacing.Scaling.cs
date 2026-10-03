@@ -155,6 +155,7 @@ public static partial class FramePacing
     {
         _yTrans = (int)m.ReadU32(_obj + ObjTransOff + 4);
         _vyTrans = (int)m.ReadU32(_obj + ObjVelYOff);
+        _airFromAir = (m.ReadU32(_obj + ObjStatusAOff) & FlagGroundLand) == 0;
         _haveTransY = true;
         _airVy = ScaleJumpVy(_ovy, _vyTrans, m, _obj);
         _airDy = KeepAirStep(_airVy * _exactTicks / 1024.0, ref _airFracY);
@@ -343,6 +344,7 @@ public static partial class FramePacing
         else if (landed)
         {
             ClearAirFractions();
+            NoteCrashLanding(vyBeforeGravity);
             m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
             m.WriteU32(o + ObjVelYOff, 0);
             return;
@@ -355,6 +357,19 @@ public static partial class FramePacing
             statusA = m.ReadU32(o + ObjStatusAOff);
             m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
         }
+    }
+
+    /// <summary>
+    /// Physics recorded <c>groundvel</c> from the dt-encoded Y step
+    /// (vy×dt/34), not the fall speed. Keep the real one for the gated
+    /// readers (see <see cref="PrimeDropPlatTouch"/>). Only a touchdown
+    /// from the air: the next present can still be AIR and re-land at ~0.
+    /// </summary>
+    static void NoteCrashLanding(int vy)
+    {
+        if (!_airFromAir || vy >= 0) return;
+        _crashLandVy = vy;
+        _crashLandTicks = _guestTicks;
     }
 
     /// <summary>

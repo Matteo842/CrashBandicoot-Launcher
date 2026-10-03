@@ -621,7 +621,40 @@ public static partial class FramePacing
         if (!IsActive(m)) return true;
         MaskSpinForYoungCrate(m, c.A0);
         TryFillTemplePlatCollider(m, c.A0);
+        PrimeDropPlatTouch(m, c.A0);
         return true;
+    }
+
+    /// <summary>
+    /// PoPlC drop plats (Jaws, Cortex Power, …): Touched CODE does
+    /// <c>vely = player->groundvel &gt;&gt; 1</c>, the spring dip. Original reads
+    /// it on the landing frame. Unlocked, groundvel is the dt-encoded step
+    /// and the gated plat interprets up to 34 wall ticks later, after
+    /// grounded presents rewrote it — dip ~0, plat sat still then fell.
+    /// Hand the landing speed to the Drop trans that sees Crash, once —
+    /// only in the plat's own Update, not an event interpret inside Crash's.
+    /// </summary>
+    static void PrimeDropPlatTouch(IMemory m, uint obj)
+    {
+        if (_crashLandVy >= 0 || _inCrashUpdate || !_haveObj || _obj != obj) return;
+        if (unchecked(_guestTicks - _crashLandTicks) > 2 * RefTicks)
+        {
+            _crashLandVy = 0;
+            return;
+        }
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypePoPl) return;
+            if (m.ReadU32(obj + ObjStateOff) != StatePoPlDrop) return;
+            if (!TryReadCrash(m, out uint crash) || m.ReadU32(obj + ObjColliderOff) != crash) return;
+            m.WriteU32(crash + ObjGroundVelOff, (uint)_crashLandVy);
+            _crashLandVy = 0;
+        }
+        catch
+        {
+            // object freed
+        }
     }
 
     static void TryFillTemplePlatCollider(IMemory m, uint obj)

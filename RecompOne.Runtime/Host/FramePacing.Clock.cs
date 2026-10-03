@@ -175,6 +175,7 @@ public static partial class FramePacing
         _gatedSolid = false;
         _objScaled = false;
         _crashAir = false;
+        _crashLandVy = 0;
         _crashGateState = uint.MaxValue;
         _crashSpawnUsed = false;
         _crashLandAcc = 0;
