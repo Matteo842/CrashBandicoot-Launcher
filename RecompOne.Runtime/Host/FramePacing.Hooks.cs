@@ -404,6 +404,7 @@ public static partial class FramePacing
         _wallEscapeLog = 0;
         _wasPaused = false;
         ClearObjectPacing();
+        DropResetCarry();
         try
         {
             m.WriteU32(PausedAddr, 0);

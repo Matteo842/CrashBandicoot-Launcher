@@ -71,6 +71,7 @@ public static partial class FramePacing
                 ClearDeathCam();
         }
         catch { /* overlay swap */ }
+        ApplyResetCarry(m);
         AdvanceWater(m);
         return true;
     }

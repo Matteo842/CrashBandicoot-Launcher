@@ -493,6 +493,59 @@ public static partial class FramePacing
         _rideAppZ = 0;
     }
 
+    /// <summary>Ride carry Reset dropped before it was applied (FPS switch).</summary>
+    static int _resetCarryX, _resetCarryY, _resetCarryZ;
+    static bool _resetCarryPending;
+
+    /// <summary>
+    /// Reset (FPS hotkey / combo) dropped the ride mid-step. The plat already
+    /// sits at the end of its 30 Hz step and the next loop is native, so the
+    /// part of that carry not yet spread was lost: Crash slid back a little on
+    /// every switch until he fell off the A→B discs. Keep it for the next loop.
+    /// Host state only — Android resets from the UI thread.
+    /// </summary>
+    static void StashRideForReset()
+    {
+        if (_rideObj == 0) return;
+        _resetCarryX += (int)Math.Round(_rideRemX) - _rideAppX;
+        _resetCarryY += (int)Math.Round(_rideRemY) - _rideAppY;
+        _resetCarryZ += (int)Math.Round(_rideRemZ) - _rideAppZ;
+        _resetCarryPending = true;
+    }
+
+    /// <summary>
+    /// Game thread, before the object tree: the plat's next step (native or
+    /// the first unlocked interpret) starts from where its last CarryCollider
+    /// put Crash. Not in a jump, and not while the pause menu holds the plat.
+    /// </summary>
+    static void ApplyResetCarry(IMemory m)
+    {
+        if (!_resetCarryPending || GamePaused(m)) return;
+        int x = _resetCarryX, y = _resetCarryY, z = _resetCarryZ;
+        DropResetCarry();
+        if (!TryReadCrash(m, out uint crash) || !CrashCanRide(m, crash) || CrashAirborne(m, crash))
+            return;
+        try
+        {
+            m.WriteU32(crash + ObjTransOff, (uint)((int)m.ReadU32(crash + ObjTransOff) + x));
+            m.WriteU32(crash + ObjTransOff + 4, (uint)((int)m.ReadU32(crash + ObjTransOff + 4) + y));
+            m.WriteU32(crash + ObjTransOff + 8, (uint)((int)m.ReadU32(crash + ObjTransOff + 8) + z));
+            PaceLog($"reset carry {x},{y},{z}");
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static void DropResetCarry()
+    {
+        _resetCarryPending = false;
+        _resetCarryX = 0;
+        _resetCarryY = 0;
+        _resetCarryZ = 0;
+    }
+
     static void SnapshotGatedCarry(IMemory m, uint obj)
     {
         _rideDidSnap = false;

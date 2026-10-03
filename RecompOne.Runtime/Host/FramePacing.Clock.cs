@@ -154,6 +154,7 @@ public static partial class FramePacing
 
     public static void Reset()
     {
+        StashRideForReset();
         _guestTicks = 0;
         _frameTicks = 34;
         _tickFrac = 0;
