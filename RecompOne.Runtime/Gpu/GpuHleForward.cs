@@ -160,22 +160,31 @@ public sealed partial class Gpu
         var backend = GpuHle.Backend!;
         backend.SetDrawEnv(CurEnv());
         var flags = PrimOf(true, true, false, clut);
+        // The side bands' world is drawn before the ordering table, so a fog
+        // strip without depth also covered side scenery that the centre draws
+        // over it; its edges showed as a box on near walls (#78). Test it at
+        // the depth of its ordering-table slot instead. It must not inherit an
+        // unrelated mesh depth from the XY GTE cache.
+        float depth = Host.FramePacing.NativeWideOtDepth(GpuHle.CurrentOtSlot);
+        var sides = depth > 0f ? WidePrimitiveMode.DepthTest : WidePrimitiveMode.OverlaySides;
+        HleVertex Side(HleVertex v) => depth > 0f ? v with { Z = depth, HasGteZ = true } : v;
         void Draw(in Vert p, in Vert q, in Vert r, WidePrimitiveMode mode)
         {
             bool sub = p.Subpixel && q.Subpixel && r.Subpixel;
             flags.WideMode = mode;
-            backend.DrawTri(HV(p, sub, false), HV(q, sub, false), HV(r, sub, false), flags);
+            if (mode == WidePrimitiveMode.CoreOnly)
+                backend.DrawTri(HV(p, sub, false), HV(q, sub, false), HV(r, sub, false), flags);
+            else
+                backend.DrawTri(Side(HV(p, sub, false)), Side(HV(q, sub, false)), Side(HV(r, sub, false)), flags);
         }
         Draw(a, b, c, WidePrimitiveMode.CoreOnly);
         Draw(b, c, d, WidePrimitiveMode.CoreOnly);
-        // Fog is composited at its original position in the ordering table.
-        // It must not inherit an unrelated mesh depth from the XY GTE cache.
-        Draw(a, b, c, WidePrimitiveMode.OverlaySides);
-        Draw(b, c, d, WidePrimitiveMode.OverlaySides);
+        Draw(a, b, c, sides);
+        Draw(b, c, d, sides);
 
         bool allSub = a.Subpixel && b.Subpixel && c.Subpixel && d.Subpixel;
-        var ha = HV(a, allSub, false); var hb = HV(b, allSub, false);
-        var hc = HV(c, allSub, false); var hd = HV(d, allSub, false);
+        var ha = Side(HV(a, allSub, false)); var hb = Side(HV(b, allSub, false));
+        var hc = Side(HV(c, allSub, false)); var hd = Side(HV(d, allSub, false));
         static HleVertex Continue(HleVertex edge, HleVertex opposite) => opposite with
         {
             X = edge.X * 2 - opposite.X,

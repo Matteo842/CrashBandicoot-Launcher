@@ -16,6 +16,9 @@ public static class LibGpu
         if (gpu == null) return;
 
         uint addr = c.A0 & 0x1FFFFCu;
+        // Crash passes its 0x800-word ordering table; each slot word links the
+        // primitives filed under it before the next slot.
+        uint otBase = addr;
         try
         {
             Host.FramePacing.CloseNativeWideHudRange(m);
@@ -24,6 +27,8 @@ public static class LibGpu
             {
                 uint header = m.ReadU32(addr);
                 uint count = header >> 24;
+                if (addr - otBase < 0x2000u)
+                    GpuHle.CurrentOtSlot = (int)((addr - otBase) >> 2);
                 if (Host.FramePacing.IsNativeWideWorldPrimitive(addr))
                 {
                     GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.World;
@@ -50,6 +55,7 @@ public static class LibGpu
             GpuHle.FinishWideWorldWinding();
             GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.Default;
             GpuHle.CurrentHudRange = -1;
+            GpuHle.CurrentOtSlot = -1;
             Host.FramePacing.FinishNativeWideDraw();
         }
 

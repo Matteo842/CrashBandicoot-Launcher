@@ -45,6 +45,7 @@ public static partial class FramePacing
     static readonly int[] _nativeWideLighting = new int[8];
     static int _nativeWideFogFar, _nativeWideFogShift;
     static uint? _nativeWideFogBackground;
+    static int _nativeWideOtFar;
     sealed class NativeWideWorld
     {
         public int PolyCount;
@@ -197,6 +198,14 @@ public static partial class FramePacing
         return NativeWideGuestPointer(tail);
     }
 
+    /// <summary>
+    /// Camera depth of the world triangles filed under ordering-table slot
+    /// <paramref name="slot"/>. RGteTransformWorlds files a triangle under
+    /// 0x800 - proj/2 - (sz0 + sz1 + sz2) / 32. Returns 0 when unknown.
+    /// </summary>
+    public static float NativeWideOtDepth(int slot) =>
+        slot < 0 || _nativeWideOtFar <= 0 ? 0f : Math.Max(1f, (_nativeWideOtFar - slot) * 32f / 3f);
+
     public static bool IsNativeWideWorldPrimitive(uint physicalAddress)
     {
         foreach (var range in _nativeWideWorldRanges)
@@ -322,12 +331,22 @@ public static partial class FramePacing
             slot.CameraVertices = null;
         }
         int drawWorldCount = AddNativeWideNeighborWorlds(m, zone, worldCount, ref totalPolygons);
+        if (NativeWideGemTempleHidden(m, zoneEntry))
+            for (int wi = 0; wi < drawWorldCount; wi++)
+            {
+                var world = worlds[wi];
+                if (!NativeWideGemTemple(m, world)) continue;
+                totalPolygons -= world.PolyCount;
+                world.PolyCount = 0;
+                world.VertexCount = 0;
+            }
 
         var matrix = _nativeWideMatrix;
         for (int i = 0; i < matrix.Length; i++)
             matrix[i] = (short)m.ReadU16(NativeWideMatrixAddr + (uint)i * 2u);
         int projection = (int)m.ReadU32(NativeWideProjectionAddr);
         if (projection is <= 0 or > 4096) return false;
+        _nativeWideOtFar = 0x800 - projection / 2;
         int screenX = (int)Gte.ReadControl(24) >> 16;
         int screenY = (int)Gte.ReadControl(25) >> 16;
 
@@ -584,6 +603,18 @@ public static partial class FramePacing
         }
         return count;
     }
+
+    // Road to Nowhere's gem path (zones s0_kZ-s3_kZ) branches right off the
+    // main bridge. The bridge zones around the junction list its temple too,
+    // but the retail camera never faces it from there; the side bands showed
+    // it floating in the sky (#78). Draw it only while the camera is on the gem path.
+    static bool NativeWideGemTempleHidden(IMemory m, uint zoneEntry) =>
+        m.ReadU32(Catalog.LevelIdAddr) == 20
+        && m.ReadU32(zoneEntry + 4u) is not (0x3807CA7Bu or 0x380FCA7Bu or 0x3817CA7Bu or 0x381FCA7Bu);
+
+    static bool NativeWideGemTemple(IMemory m, NativeWideWorld world) =>
+        world.PolyCount == 1209 && world.VertexCount == 1122
+        && (int)FastU32(m, world.Header) == 17800 && (int)FastU32(m, world.Header + 8u) == -73200;
 
     // NSLookup would page a missing entry in from disc. Read the reference
     // (EID or page table entry) instead and skip anything not resident.

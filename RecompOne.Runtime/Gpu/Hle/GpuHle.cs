@@ -16,6 +16,12 @@ public static class GpuHle
     /// </summary>
     public static int CurrentHudRange { get; set; } = -1;
 
+    /// <summary>
+    /// Ordering-table slot of the primitive DrawOTag is decoding (slot 0 is
+    /// drawn first, farthest), or -1 outside the game's ordering table.
+    /// </summary>
+    public static int CurrentOtSlot { get; set; } = -1;
+
     static int _wideWorldPositive;
     static int _wideWorldNegative;
 
