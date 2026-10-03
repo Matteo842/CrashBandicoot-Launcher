@@ -56,15 +56,20 @@ Install the `.apk` from [Releases](https://github.com/Matteo842/CrashBandicoot-L
    chmod +x CrashBandicoot-Linux
    ```
 
-2. Put your `.chd` (or `.cue` + `.bin`) in the same folder and double-click `CrashBandicoot-Linux`, or start it from a terminal:
+2. Double-click `CrashBandicoot-Linux` (or run `./CrashBandicoot-Linux` from a terminal). The launcher opens.
+3. Click **Select disc** to choose your `.chd` or `.cue`, then **START GAME**. A disc in the same folder as the program is picked up on its own.
 
-   ```bash
-   ./CrashBandicoot-Linux --run /path/to/your/game.cue
-   ```
+It's the same launcher as on Windows: Settings, Controls, Mods and Cheat, with mouse, keyboard or gamepad. The first start builds the game from your disc, which takes a minute or two. While you play the launcher steps aside, and it comes back when you close the game. In **About** (the **i** button) you can add it to your applications menu, which also makes it show up in Steam's *Add a Non-Steam Game* list.
 
-There's no graphical launcher on Linux yet. Started without arguments (double-click, Steam shortcut) it uses the last disc you played, else the only `.chd`/`.cue` next to it, else it asks you to pick one. The first launch builds the game, which takes a minute or two before the window opens. Progress and errors also show up as desktop notifications.
+To skip the launcher (for example in a Steam shortcut), start the game directly:
 
-You need a GPU with **OpenGL 4.3+** (Mesa, NVIDIA or AMD). Audio (OpenAL Soft) is bundled, so there's nothing else to install. If it doesn't start, attach `logs/last-run.txt` (next to the program) to your [bug report](https://github.com/Matteo842/CrashBandicoot-Launcher/issues).
+```bash
+./CrashBandicoot-Linux --run /path/to/your/game.chd
+```
+
+Without the path, `--run` uses the last disc you played.
+
+You need a GPU with **OpenGL 4.3+** (Mesa, NVIDIA or AMD). Audio (OpenAL Soft) is bundled, so there's nothing else to install. The launcher window uses X11, which Wayland desktops provide through XWayland. If it doesn't start, attach `logs/last-run.txt` (next to the program) to your [bug report](https://github.com/Matteo842/CrashBandicoot-Launcher/issues).
 
 <details>
 <summary><b>Linux troubleshooting: instant <code>Segmentation fault</code> in a VM</b></summary>
@@ -158,10 +163,11 @@ dotnet build CrashBandicoot.Launcher -c Release
 dotnet run --project CrashBandicoot.Launcher -c Release -f net10.0-windows
 ```
 
-Linux / CLI:
+Linux (no arguments opens the launcher, `--run` starts the game directly):
 
 ```bash
 dotnet build CrashBandicoot.Launcher -c Release -f net10.0
+dotnet run --project CrashBandicoot.Launcher -c Release -f net10.0
 dotnet run --project CrashBandicoot.Launcher -c Release -f net10.0 -- --run /path/to/game.cue
 ```
 
@@ -196,7 +202,7 @@ Before uploading a release, make sure it contains only tools and UI: **no** `.bi
 
 | Path | Role |
 |------|------|
-| `CrashBandicoot.Launcher/` | WinForms launcher (Windows), CLI, and the local recompile pipeline |
+| `CrashBandicoot.Launcher/` | WinForms launcher (Windows), Avalonia launcher (Linux, `Linux/`), CLI, and the local recompile pipeline |
 | `AndroidLauncher/`, `AndroidRuntimeHost/` | Android app |
 | `RecompOne.Runtime/` | PS1 HLE runtime (from RecompOne), plus frame pacing, widescreen and cheats |
 | `RecompOne.Recompiler/` | Recompiler library (from RecompOne) |

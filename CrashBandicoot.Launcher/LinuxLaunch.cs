@@ -10,10 +10,10 @@ using RecompOne.Runtime.Config;
 namespace CrashBandicoot.Launcher;
 
 /// <summary>
-/// Linux has no graphical launcher. When the binary is started without a
-/// terminal (double-click in a file manager, Steam shortcut) these helpers pick
-/// a disc, report progress and errors as desktop notifications, and keep the
-/// console output in logs/last-run.txt so users can attach it to bug reports.
+/// Linux helpers outside the launcher window: the console output is kept in
+/// logs/last-run.txt so users can attach it to bug reports, and when the window
+/// cannot open (no X11 display) these pick a disc and report progress and
+/// errors as desktop notifications.
 /// </summary>
 internal static class LinuxLaunch
 {
@@ -25,31 +25,55 @@ internal static class LinuxLaunch
 
     public static string LogPath => Path.Combine(AppPaths.LogsDir, LogFileName);
 
+    static LogSink? _sink;
+
     /// <summary>Mirror Console.Out/Error into logs/last-run.txt (overwritten each run).</summary>
     public static void StartLog(string[] args)
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.LogsDir);
-            var file = new StreamWriter(LogPath, append: false, new UTF8Encoding(false)) { AutoFlush = true };
-            var version = Assembly.GetEntryAssembly()?
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
-            file.WriteLine($"{AppName} {version}  {DateTime.Now:O}");
-            file.WriteLine($"args: {string.Join(' ', args)}");
-            file.WriteLine($"os: {RuntimeInformation.OSDescription}");
-            file.WriteLine($"session: {Env("XDG_SESSION_TYPE")}  desktop: {Env("XDG_CURRENT_DESKTOP")}  " +
-                           $"WAYLAND_DISPLAY={Env("WAYLAND_DISPLAY")}  DISPLAY={Env("DISPLAY")}");
-            file.WriteLine($"root: {AppPaths.Root}");
-            file.WriteLine("----");
-
-            var sink = new LogSink(file, MaxLogLines);
+            var sink = new LogSink(OpenLog($"args: {string.Join(' ', args)}"), MaxLogLines);
             Console.SetOut(new Tee(Console.Out, sink));
             Console.SetError(new Tee(Console.Error, sink));
+            _sink = sink;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[CrashBandicoot] could not write {LogFileName}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Start logs/last-run.txt over (the launcher calls this for each game it starts,
+    /// so the file always holds the last game session in full).
+    /// </summary>
+    public static void RestartLog(string reason)
+    {
+        if (_sink == null) return;
+        try
+        {
+            _sink.Replace(OpenLog(reason));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[CrashBandicoot] could not restart {LogFileName}: {ex.Message}");
+        }
+    }
+
+    static StreamWriter OpenLog(string firstLine)
+    {
+        Directory.CreateDirectory(AppPaths.LogsDir);
+        var file = new StreamWriter(LogPath, append: false, new UTF8Encoding(false)) { AutoFlush = true };
+        var version = Assembly.GetEntryAssembly()?
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
+        file.WriteLine($"{AppName} {version}  {DateTime.Now:O}");
+        file.WriteLine(firstLine);
+        file.WriteLine($"os: {RuntimeInformation.OSDescription}");
+        file.WriteLine($"session: {Env("XDG_SESSION_TYPE")}  desktop: {Env("XDG_CURRENT_DESKTOP")}  " +
+                       $"WAYLAND_DISPLAY={Env("WAYLAND_DISPLAY")}  DISPLAY={Env("DISPLAY")}");
+        file.WriteLine($"root: {AppPaths.Root}");
+        file.WriteLine("----");
+        return file;
     }
 
     static string Env(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : "-";
@@ -134,6 +158,23 @@ internal static class LinuxLaunch
         readonly object _gate = new();
         StreamWriter? _file = file;
         int _lines;
+
+        public void Replace(StreamWriter file)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    _file?.Dispose();
+                }
+                catch
+                {
+                    // ignore
+                }
+                _file = file;
+                _lines = 0;
+            }
+        }
 
         public void Write(char c)
         {

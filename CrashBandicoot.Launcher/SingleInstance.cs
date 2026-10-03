@@ -77,6 +77,9 @@ internal sealed class SingleInstance : IDisposable
         {
             // Fall through to stderr (headless / early boot).
         }
+#else
+        // Double-clicked again while the launcher or the game is open: say so on the desktop.
+        LinuxLaunch.Notify(message);
 #endif
 
         Console.Error.WriteLine(message);

@@ -28,6 +28,13 @@ internal static class Program
             return 0;
         }
 
+#if !WINDOWS
+        // Game started by the Linux launcher window: the launcher holds the instance
+        // lock and copies our console output into logs/last-run.txt.
+        if (Linux.GameSession.IsChildRun(args, out var childCue))
+            return RunGame(childCue, desktop: false);
+#endif
+
         // Exclusive file lock — works the same on Windows and Linux (no named Mutex).
         if (!SingleInstance.TryAcquire(out var singleInstance))
         {
@@ -105,11 +112,14 @@ internal static class Program
             Application.Run(new LauncherHost());
             return 0;
 #else
-            // No graphical launcher on non-Windows yet. Without arguments the binary
-            // was most likely double-clicked or started from a Steam shortcut, where
-            // printing help and exiting looks like "it does not launch".
+            // Without arguments the binary was double-clicked or started from a menu /
+            // Steam shortcut: open the launcher window. With no X11 display to show it
+            // on, start the game directly (saved disc, else the one next to the program).
             if (args.Length == 0)
             {
+                if (Linux.LinuxGui.TryRun(args, out var launcherExit))
+                    return launcherExit;
+
                 var disc = LinuxLaunch.FindDisc();
                 if (disc != null)
                     return RunGame(disc, desktop: true);
@@ -176,7 +186,7 @@ internal static class Program
 #if WINDOWS
         Console.WriteLine("  (no args)              open the launcher");
 #else
-        Console.WriteLine("  (no args)              play: saved disc, else the only .chd/.cue next to the program, else pick one");
+        Console.WriteLine("  (no args)              open the launcher (no X11 display: play the saved disc directly)");
 #endif
         Console.WriteLine("  --prepare <file.cue|file.chd>   prepare game folder without UI");
         Console.WriteLine("  --run <file.cue|file.chd>       prepare (if needed) and play (no UI)");
