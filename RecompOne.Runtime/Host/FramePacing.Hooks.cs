@@ -338,6 +338,8 @@ public static partial class FramePacing
         if (_crashObj)
             SyncRiddenBound(m);
         WriteCrashOrObjectTicks(m);
+        if (_crashObj && _crashAir)
+            DropStalePathPlatCollider(m, _obj);
         // Keep the full XZ wall query, but give Y collision the same dt-scaled
         // hang velocity and integer displacement that FinishPacedScale commits.
         if (_crashObj && (_crashAir || HogNeedsJumpY(m)))
@@ -680,6 +682,41 @@ public static partial class FramePacing
         catch
         {
             // object freed
+        }
+    }
+
+    /// <summary>
+    /// Plat <c>collider</c> is written by Crash's physics (GoolCollide on the
+    /// landing) and cleared only by the plat's own physics. Original: the plat
+    /// trans reads the touch of the last frame. Gated, Crash runs physics every
+    /// present and the plat once per 34 wall ticks, so the touch from before a
+    /// jump was still set at the next interpret. Wait/Active/Auto then
+    /// CarryCollider'd a rising Crash (<c>player->y - y</c> has no upper bound):
+    /// GROUNDLAND, Willy_Land in mid-air, X again — chained jumps over the Jaws
+    /// up/down plats (#71). Bound-before-trans retests the AABB and hid it; Bound
+    /// in physics did not. Which one runs is the gate vs frames_elapsed phase,
+    /// re-rolled by every FPS switch. Drop the old touch before each airborne
+    /// Crash physics — a real one is written again by that same physics.
+    /// Drop states keep it (#70 landing touch).
+    /// </summary>
+    static void DropStalePathPlatCollider(IMemory m, uint crash)
+    {
+        foreach (uint obj in _gateFrame.Keys)
+        {
+            if ((obj & 0xFF000000u) != 0x80000000u) continue;
+            try
+            {
+                if (m.ReadU32(obj + ObjColliderOff) != crash) continue;
+                if (m.ReadU32(obj) is 0 or 2) continue;
+                if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypePoPl) continue;
+                uint state = m.ReadU32(obj + ObjStateOff);
+                if (state < StatePoPlWait || state > StatePoPlAuto) continue;
+                m.WriteU32(obj + ObjColliderOff, 0);
+            }
+            catch
+            {
+                // object freed
+            }
         }
     }
 
