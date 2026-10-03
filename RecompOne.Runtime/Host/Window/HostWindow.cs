@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ImGuiNET;
+using SilkGlfw = Silk.NET.GLFW;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -112,6 +113,8 @@ internal static class HostWindow
                 API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 3)),
             };
             _window = Silk.NET.Windowing.Window.Create(options);
+            InstallGlfwErrorLog();
+            ProbeGlContext();
             Console.WriteLine("[Host] window object created, initializing GLFW/GL…");
             Console.Out.Flush();
             _window.Load += OnLoad;
@@ -138,8 +141,69 @@ internal static class HostWindow
             Console.Error.WriteLine(
                 "[Host] Need OpenGL 4.3+. In a VM try: LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot --run <cue>");
             Console.Error.WriteLine("[Host] Or enable 3D acceleration / use a host with a real GPU.");
+            // Off Windows there is no launcher window behind the game: a headless
+            // session is an invisible process that never ends. Fail the launch instead.
+            if (!OperatingSystem.IsWindows())
+                throw new InvalidOperationException(
+                    $"Could not open the game window: {e.Message}. An OpenGL 4.3 GPU driver is required.", e);
             _headless = true;
         }
+    }
+
+    // Silk.NET throws GLFW errors only on Windows; elsewhere it queues them in a
+    // list nobody reads, so a failed GL context on Linux gave no reason at all.
+    static SilkGlfw.GlfwCallbacks.ErrorCallback? _glfwErrorLog;
+    static string? _lastGlfwError;
+    static int _glfwErrorCount;
+
+    static void InstallGlfwErrorLog()
+    {
+        if (OperatingSystem.IsWindows() || !SilkGlfw.GlfwProvider.GLFW.IsValueCreated) return;
+        _glfwErrorLog ??= (code, description) =>
+        {
+            try
+            {
+                // Expected noise once the window exists: NO_WINDOW_CONTEXT and
+                // PLATFORM_UNAVAILABLE come from Silk probing native handles of other
+                // platforms, FEATURE_UNAVAILABLE from window position/icon on Wayland.
+                if ((int)code is 0x1000A or 0x1000C or 0x1000E) return;
+                var text = $"{code}: {description}";
+                if (text == _lastGlfwError) return;
+                _lastGlfwError = text;
+                if (++_glfwErrorCount <= 20)
+                    Console.Error.WriteLine("[GLFW] " + text);
+            }
+            catch
+            {
+                // never throw back into native GLFW
+            }
+        };
+        SilkGlfw.GlfwProvider.GLFW.Value.SetErrorCallback(_glfwErrorLog);
+    }
+
+    /// <summary>
+    /// Off Windows, Silk.NET keeps going when GLFW cannot create the window and then
+    /// segfaults inside GLFW on the null handle. Try the same context on a hidden
+    /// 1x1 window first so that case ends with a readable error instead.
+    /// </summary>
+    static unsafe void ProbeGlContext()
+    {
+        if (OperatingSystem.IsWindows() || !SilkGlfw.GlfwProvider.GLFW.IsValueCreated) return;
+        var glfw = SilkGlfw.GlfwProvider.GLFW.Value;
+        glfw.DefaultWindowHints();
+        glfw.WindowHint(SilkGlfw.WindowHintBool.Visible, false);
+        glfw.WindowHint(SilkGlfw.WindowHintClientApi.ClientApi, SilkGlfw.ClientApi.OpenGL);
+        glfw.WindowHint(SilkGlfw.WindowHintInt.ContextVersionMajor, 4);
+        glfw.WindowHint(SilkGlfw.WindowHintInt.ContextVersionMinor, 3);
+        glfw.WindowHint(SilkGlfw.WindowHintOpenGlProfile.OpenGlProfile, SilkGlfw.OpenGlProfile.Core);
+        glfw.WindowHint(SilkGlfw.WindowHintInt.DepthBits, 24);
+        glfw.WindowHint(SilkGlfw.WindowHintInt.StencilBits, 8);
+        var probe = glfw.CreateWindow(1, 1, "GL probe", null, null);
+        glfw.DefaultWindowHints();
+        if (probe == null)
+            throw new InvalidOperationException(
+                "OpenGL 4.3 Core context could not be created" + (_lastGlfwError != null ? $" ({_lastGlfwError})" : ""));
+        glfw.DestroyWindow(probe);
     }
 
     static void ResetSessionState()

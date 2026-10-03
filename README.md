@@ -50,14 +50,21 @@ Install the `.apk` from [Releases](https://github.com/Matteo842/CrashBandicoot-L
 
 ### Linux
 
-There's no graphical launcher on Linux yet, so use the command line:
+1. Download `CrashBandicoot-Linux` from [**Releases**](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest) and make it executable (browsers drop that permission):
 
-```bash
-./CrashBandicoot --prepare /path/to/your/game.cue
-./CrashBandicoot --run /path/to/your/game.cue
-```
+   ```bash
+   chmod +x CrashBandicoot-Linux
+   ```
 
-The game opens in its own window. You need a GPU with **OpenGL 4.3+** (Mesa, NVIDIA or AMD). Audio (OpenAL Soft) is bundled, so there's nothing else to install.
+2. Put your `.chd` (or `.cue` + `.bin`) in the same folder and double-click `CrashBandicoot-Linux`, or start it from a terminal:
+
+   ```bash
+   ./CrashBandicoot-Linux --run /path/to/your/game.cue
+   ```
+
+There's no graphical launcher on Linux yet. Started without arguments (double-click, Steam shortcut) it uses the last disc you played, else the only `.chd`/`.cue` next to it, else it asks you to pick one. The first launch builds the game, which takes a minute or two before the window opens. Progress and errors also show up as desktop notifications.
+
+You need a GPU with **OpenGL 4.3+** (Mesa, NVIDIA or AMD). Audio (OpenAL Soft) is bundled, so there's nothing else to install. If it doesn't start, attach `logs/last-run.txt` (next to the program) to your [bug report](https://github.com/Matteo842/CrashBandicoot-Launcher/issues).
 
 <details>
 <summary><b>Linux troubleshooting: instant <code>Segmentation fault</code> in a VM</b></summary>
@@ -66,7 +73,7 @@ If it crashes right after `launching … game.recomp.dll`, the VM probably can't
 
 ```bash
 sudo apt install mesa-utils
-LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot --run /path/to/game.cue
+LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot-Linux --run /path/to/game.cue
 ```
 
 </details>

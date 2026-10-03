@@ -37,6 +37,10 @@ internal static class Program
 
         using (singleInstance)
         {
+#if !WINDOWS
+            LinuxLaunch.StartLog(args);
+#endif
+
             if (args.Length >= 2 && string.Equals(args[0], "--prepare", StringComparison.OrdinalIgnoreCase))
             {
                 var cue = Path.GetFullPath(args[1]);
@@ -57,24 +61,7 @@ internal static class Program
                     return 1;
                 }
 
-                try
-                {
-                    ConfigManager.Load();
-                    ConfigManager.Game.CdPath = cue;
-                    ConfigManager.SaveGame();
-                    var dll = RecompPipeline.EnsureReady(cue);
-                    Console.WriteLine("[CrashBandicoot] launching " + dll);
-                    GameLoader.Run(dll, cue);
-                    return 0;
-                }
-                catch (Exception ex)
-                {
-                    RecompOne.Runtime.Diagnostics.SessionLog.Exception("--run", ex.GetBaseException());
-                    RecompOne.Runtime.Diagnostics.SessionLog.Stop();
-                    Console.Error.WriteLine("[CrashBandicoot] FAIL: " + ex.GetBaseException().Message);
-                    Console.Error.WriteLine(ex);
-                    return 1;
-                }
+                return RunGame(cue, desktop: false);
             }
 
             if (args.Length >= 1 && string.Equals(args[0], "--smoke", StringComparison.OrdinalIgnoreCase))
@@ -118,10 +105,68 @@ internal static class Program
             Application.Run(new LauncherHost());
             return 0;
 #else
-            // No graphical launcher on non-Windows yet — CLI only.
+            // No graphical launcher on non-Windows yet. Without arguments the binary
+            // was most likely double-clicked or started from a Steam shortcut, where
+            // printing help and exiting looks like "it does not launch".
+            if (args.Length == 0)
+            {
+                var disc = LinuxLaunch.FindDisc();
+                if (disc != null)
+                    return RunGame(disc, desktop: true);
+
+                const string noDisc =
+                    "No disc selected. Put your Crash Bandicoot .chd (or .cue + .bin) next to the program, " +
+                    "or run it from a terminal: --run <file.cue|file.chd>";
+                Console.Error.WriteLine("[CrashBandicoot] " + noDisc);
+                LinuxLaunch.Notify(noDisc, error: true);
+                PrintHelp();
+                return 1;
+            }
+
             PrintHelp();
-            return args.Length == 0 ? 0 : 1;
+            return 1;
 #endif
+        }
+    }
+
+    /// <summary>Prepare (first time only) and play. <paramref name="desktop"/> = started without a terminal.</summary>
+    static int RunGame(string cue, bool desktop)
+    {
+        try
+        {
+#if !WINDOWS
+            int notified = 0;
+#endif
+            var progress = new Progress<PipelineProgress>(p =>
+            {
+                Console.WriteLine($"  [{p.Fraction * 100,3:0}%] {p.Stage}: {p.Detail}");
+#if !WINDOWS
+                if (desktop && p.Stage == "Recompile" && Interlocked.Exchange(ref notified, 1) == 0)
+                    LinuxLaunch.Notify("First launch: building the game from your disc. " +
+                                       "This takes a minute or two, the game window opens when it is done.");
+#endif
+            });
+
+            ConfigManager.Load();
+            var dll = RecompPipeline.EnsureReady(cue, progress);
+            // Save only a disc that passed validation, so a bad pick is asked again next time.
+            ConfigManager.Game.CdPath = cue;
+            ConfigManager.SaveGame();
+            Console.WriteLine("[CrashBandicoot] launching " + dll);
+            GameLoader.Run(dll, cue);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            RecompOne.Runtime.Diagnostics.SessionLog.Exception("--run", ex.GetBaseException());
+            RecompOne.Runtime.Diagnostics.SessionLog.Stop();
+            Console.Error.WriteLine("[CrashBandicoot] FAIL: " + ex.GetBaseException().Message);
+            Console.Error.WriteLine(ex);
+#if !WINDOWS
+            if (desktop)
+                LinuxLaunch.Notify($"{ex.GetBaseException().Message}\n\nDetails: {LinuxLaunch.LogPath}", error: true);
+#endif
+            return 1;
         }
     }
 
@@ -131,7 +176,7 @@ internal static class Program
 #if WINDOWS
         Console.WriteLine("  (no args)              open the launcher");
 #else
-        Console.WriteLine("  (no args)              show this help (graphical launcher is Windows-only)");
+        Console.WriteLine("  (no args)              play: saved disc, else the only .chd/.cue next to the program, else pick one");
 #endif
         Console.WriteLine("  --prepare <file.cue|file.chd>   prepare game folder without UI");
         Console.WriteLine("  --run <file.cue|file.chd>       prepare (if needed) and play (no UI)");
