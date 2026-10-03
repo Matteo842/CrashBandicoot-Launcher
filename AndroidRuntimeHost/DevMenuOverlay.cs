@@ -145,6 +145,7 @@ sealed partial class DevMenuOverlay : FrameLayout
         Divider();
         Category("Cheats", "cheats");
         Category("Levels", "levels");
+        Category("Warp to Level", "warp");
         Category("Display", "display");
         Category("Rendering", "rendering");
         Category("Audio", "audio");
@@ -171,6 +172,10 @@ sealed partial class DevMenuOverlay : FrameLayout
             case "levels":
                 _title.Text = "LEVELS";
                 BuildLevels();
+                break;
+            case "warp":
+                _title.Text = "WARP TO LEVEL";
+                BuildWarp();
                 break;
             case "display":
                 _title.Text = "DISPLAY";
@@ -291,6 +296,26 @@ sealed partial class DevMenuOverlay : FrameLayout
         Hint($"VA 0x{Catalog.Levels.LevelIdAddr:X8}");
         FullButton("Refresh", () => ShowSection("levels"));
         Hint("Level Select and other cheats are under Cheats.");
+    }
+
+    void BuildWarp()
+    {
+        Hint("Tap to load. Tapping the current level restarts it.");
+        Hint("Bonus rounds load their level first; leaving the round returns there.");
+        var hasCurrent = CheatManager.TryGetLevelId(out var current);
+        foreach (var group in LevelWarpList.Groups)
+        {
+            Divider();
+            _body.AddView(Label(group.Name, 14, Wumpa, _displayFont), Margin(bottom: 2));
+            foreach (var entry in group.Entries)
+            {
+                FullButton(entry.Label, () =>
+                {
+                    entry.Warp();
+                    Close();
+                }, primary: hasCurrent && entry.IsCurrent(current));
+            }
+        }
     }
 
     void BuildDisplay()

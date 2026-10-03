@@ -48,6 +48,14 @@ public static class CheatManager
     public const uint LevelIdAddr = 0x80056710;
     // c1 ns.c next_lid: GOOL loadlevel writes it, the main loop loads it when != -1.
     const uint NextLevelIdAddr = 0x80056714u;
+    // c1 level.c bonus_return: the main loop sets it before NSInit when next_lid is -2.
+    const uint BonusReturnAddr = 0x80056490u;
+    // c1 level.c savestate.lid (level_state at 0x80057974). Crash's spawn saves it;
+    // a bonus round's loadcheckpoint reloads that level at the saved zone.
+    const uint SaveStateLidAddr = 0x800579A4u;
+    // c1 globals.h game_state: DispC sets PLAYING (WillC EventStatus 5) before a bonus round.
+    const uint GameStateAddr = 0x800618D0u;
+    const uint GameStatePlaying = 0x100u;
     // GOOL globals the warp map sets before loadlevel (IsldC) and the engine
     // resets when loading LID_TITLE (c1 main.c) — a direct warp skips both.
     const uint RespawnCountAddr = 0x800618A0u;
@@ -106,8 +114,12 @@ public static class CheatManager
     static uint _warpMapLevel;
     static uint _warpLoadLid = uint.MaxValue;
     static uint _returnMapLevel = NewGameMapLevel;
+    // Bonus warp: round loaded once Crash has spawned in the warped level (armed by its NSInit).
+    static uint _bonusLid = uint.MaxValue;
+    static uint _bonusRound;
+    static bool _bonusArmed;
 
-    public static bool WarpPending => _warpPending;
+    public static bool WarpPending => _warpPending || _bonusLid != uint.MaxValue;
 
     /// <summary>
     /// Queue a direct level load. <paramref name="mapLevel"/> is the warp-map slot
@@ -119,6 +131,38 @@ public static class CheatManager
         _warpLevelId = levelId;
         _warpMapLevel = mapLevel;
         _warpPending = true;
+        _bonusLid = uint.MaxValue;
+        _bonusArmed = false;
+    }
+
+    /// <summary>
+    /// Queue a bonus round. The level holding its tokens loads first: Crash's spawn
+    /// there saves the state the round returns to (WillC loadcheckpoint). Then the
+    /// round loads like DispC SelectBonusRound — <paramref name="bonusRound"/> is the
+    /// BonoC layout.
+    /// </summary>
+    public static void RequestBonusWarp(uint levelId, uint mapLevel, uint bonusLevelId, uint bonusRound)
+    {
+        RequestWarp(levelId, mapLevel);
+        _bonusLid = bonusLevelId;
+        _bonusRound = bonusRound;
+    }
+
+    /// <summary>BonoC layout of the current bonus round (GOOL BONUSROUND).</summary>
+    public static bool TryGetBonusRound(out uint round)
+    {
+        round = 0;
+        var mem = Runtime.Mem;
+        if (mem == null) return false;
+        try
+        {
+            round = mem.ReadU32(BonusRoundAddr);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static void Apply()
@@ -128,6 +172,8 @@ public static class CheatManager
 
         if (_warpPending)
             ApplyWarp(mem);
+        else if (_bonusArmed)
+            ApplyBonusWarp(mem);
 
         if (_instantSaveHoldFrames > 0)
         {
@@ -195,6 +241,22 @@ public static class CheatManager
         mem.WriteU32(NextLevelIdAddr, _warpLevelId);
     }
 
+    static void ApplyBonusWarp(IMemory mem)
+    {
+        // Crash's spawn replaces the lid cleared at NSInit — the return state is saved.
+        if (mem.ReadU32(LevelIdAddr) != _warpLevelId
+            || mem.ReadU32(SaveStateLidAddr) != _warpLevelId
+            || mem.ReadU32(NextLevelIdAddr) != uint.MaxValue)
+            return;
+        _bonusArmed = false;
+
+        // DispC Pickup_Display_Show: EventStatus 5 (GAME_STATE_PLAYING), BonusRoundParams, loadlevel.
+        mem.WriteU32(GameStateAddr, GameStatePlaying);
+        mem.WriteU32(BonusRoundAddr, _bonusRound);
+        mem.WriteU32(NextLevelIdAddr, _bonusLid);
+        _bonusLid = uint.MaxValue;
+    }
+
     /// <summary>
     /// NSInit pre-hook: A1 is the level about to load, cur_lid still the one being left.
     /// </summary>
@@ -205,6 +267,17 @@ public static class CheatManager
         bool warp = lid == _warpLoadLid;
         if (!warp)
             _warpLoadLid = uint.MaxValue;
+
+        // Bonus warp: clear the saved lid so the round waits for Crash's spawn here.
+        // Never on a bonus return — its LevelRestart reads that lid right after NSInit.
+        if (_bonusLid != uint.MaxValue && !_warpPending && (warp || _bonusArmed))
+        {
+            _bonusArmed = warp && m.ReadU32(BonusReturnAddr) == 0;
+            if (_bonusArmed)
+                m.WriteU32(SaveStateLidAddr, uint.MaxValue);
+            else
+                _bonusLid = uint.MaxValue; // left the level before the round could load
+        }
 
         // Third Cortex token in Stormy Ascent: SelectBonusRound has no branch for it,
         // so loadlevel(BonusLevel) reads a stale field (NSInit on garbage = retail crash).
