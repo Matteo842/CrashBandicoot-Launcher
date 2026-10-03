@@ -923,7 +923,7 @@ public sealed class GlBackend : IGpuBackend
             // at opaque/transparent boundaries. This preserves exact primitive
             // order (important on the map) without repeating buffer uploads and
             // uniform setup for every blend-mode change during Crash's spin.
-            _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
+            UploadBatchVertices();
             BindPrimState(true, rt, destTex);
             BindPrimState(false, rt, destTex);
             _gl.Disable(EnableCap.Blend);
@@ -949,7 +949,7 @@ public sealed class GlBackend : IGpuBackend
         else
         {
             BindPrimState(false, rt, destTex);
-            _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
+            UploadBatchVertices();
 
             // Coarse shading cannot accelerate a mixed framebuffer-fetch shader,
             // but remains useful on the fixed-function fallback.
@@ -1014,6 +1014,23 @@ public sealed class GlBackend : IGpuBackend
         _gl.DepthMask(true);
         if (rt != null) { rt.Dirty = true; rt.LastDrawFrame = _frame; }
         _count = 0;
+    }
+
+    // Native 16:9 flushes several batches per frame. On Adreno, rewriting the
+    // 8 MB stream buffer while an earlier batch of the same frame still uses it
+    // makes the driver allocate and copy a whole new 8 MB store each time, then
+    // wait on the GPU (#67: ~140 fps in 4:3 fell to ~43 fps in 16:9). Respecify
+    // exactly the batch instead: the driver orphans the old store, no copy.
+    unsafe void UploadBatchVertices()
+    {
+        if (!_gles)
+        {
+            _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
+            return;
+        }
+        fixed (GlVertex* data = _verts)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(_count * sizeof(GlVertex)), data,
+                BufferUsageARB.StreamDraw);
     }
 
     bool BatchSamplesVram()
