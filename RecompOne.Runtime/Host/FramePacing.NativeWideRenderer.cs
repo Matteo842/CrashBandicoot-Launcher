@@ -105,7 +105,7 @@ public static partial class FramePacing
         uint zone = NativeWideGuestPointer(zoneEntry) ? EntryItem(m, zoneEntry, 0) : 0;
         uint level = m.ReadU32(Catalog.LevelIdAddr);
         uint shaderFlags = NativeWideGuestPointer(zone) ? m.ReadU32(zone + 0x2FCu) : 0;
-        bool supported = GpuHle.WideFovActive && level is not (25 or 45 or 56 or 57)
+        bool supported = GpuHle.WideFovActive && NativeWideLevelSupported(level)
             && NativeWideGuestPointer(zone);
         GpuHle.NativeWideRendererActive = supported;
         _nativeWideShader = (shaderFlags & 0x400u) != 0 ? NativeWideShader.Lamp
@@ -1148,4 +1148,6 @@ public static partial class FramePacing
 
     static int NativeWideSign13(int value) => (value & 0x1000) != 0 ? value - 0x2000 : value;
     static bool NativeWideGuestPointer(uint value) => (value & 0xFFE00000u) == 0x80000000u;
+
+    static bool NativeWideLevelSupported(uint level) => level is not (25 or 45 or 56 or 57);
 }

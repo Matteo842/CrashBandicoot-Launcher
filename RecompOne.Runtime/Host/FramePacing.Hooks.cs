@@ -379,6 +379,8 @@ public static partial class FramePacing
         Cheats.CheatManager.OnLevelLoad(c, m);
         RestoreNativeWideObjectFrustum(m);
         ResetNativeWideRenderer();
+        // NSInit rebuilds the object pool; nothing left to terminate.
+        _nativeWidePickupZones.Clear();
         _inNsInit = true;
         _frameTimeReady = false;
         _ticksTakenThisLoop = false;

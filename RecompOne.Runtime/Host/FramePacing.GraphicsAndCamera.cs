@@ -73,6 +73,7 @@ public static partial class FramePacing
         catch { /* overlay swap */ }
         ApplyResetCarry(m);
         AdvanceWater(m);
+        SpawnNativeWidePickups(c, m);
         return true;
     }
 
@@ -320,6 +321,7 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
+        DropNativeWidePickupsOnZoneChange(c, m);
         CamTraceLevelUpdate(c);
         EnsureFrameTime(m);
         if (!IsActive(m) || _exactTicks >= RefTicks - 0.01 || c.RA == CamFollowSnapRa)
