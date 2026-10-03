@@ -1021,9 +1021,12 @@ public sealed class GlBackend : IGpuBackend
     // makes the driver allocate and copy a whole new 8 MB store each time, then
     // wait on the GPU (#67: ~140 fps in 4:3 fell to ~43 fps in 16:9). Respecify
     // exactly the batch instead: the driver orphans the old store, no copy.
+    // Mesa's d3d12 driver (WSL) behaves the same with every Crash frame's ~240
+    // batches: N. Sanity Beach drew 13/s with 55 ms of GPU work, 30/s after.
+    // Windows drivers handle the in-place rewrite fine, so keep it there.
     unsafe void UploadBatchVertices()
     {
-        if (!_gles)
+        if (!_gles && OperatingSystem.IsWindows())
         {
             _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
             return;
