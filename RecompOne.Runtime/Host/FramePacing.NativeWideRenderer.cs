@@ -331,7 +331,8 @@ public static partial class FramePacing
             slot.CameraVertices = null;
         }
         int drawWorldCount = AddNativeWideNeighborWorlds(m, zone, worldCount, ref totalPolygons);
-        if (NativeWideGemTempleHidden(m, zoneEntry))
+        bool gemTempleHidden = NativeWideGemTempleHidden(m, zoneEntry);
+        if (gemTempleHidden)
             for (int wi = 0; wi < drawWorldCount; wi++)
             {
                 var world = worlds[wi];
@@ -429,8 +430,10 @@ public static partial class FramePacing
             if (!NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
                     viewCenterX, coreHalf))
                 continue;
+            int gemColumn = gemTempleHidden && NativeWideGemColumnMesh(m, world) ? NativeWideGemColumnFirst : -1;
             for (int pi = 0; pi < world.PolyCount; pi++)
             {
+                if (gemColumn >= 0 && (uint)(pi - gemColumn) < NativeWideGemColumnCount) continue;
                 candidates++;
                 uint poly = world.Polygons + (uint)pi * 8u;
                 uint p0 = FastU32(m, poly);
@@ -615,6 +618,15 @@ public static partial class FramePacing
     static bool NativeWideGemTemple(IMemory m, NativeWideWorld world) =>
         world.PolyCount == 1209 && world.VertexCount == 1122
         && (int)FastU32(m, world.Header) == 17800 && (int)FastU32(m, world.Header + 8u) == -73200;
+
+    // A lone column beside the temple (X 7512-7664) belongs to the bridge
+    // mesh 4__kW instead; it is the only part of that mesh beyond X 4200.
+    const int NativeWideGemColumnFirst = 1204;
+    const uint NativeWideGemColumnCount = 16;
+
+    static bool NativeWideGemColumnMesh(IMemory m, NativeWideWorld world) =>
+        world.PolyCount == 2624 && world.VertexCount == 2609
+        && FastU32(m, world.Header) == 0 && (int)FastU32(m, world.Header + 8u) == -68050;
 
     // NSLookup would page a missing entry in from disc. Read the reference
     // (EID or page table entry) instead and skip anything not resident.
