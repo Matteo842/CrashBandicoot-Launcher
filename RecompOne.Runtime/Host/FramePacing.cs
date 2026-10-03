@@ -676,7 +676,6 @@ public static partial class FramePacing
     static int _svtxLog;
     static int _svtxCrashLog;
     static int _svtxBoxLog;
-    static bool _gfxHookTried;
     static bool _spawnBurst;
     static bool _didSpawn;
     static bool _spawnFirstFrame;

@@ -1,11 +1,9 @@
 using System.Diagnostics;
-using System.Reflection;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Memory;
-using RecompOne.Runtime.Modding;
 
 namespace RecompOne.Runtime.Host;
 
@@ -13,8 +11,9 @@ public static partial class FramePacing
 {
     /// <summary>
     /// GOOL function-pointer updates go through <see cref="Dispatcher.Call"/>.
-    /// Direct jals (physics, cam, worlds, GpuUpdate) are hooked at compile time
-    /// in CrashBandicoot.json — MonoMod detours do not exist on Android.
+    /// Direct jals (physics, cam, worlds, GpuUpdate, Gfx mesh, interpret,
+    /// change state) are hooked at compile time in CrashBandicoot.json —
+    /// MonoMod detours do not exist on Android or in single-file releases.
     /// </summary>
     public static void InstallGameHooks()
     {
@@ -36,7 +35,6 @@ public static partial class FramePacing
         NoteSaveUiWorld(m);
         if (IsActive(m))
         {
-            EnsureGfxHook();
             EnsureFrameTime(m);
             PublishWallStamps(m);
             RefillSpawnBudget();
@@ -304,7 +302,6 @@ public static partial class FramePacing
 
     public static bool PreTransform(CpuContext c, IMemory m)
     {
-        EnsureGfxHook();
         NoteNativeWideHudTransform(m, c.A0);
         if (IsActive(m))
         {
@@ -508,109 +505,6 @@ public static partial class FramePacing
         {
             // ignore
         }
-    }
-
-    static void EnsureGfxHook()
-    {
-        if (_gfxHookTried) return;
-        if (Dispatcher.Overlays.Count == 0) return;
-        _gfxHookTried = true;
-        TryHookGfx(GfxTransformSvtxAddr, "func_80018964");
-        TryHookGfx(GfxTransformCvtxAddr, "func_80018A40");
-        TryHookNamed(GoolObjectInterpretAddr, "func_800201DC", PreGoolInterpret, PostGoolInterpret);
-        TryHookNamed(GoolObjectChangeStateAddr, "func_8001D698", PreChangeState);
-        try
-        {
-            HookManager.Commit();
-        }
-        catch (Exception ex)
-        {
-            PaceLog($"gfx commit fail {ex.GetType().Name}: {ex.Message}");
-        }
-    }
-
-    static void TryHookGfx(uint addr, string name)
-    {
-        MethodInfo? mi = null;
-        foreach (var ov in Dispatcher.Overlays.Values)
-        {
-            if (ov.Functions.TryGetValue(addr, out var fn))
-            {
-                mi = fn.Method;
-                break;
-            }
-        }
-        if (mi == null)
-        {
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                Type[]? types;
-                try { types = asm.GetTypes(); }
-                catch (ReflectionTypeLoadException ex) { types = ex.Types ?? Type.EmptyTypes; }
-                catch { continue; }
-                if (types == null) continue;
-                foreach (var t in types)
-                {
-                    if (t is null) continue;
-                    var found = t.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (found == null) continue;
-                    mi = found;
-                    break;
-                }
-                if (mi != null) break;
-            }
-        }
-        if (mi == null)
-        {
-            PaceLog($"no gfx fn {name} 0x{addr:X8} overlays={Dispatcher.Overlays.Count}");
-            return;
-        }
-        HookManager.AddPre(mi, PreGfxTransformMesh);
-        HookManager.AddPost(mi, PostGfxTransformMesh);
-        PaceLog($"hook gfx {mi.DeclaringType?.Name}.{mi.Name}");
-    }
-
-    static void TryHookNamed(uint addr, string name, Func<CpuContext, IMemory, bool> pre,
-        Action<CpuContext, IMemory>? post = null)
-    {
-        MethodInfo? mi = null;
-        foreach (var ov in Dispatcher.Overlays.Values)
-        {
-            if (ov.Functions.TryGetValue(addr, out var fn))
-            {
-                mi = fn.Method;
-                break;
-            }
-        }
-        if (mi == null)
-        {
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                Type[]? types;
-                try { types = asm.GetTypes(); }
-                catch (ReflectionTypeLoadException ex) { types = ex.Types ?? Type.EmptyTypes; }
-                catch { continue; }
-                if (types == null) continue;
-                foreach (var t in types)
-                {
-                    if (t is null) continue;
-                    var found = t.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                    if (found == null) continue;
-                    mi = found;
-                    break;
-                }
-                if (mi != null) break;
-            }
-        }
-        if (mi == null)
-        {
-            PaceLog($"no fn {name} 0x{addr:X8} overlays={Dispatcher.Overlays.Count}");
-            return;
-        }
-        HookManager.AddPre(mi, pre);
-        if (post != null)
-            HookManager.AddPost(mi, post);
-        PaceLog($"hook {mi.DeclaringType?.Name}.{mi.Name}");
     }
 
     /// <summary>

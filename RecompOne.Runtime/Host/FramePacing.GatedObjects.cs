@@ -147,7 +147,7 @@ public static partial class FramePacing
         }
     }
 
-    static void PostGoolInterpret(CpuContext c, IMemory m) => RestorePadSpin(m);
+    public static void PostGoolInterpret(CpuContext c, IMemory m) => RestorePadSpin(m);
 
     /// <summary>gool_process.anim_stamp (frames_elapsed of the last Update).</summary>
     const uint ObjAnimStampOff = 0xFCu;

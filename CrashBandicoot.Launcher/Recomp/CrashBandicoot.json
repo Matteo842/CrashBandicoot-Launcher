@@ -57,6 +57,8 @@
     { "address": "80018A40", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostGfxTransformMesh" },
     { "address": "8001F30C", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PrePhysics" },
     { "address": "8001F30C", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostObjectPhysics" },
+    { "address": "800201DC", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreGoolInterpret" },
+    { "address": "800201DC", "mode": "post", "target": "RecompOne.Runtime.Host.FramePacing.PostGoolInterpret" },
     { "address": "80024628", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreGoolSeek" },
     { "address": "80025A60", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreLevelUpdate" },
     { "address": "8002A82C", "mode": "pre",  "target": "RecompOne.Runtime.Host.FramePacing.PreCamFollow" },
