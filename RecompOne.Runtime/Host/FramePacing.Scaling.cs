@@ -1081,10 +1081,15 @@ public static partial class FramePacing
     /// Path GOOL sometimes does <c>x += vel</c> every trans (no ticks). A
     /// 30 Hz world step is large; a tick-scaled path step at 270 FPS is not.
     /// Keep only dt/34 of the leftover after vel*ticks.
+    /// DispC is screen-space and only reaches here while paused. Pause_Menu
+    /// SETs x = 0 once, over the stale trans of a reused pool slot (CoreLoop
+    /// creates it under a handle, so no parent trans): dt/34 of that left
+    /// PAUSE off-centre for the whole pause (#89).
     /// </summary>
     static void PaceExtraTrans(IMemory m)
     {
         if (!_haveObj || _crashObj || _solidObj || _frameTicks >= RefTicks) return;
+        if (IsHud(m, _obj)) return;
         try
         {
             int x = (int)m.ReadU32(_obj + ObjTransOff);
