@@ -651,6 +651,9 @@ public static partial class FramePacing
     /// <summary>Crash's unscaled fall speed on the last touchdown, and its wall tick.</summary>
     static int _crashLandVy;
     static uint _crashLandTicks;
+    /// <summary>Crash's last rising head hit (StopAtCeil 0x80) and its wall tick.</summary>
+    static bool _ceilHit;
+    static uint _ceilHitTicks;
     static bool _haveTransY;
     static bool _rideWasStanding;
     static double _ridePhase;

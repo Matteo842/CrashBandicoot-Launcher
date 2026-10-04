@@ -418,6 +418,7 @@ public static partial class FramePacing
         Array.Clear(_hogMemFrac);
         ClearCrashScaleFrac();
         ClearDeathCam();
+        _ceilHit = false;
         _crashGateState = uint.MaxValue;
         _crashSpawnUsed = false;
         _crashLandAcc = 0;

@@ -158,6 +158,7 @@ public static partial class FramePacing
         _airFromAir = (m.ReadU32(_obj + ObjStatusAOff) & FlagGroundLand) == 0;
         _haveTransY = true;
         _airVy = ScaleJumpVy(_ovy, _vyTrans, m, _obj);
+        HoldUnderCeiling();
         _airDy = KeepAirStep(_airVy * _exactTicks / 1024.0, ref _airFracY);
 
         // Guest displace truncates (vy * 34) / 1024 toward zero. Encode our
@@ -166,6 +167,28 @@ public static partial class FramePacing
         long magnitude = (Math.Abs((long)_airDy) * 1024 + RefTicks - 1) / RefTicks;
         int vyPhys = (int)(_airDy < 0 ? -magnitude : magnitude);
         m.WriteU32(_obj + ObjVelYOff, (uint)vyPhys);
+    }
+
+    /// <summary>
+    /// Original: the frame after a rising head hit always moves down
+    /// (vy = 0 − 4000×34, plus at most two hangs). Jump→Flip/Stand at
+    /// vely &lt; 5m runs the new trans inside ChangeState, so that frame has
+    /// two 34-tick hangs. Here the switch is the very next present: first
+    /// frame keeps both hangs against one present of gravity, the head went
+    /// back into the crate bottom and StopAtCeil re-sent Event23 — the fruit
+    /// crate counted three bounces per bump (#91). No hang lift for one
+    /// original frame after the hit. Bounce SETs are millions and still go.
+    /// </summary>
+    static void HoldUnderCeiling()
+    {
+        if (!_ceilHit || _airVy <= 0 || _airVy > 0x80000) return;
+        if (unchecked(_guestTicks - _ceilHitTicks) >= RefTicks)
+        {
+            _ceilHit = false;
+            return;
+        }
+        _airVy = 0;
+        _airFracY = 0;
     }
 
     /// <summary>
@@ -308,6 +331,9 @@ public static partial class FramePacing
     /// the SET. Do not write vy=0 on every 0x80: jump hang while X is
     /// held re-enters the roof each present and pins the fall pose.
     /// Kill +vy, keep gravity, do not Land.
+    /// Guest order is vy=0 in StopAtCeil, then gravity: a rising hit leaves
+    /// −gravity×dt. Plain 0 let the next present's hang lift the head back
+    /// into a crate bottom (Event23 again, #91; see HoldUnderCeiling).
     /// </summary>
     static void WriteAirborneY(IMemory m, int y, int vy, int vyBeforeGravity)
     {
@@ -326,10 +352,12 @@ public static partial class FramePacing
         {
             ClearAirFractions();
             m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
-            if (vy > 0)
+            if (rising)
             {
                 y = yPhys;
-                vy = 0;
+                vy -= vyBeforeGravity;
+                _ceilHit = true;
+                _ceilHitTicks = _guestTicks;
             }
             else if (y > yPhys)
                 y = yPhys;
