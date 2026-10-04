@@ -591,20 +591,29 @@ public static partial class FramePacing
         {
             if (_gateRot.Count > 96)
                 EvictDict(_gateRot, obj);
+            int tx = (int)m.ReadU32(obj + ObjRotOff);
+            int ty = (int)m.ReadU32(obj + ObjRotOff + 4);
+            int tz = (int)m.ReadU32(obj + ObjRotOff + 8);
+            int qx = (int)m.ReadU32(obj + ObjTransOff);
+            int qy = (int)m.ReadU32(obj + ObjTransOff + 4);
+            int qz = (int)m.ReadU32(obj + ObjTransOff + 8);
+            // The skip presents of a new object's first gate hold its CODE
+            // pose instead of finishing a lerp from the spawn trans (#94).
+            bool born = _newObj && obj == _obj;
             _gateRot[obj] = new GatePose
             {
-                Fx = _orx,
-                Fy = _ory,
-                Fz = _orz,
-                Tx = (int)m.ReadU32(obj + ObjRotOff),
-                Ty = (int)m.ReadU32(obj + ObjRotOff + 4),
-                Tz = (int)m.ReadU32(obj + ObjRotOff + 8),
-                Px = _ox,
-                Py = _oy,
-                Pz = _oz,
-                Qx = (int)m.ReadU32(obj + ObjTransOff),
-                Qy = (int)m.ReadU32(obj + ObjTransOff + 4),
-                Qz = (int)m.ReadU32(obj + ObjTransOff + 8),
+                Fx = born ? tx : _orx,
+                Fy = born ? ty : _ory,
+                Fz = born ? tz : _orz,
+                Tx = tx,
+                Ty = ty,
+                Tz = tz,
+                Px = born ? qx : _ox,
+                Py = born ? qy : _oy,
+                Pz = born ? qz : _oz,
+                Qx = qx,
+                Qy = qy,
+                Qz = qz,
                 FromAnim = _oanim,
                 ToAnim = (int)m.ReadU32(obj + ObjAnimFrameOff),
                 FromSequence = _oanimSequence,
@@ -628,6 +637,8 @@ public static partial class FramePacing
             RestoreGatedDisplayRot(m, _dispRotObj);
         if (obj != _obj) return;
         if (!_solidObj) return;
+        // First Update after GoolObjectInit: no drawn pose to lerp from (#94).
+        if (_newObj && !_gatedSolid) return;
         if (GamePaused(m)) return;
         // HUD / flying icons are screen-space. Lerping rot+trans of Tawna's
         // portrait between 30 Hz poses swings it across the top of the frame.

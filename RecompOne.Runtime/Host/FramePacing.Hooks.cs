@@ -100,6 +100,7 @@ public static partial class FramePacing
         _spawnBurst = false;
         _didSpawn = false;
         _spawnFirstFrame = false;
+        _newObj = false;
         _platObj = false;
         _platFirst = false;
         _platChild = false;
@@ -123,6 +124,7 @@ public static partial class FramePacing
         if (TryReadCrash(m, out uint rider) && c.A0 == rider && !IsFirstFrame(m, rider))
             RideAfterCrash(m);
         SnapshotObject(m, c.A0);
+        _newObj = _newObjs.Remove(c.A0) && _haveObj && IsFirstFrame(m, c.A0);
         _inCrashUpdate = _crashObj;
         if (_haveObj && !_crashObj && IsBoxObj(m, c.A0))
             NoteCrateFlight(m, c.A0);

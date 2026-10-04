@@ -919,6 +919,19 @@ public static partial class FramePacing
         }
     }
 
+    /// <summary>
+    /// Until its first Update, a new object holds its parent's trans/rot
+    /// (spawn()) or a stale pool slot's; it was never drawn there. Original
+    /// shows it first at the post-CODE pose. FatsC barrel (#94): lerping from
+    /// Fat's feet to the throw point drew it at his chest for one present.
+    /// </summary>
+    static void NoteNewObject(CpuContext c)
+    {
+        if (c.RA != InitChangeStateRa) return;
+        if (_newObjs.Count > ObjectPoolMax) _newObjs.Clear();
+        _newObjs.Add(c.A0);
+    }
+
     static void ArmSpawnBurst(IMemory m, uint obj)
     {
         _spawnBurst = IsFirstFrame(m, obj);

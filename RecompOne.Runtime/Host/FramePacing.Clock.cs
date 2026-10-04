@@ -805,6 +805,7 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreChangeState(CpuContext c, IMemory m)
     {
+        NoteNewObject(c);
         if (!IsActive(m)) return true;
         try
         {

@@ -217,6 +217,8 @@ public static partial class FramePacing
 
     const uint GoolUpdateObjectsAddr = 0x8001D5ECu;
     const uint GoolObjectChangeStateAddr = 0x8001D698u;
+    /// <summary>RA of the ChangeState jal in GoolObjectInit (8001CB80).</summary>
+    const uint InitChangeStateRa = 0x8001CDA4u;
     const uint GoolObjectUpdateAddr = 0x8001DA0Cu;
     /// <summary>NTSC-U <c>PadUpdate</c>. GoolObjectUpdate calls it first, for Crash only.</summary>
     const uint PadUpdateAddr = 0x800167A4u;
@@ -690,6 +692,10 @@ public static partial class FramePacing
     static bool _spawnBurst;
     static bool _didSpawn;
     static bool _spawnFirstFrame;
+    /// <summary>Slots initialised by GoolObjectInit and not yet updated.</summary>
+    static readonly HashSet<uint> _newObjs = new();
+    /// <summary>This Update is the object's first since GoolObjectInit.</summary>
+    static bool _newObj;
     static int _spawnBudget;
     static double _spawnAcc;
     static readonly Dictionary<uint, double> _spawnCredit = new();
