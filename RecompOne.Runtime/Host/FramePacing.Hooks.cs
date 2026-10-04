@@ -344,6 +344,8 @@ public static partial class FramePacing
             PrepareAirborneY(m);
             WriteAllTicks(m, RefTicks);
         }
+        else if (_crashObj)
+            ClearAirHang();
         return true;
     }
 
@@ -418,7 +420,7 @@ public static partial class FramePacing
         Array.Clear(_hogMemFrac);
         ClearCrashScaleFrac();
         ClearDeathCam();
-        _ceilHit = false;
+        ClearAirHang();
         _crashGateState = uint.MaxValue;
         _crashSpawnUsed = false;
         _crashLandAcc = 0;

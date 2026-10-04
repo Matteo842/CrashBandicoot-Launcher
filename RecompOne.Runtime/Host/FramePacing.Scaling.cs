@@ -158,8 +158,13 @@ public static partial class FramePacing
         _airFromAir = (m.ReadU32(_obj + ObjStatusAOff) & FlagGroundLand) == 0;
         _haveTransY = true;
         _airVy = ScaleJumpVy(_ovy, _vyTrans, m, _obj);
-        HoldUnderCeiling();
-        _airDy = KeepAirStep(_airVy * _exactTicks / 1024.0, ref _airFracY);
+        int moveVy = _airVy + EulerLift(m);
+        if (HoldUnderCeiling(moveVy))
+        {
+            moveVy = 0;
+            _airFracY = 0;
+        }
+        _airDy = KeepAirStep(moveVy * _exactTicks / 1024.0, ref _airFracY);
 
         // Guest displace truncates (vy * 34) / 1024 toward zero. Encode our
         // integer displacement exactly so collision and the final Y agree,
@@ -170,25 +175,97 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Original: the frame after a rising head hit always moves down
-    /// (vy = 0 − 4000×34, plus at most two hangs). Jump→Flip/Stand at
-    /// vely &lt; 5m runs the new trans inside ChangeState, so that frame has
-    /// two 34-tick hangs. Here the switch is the very next present: first
-    /// frame keeps both hangs against one present of gravity, the head went
-    /// back into the crate bottom and StopAtCeil re-sent Event23 — the fruit
-    /// crate counted three bounces per bump (#91). No hang lift for one
-    /// original frame after the hit. Bounce SETs are millions and still go.
+    /// Original physics moves by vy×34 and only then adds gravity (−4000×34):
+    /// explicit Euler on a 30 Hz step. Sampled at its frame ends that is a
+    /// parabola launched G/2 faster than the SET. Per-present steps lose that
+    /// half frame of gravity — a plain jump at 120 FPS peaked 13k lower and
+    /// landed 25 ms sooner. Guest vy stays as is (state checks read it); Y
+    /// moves with vy + G/2, less the half step this present's own order
+    /// already gives (G·dt/68). Zero at 34 ticks.
     /// </summary>
-    static void HoldUnderCeiling()
+    static int EulerLift(IMemory m)
     {
-        if (!_ceilHit || _airVy <= 0 || _airVy > 0x80000) return;
-        if (unchecked(_guestTicks - _ceilHitTicks) >= RefTicks)
+        if (_exactTicks >= RefTicks) return 0;
+        try
+        {
+            if ((m.ReadU32(_obj + ObjStatusBOff) & FlagGravity) == 0) return 0;
+        }
+        catch
+        {
+            return 0;
+        }
+        return (int)Math.Round(2000.0 * (RefTicks - _exactTicks));
+    }
+
+    /// <summary>
+    /// Original: the frame after a rising head hit always ends lower
+    /// (vy = 0 − 4000×34, plus at most two hangs). Here the next presents
+    /// still had the Euler lift and, at Jump→Flip/Stand (ChangeState runs the
+    /// new trans: two hangs), a whole extra hang; the head went back into the
+    /// crate bottom and StopAtCeil re-sent Event23 — the fruit crate counted
+    /// three bounces per bump (#91). Hold Y until the move turns down on its
+    /// own. Bounce SETs are millions and still go.
+    /// </summary>
+    static bool HoldUnderCeiling(int moveVy)
+    {
+        if (!_ceilHit) return false;
+        if (moveVy <= 0 || _airVy > 0x80000)
         {
             _ceilHit = false;
-            return;
+            return false;
         }
-        _airVy = 0;
-        _airFracY = 0;
+        return true;
+    }
+
+    /// <summary>
+    /// The original's SET frame has no hang (code overrides trans) and the
+    /// first hang lands on the next frame start; as a rate that is hang from
+    /// half a frame after the SET. A present adds its hang at its start, half
+    /// a present early. So no hang for (34+dt)/2 wall ticks after a SET,
+    /// partial on the present that crosses it. Was ~0.75 extra hang per
+    /// held jump at 120 FPS.
+    /// </summary>
+    static double HangShare()
+    {
+        double dt = _exactTicks;
+        if (!_airSetWindow) return dt;
+        double share = unchecked(_guestTicks - _airSetTicks) + dt - (RefTicks + dt) / 2.0;
+        if (share >= dt)
+        {
+            _airSetWindow = false;
+            return dt;
+        }
+        return share > 0 ? share : 0;
+    }
+
+    /// <summary>
+    /// Takeoff here is the present after the press; the original waits for
+    /// its next 30 Hz pad read, (34−dt)/2 ticks later on average. Letting go
+    /// of X is read the same way in both, so a hang cut by the release ran
+    /// that much longer than the original's. Take it back once. Hang that
+    /// ends on its own (landing, NoFall apex) keeps X held: no change.
+    /// </summary>
+    static int ReleaseCorrection(IMemory m, int hangNow)
+    {
+        int last = _hangLastStep;
+        _hangLastStep = hangNow;
+        if (last <= 0 || hangNow > 0 || _exactTicks >= RefTicks) return 0;
+        try
+        {
+            if ((m.ReadU32(PadsAddr + 4) & PadCross) != 0) return 0;
+        }
+        catch
+        {
+            return 0;
+        }
+        return (int)Math.Round(last * (RefTicks - _exactTicks) / (2.0 * RefTicks));
+    }
+
+    static void ClearAirHang()
+    {
+        _ceilHit = false;
+        _airSetWindow = false;
+        _hangLastStep = 0;
     }
 
     /// <summary>
@@ -310,19 +387,39 @@ public static partial class FramePacing
         }
     }
 
+    /// <summary>WillC <c>spd(vely, 5454.0)</c> at 34 ticks.</summary>
+    const int HangStep = 46359;
+    /// <summary>NTSC-U <c>pads[0].held</c> Cross (PAD_X).</summary>
+    const uint PadCross = 0x40u;
+
     /// <summary>
     /// Takeoff/bounce SET is millions; 34-tick hang spd is much smaller.
     /// Scaling the SET is the 60-only half-impulse. Keep it; scale hang.
+    /// A first frame is a SET too, unless its delta is whole hangs:
+    /// ChangeState runs the new state's trans at once, so Jump→Flip/Stand
+    /// with X held is two hangs in that original frame. Keeping both
+    /// unscaled added (1−dt/34) of a hang at every switch; keep the extra
+    /// one whole and scale the frame's own one.
     /// </summary>
     static int ScaleJumpVy(int from, int after, IMemory m, uint obj)
     {
         long dvy = (long)after - from;
-        if (IsFirstFrame(m, obj) || dvy > 0x80000 || dvy < -0x80000)
+        bool first = IsFirstFrame(m, obj);
+        bool twoHangs = first && dvy == 2 * HangStep;
+        if (dvy > 0x80000 || dvy < -0x80000
+            || (first && !twoHangs && dvy != HangStep && dvy != 0))
         {
             ClearAirFractions();
+            _airSetTicks = _guestTicks;
+            _airSetWindow = true;
+            _hangLastStep = 0;
             return after;
         }
-        return from + KeepAirStep(dvy * _exactTicks / RefTicks, ref _airFracHang);
+        long own = twoHangs ? HangStep : dvy;
+        double share = HangShare();
+        int vy = from + KeepAirStep(own * share / RefTicks, ref _airFracHang);
+        if (twoHangs) vy += HangStep;
+        return vy - ReleaseCorrection(m, own > 0 && share > 0 ? (int)own : 0);
     }
 
     /// <summary>
@@ -356,11 +453,11 @@ public static partial class FramePacing
             {
                 y = yPhys;
                 vy -= vyBeforeGravity;
-                _ceilHit = true;
-                _ceilHitTicks = _guestTicks;
             }
             else if (y > yPhys)
                 y = yPhys;
+            if (rising || _airDy > 0)
+                _ceilHit = true;
             m.WriteU32(o + ObjTransOff + 4, (uint)y);
             m.WriteU32(o + ObjVelYOff, (uint)vy);
             return;

@@ -162,6 +162,10 @@ namespace RecompOne.Runtime.Host;
 /// half-steps at 60 (looks like 30) and a rocket at 120/240. Rebuild
 /// Y from hang×dt + gravity×dt like the foot jump. Ride is
 /// TRACK_PATH_SIGN, not a WillC state index.
+/// Finer steps alone land lower than 30 FPS: the original is explicit
+/// Euler at 34 ticks (move, then gravity) and reads X once per frame. Y
+/// moves with the half-frame EulerLift; hang waits (34+dt)/2 after a SET
+/// (HangShare) and gives back the takeoff-latency share on X release.
 /// Wooden crates Bonk_Jump once and break — they do not re-fire.
 /// Spring-crate SET is kept. FinishJumpScale must not undo StopAtCeil
 /// (status A 0x80): that rewrite flew the roof. Crate takeoff is
@@ -651,9 +655,13 @@ public static partial class FramePacing
     /// <summary>Crash's unscaled fall speed on the last touchdown, and its wall tick.</summary>
     static int _crashLandVy;
     static uint _crashLandTicks;
-    /// <summary>Crash's last rising head hit (StopAtCeil 0x80) and its wall tick.</summary>
+    /// <summary>Crash hit a roof moving up (StopAtCeil 0x80); Y held until the move turns down.</summary>
     static bool _ceilHit;
-    static uint _ceilHitTicks;
+    /// <summary>Wall tick of the last jump/bounce SET; hang waits (34+dt)/2 after it.</summary>
+    static uint _airSetTicks;
+    static bool _airSetWindow;
+    /// <summary>34-tick hang applied last present (0 = none), for the X-release correction.</summary>
+    static int _hangLastStep;
     static bool _haveTransY;
     static bool _rideWasStanding;
     static double _ridePhase;
