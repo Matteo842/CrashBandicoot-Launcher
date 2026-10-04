@@ -46,6 +46,10 @@ public static partial class FramePacing
     static int _nativeWideFogFar, _nativeWideFogShift;
     static uint? _nativeWideFogBackground;
     static int _nativeWideOtFar;
+    // Projection of this frame's side pass, for object additions made after it.
+    readonly record struct NativeWideView(int Projection, int ScreenX, int ScreenY, int DrawX, int DrawY,
+        float CenterX, float CenterY, float CoreHalf, float WideHalf, float HalfHeight);
+    static NativeWideView? _nativeWideView;
     sealed class NativeWideWorld
     {
         public int PolyCount;
@@ -92,6 +96,7 @@ public static partial class FramePacing
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
         _nativeWideFogBackground = null;
+        _nativeWideView = null;
         GpuHle.NativeWideRendererActive = false;
         if (!GpuHle.WideFovActive)
         {
@@ -219,6 +224,7 @@ public static partial class FramePacing
         _nativeWideWorldRanges.Clear();
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
+        _nativeWideView = null;
         ClearNativeWideHudRanges();
         GpuHle.NativeWideRendererActive = false;
     }
@@ -478,6 +484,8 @@ public static partial class FramePacing
         for (int i = 0; i < _nativeWideTransparent.Count; i++)
             if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
                 _nativeWidePending.Add(_nativeWideTransparent[i]);
+        _nativeWideView = new NativeWideView(projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
+            viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
 
         LastNativeWideCpuMs = (Stopwatch.GetTimestamp() - cpuStart) * 1000.0 / Stopwatch.Frequency;
         if (_nativeWideLogCount < 8)
