@@ -237,7 +237,7 @@ public static partial class FramePacing
         _nativeWideLogCount = 0;
         _nativeWideSceneryRepairs.Clear();
         _nativeWideBeachSky = null;
-        _nativeWideBridgeSkies.Clear();
+        _nativeWideSkyArcs.Clear();
     }
 
     /// <summary>

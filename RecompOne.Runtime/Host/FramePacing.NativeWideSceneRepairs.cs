@@ -19,15 +19,14 @@ public static partial class FramePacing
     readonly record struct NativeWideSceneryKey(uint Level, uint X, uint Y, uint Z, int Polygons, int Vertices);
     static readonly Dictionary<NativeWideSceneryKey, List<NativeWideRepair>> _nativeWideSceneryRepairs = [];
     static List<NativeWideRepair>? _nativeWideBeachSky;
-    static readonly Dictionary<uint, List<NativeWideRepair>> _nativeWideBridgeSkies = [];
+    static readonly Dictionary<NativeWideSceneryKey, List<NativeWideRepair>> _nativeWideSkyArcs = [];
 
     static IReadOnlyList<NativeWideRepair> NativeWideSceneRepairs(IMemory m, NativeWideWorld world)
     {
         uint level = m.ReadU32(Catalogs.Catalog.LevelIdAddr);
-        if (level is 20 or 22 && world.PolyCount == 12 && world.VertexCount == 14
-            && m.ReadU32(world.Header + 0x1C) == 1)
-            return NativeWideBridgeSkyRepairs(m, world);
-        if (level is not (9 or 12 or 15 or 17 or 18 or 24 or 26 or 35 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (NativeWideSkyArc(m, world, level))
+            return NativeWideSkyArcRepairs(m, world, level);
+        if (level is not (9 or 12 or 15 or 17 or 18 or 24 or 26 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -58,6 +57,40 @@ public static partial class FramePacing
         bool hog = level == 17 && world.PolyCount == 1232 && world.VertexCount == 1382
             && m.ReadU32(world.Header) == 8383 && m.ReadU32(world.Header + 4) == 7163
             && m.ReadU32(world.Header + 8) == 122966;
+        // The Great Hall's end walls stop at the 4:3 edge as they approach the
+        // camera: the hall's left and right ends, and the right wall where the
+        // second gallery turns. Their stone cells repeat, so a block of original
+        // cells is copied along Z instead (no seams, no coplanar overlap between
+        // copies). Absolute X plane, Y and Z range of the block, Y offset, first
+        // Z shift; copies step by the block length until the wall passes the
+        // camera's nearest path point.
+        NativeWideHallWalls? hallWalls = level != 44 ? null
+            : (world.PolyCount, world.VertexCount, (int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8)) switch
+            {
+                (2466, 2395, 15063, 126774) => new(
+                [
+                    // Right end: three cells per period; the grid restarts after the column.
+                    new(22799, 797, 6685, 121198, 122798, 0, 2400, 127200),
+                    // Left end, beside and above its window.
+                    new(5599, 2397, 3997, 122798, 124398, 0, 1600, 127200),
+                    new(5599, 3997, 5597, 123998, 124398, 0, 400, 127200),
+                    new(5599, 4797, 5597, 123998, 124398, 800, 0, 127200),
+                    new(5599, 6397, 6997, 122798, 123398, 0, 600, 127200),
+                ],
+                // The window keeps only the far half of its arch surround.
+                Complete: [], Mirror: [112, 113, 114], MirrorZ: 123398),
+                (3148, 3050, 27889, 111327) => new(
+                [
+                    // Second gallery's right wall: one column per period. Each row
+                    // continues after its own last cell.
+                    new(35193, 5597, 6397, 111199, 111599, 0, 400, 115200),
+                    new(35193, 3197, 5597, 111199, 111599, 0, 800, 115200),
+                    new(35193, 2397, 3197, 111199, 111599, 0, 1400, 115200),
+                ],
+                // Cells cut along their diagonal at the end of two rows.
+                Complete: [2681, 2682], Mirror: [], MirrorZ: 0),
+                _ => null,
+            };
         // Sunset Vista's temple interior: climbing shafts and the rooms between them.
         // The outdoor opening and its corridor are not included.
         bool sunset = level == 35 && world.PolyCount == 3463 && world.VertexCount == 3183
@@ -73,7 +106,7 @@ public static partial class FramePacing
             _ => float.NaN,
         };
         bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
-            || temple;
+            || temple || hallWalls != null;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -83,6 +116,12 @@ public static partial class FramePacing
             m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
         var cached = scenery ? _nativeWideSceneryRepairs.GetValueOrDefault(key) : _nativeWideBeachSky;
         if (cached != null) return cached;
+        if (hallWalls != null)
+        {
+            var hall = NativeWideWallBlockRepairs(m, world, hallWalls);
+            PaceLog($"native-wide level={level} wall blocks repairs={hall.Count}");
+            return _nativeWideSceneryRepairs[key] = hall;
+        }
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
         var triangles = new NativeWideClipVertex[world.PolyCount * 3];
@@ -312,20 +351,101 @@ public static partial class FramePacing
         return repairs;
     }
 
-    static IReadOnlyList<NativeWideRepair> NativeWideBridgeSkyRepairs(IMemory m, NativeWideWorld world)
+    readonly record struct NativeWideWallBlock(float X, float YLow, float YHigh, float ZFrom, float ZTo,
+        float DY, float Shift, float Until);
+    // Blocks to copy, polygons whose cut cell is completed, and polygons mirrored across MirrorZ.
+    sealed record NativeWideHallWalls(NativeWideWallBlock[] Blocks, int[] Complete, int[] Mirror, float MirrorZ);
+
+    static List<NativeWideRepair> NativeWideWallBlockRepairs(IMemory m, NativeWideWorld world, NativeWideHallWalls walls)
     {
-        uint key = m.ReadU32(world.Header + 8);
-        if (_nativeWideBridgeSkies.TryGetValue(key, out var cached)) return cached;
-        var vertices = Enumerable.Range(0, world.VertexCount).Select(i => ReadNativeWideLocal(m, world, i)).ToArray();
+        int hx = (int)m.ReadU32(world.Header), hy = (int)m.ReadU32(world.Header + 4), hz = (int)m.ReadU32(world.Header + 8);
         var repairs = new List<NativeWideRepair>();
-        // The bridges' sky is a textured cylinder segment ending at +/-41°.
-        // Continue its arc at both end columns, keeping its radius and texture
-        // density. Reflection in the radial plane fixes every seam vertex.
-        foreach (var end in new[] { vertices.MinBy(v => v.X), vertices.MaxBy(v => v.X) })
+        Span<NativeWideClipVertex> t = stackalloc NativeWideClipVertex[3];
+        for (int pi = 0; pi < world.PolyCount; pi++)
         {
-            var radial = Vector2.Normalize(new Vector2((float)end.X, (float)end.Z));
-            NativeWideClipVertex Reflect(NativeWideClipVertex v, short u, short texV)
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            t[0] = ReadNativeWideLocal(m, world, a);
+            t[1] = ReadNativeWideLocal(m, world, b);
+            t[2] = ReadNativeWideLocal(m, world, c);
+            if (Array.IndexOf(walls.Complete, pi) >= 0 && TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short cu0, out short cv0, out short cu1, out short cv1, out short cu2, out short cv2))
             {
+                // A rectangular cell split along its diagonal: the right-angle corner
+                // shares Y with one vertex and Z with the other. The missing half
+                // uses the opposite corner, in position and texture.
+                t[0] = t[0] with { U = cu0, V = cv0 }; t[1] = t[1] with { U = cu1, V = cv1 }; t[2] = t[2] with { U = cu2, V = cv2 };
+                for (int r = 0; r < 3; r++)
+                {
+                    var right = t[r]; var p = t[(r + 1) % 3]; var q = t[(r + 2) % 3];
+                    if (!((right.Y == p.Y && right.Z == q.Z) || (right.Y == q.Y && right.Z == p.Z))) continue;
+                    repairs.Add(new(pi, p, q, p with
+                    {
+                        Y = p.Y + q.Y - right.Y, Z = p.Z + q.Z - right.Z, U = p.U + q.U - right.U, V = p.V + q.V - right.V,
+                        R = (p.R + q.R) / 2, G = (p.G + q.G) / 2, B = (p.B + q.B) / 2,
+                    }));
+                    break;
+                }
+            }
+            foreach (var block in walls.Blocks)
+            {
+                bool inside = true;
+                foreach (var v in t)
+                    inside &= v.X + hx == block.X && v.Y + hy >= block.YLow && v.Y + hy <= block.YHigh
+                        && v.Z + hz >= block.ZFrom && v.Z + hz <= block.ZTo;
+                if (!inside || !TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                    out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+                for (float dz = block.Shift; block.ZFrom + dz < block.Until; dz += block.ZTo - block.ZFrom)
+                    repairs.Add(new(pi, t[0] with { Y = t[0].Y + block.DY, Z = t[0].Z + dz, U = u0, V = v0 },
+                        t[1] with { Y = t[1].Y + block.DY, Z = t[1].Z + dz, U = u1, V = v1 },
+                        t[2] with { Y = t[2].Y + block.DY, Z = t[2].Z + dz, U = u2, V = v2 }));
+            }
+        }
+        float mirror = 2 * (walls.MirrorZ - hz);
+        foreach (int pi in walls.Mirror)
+        {
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+            NativeWideClipVertex Mirror(int index, short u, short v)
+            {
+                var p = ReadNativeWideLocal(m, world, index);
+                return p with { Z = mirror - p.Z, U = u, V = v };
+            }
+            repairs.Add(new(pi, Mirror(a, u0, v0), Mirror(b, u1, v1), Mirror(c, u2, v2)));
+        }
+        return repairs;
+    }
+
+    // Backdrop skies built as a camera-centred arc that ends inside the 16:9 view.
+    static bool NativeWideSkyArc(IMemory m, NativeWideWorld world, uint level) =>
+        m.ReadU32(world.Header + 0x1C) == 1 && (level, world.PolyCount, world.VertexCount) is
+            // Road to Nowhere / The High Road bridges: +/-41°.
+            (20 or 22, 12, 14)
+            // The Great Hall: the hall's sky (+/-45°) and the ending's (-117° to +45°).
+            or (44, 38, 30) or (44, 81, 57);
+
+    static IReadOnlyList<NativeWideRepair> NativeWideSkyArcRepairs(IMemory m, NativeWideWorld world, uint level)
+    {
+        var key = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
+            m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
+        if (_nativeWideSkyArcs.TryGetValue(key, out var cached)) return cached;
+        var vertices = Enumerable.Range(0, world.VertexCount).Select(i => ReadNativeWideLocal(m, world, i)).ToArray();
+        // Angle around the camera, 0 straight ahead (-Z).
+        var angles = vertices.Select(v => MathF.Atan2((float)v.X, -(float)v.Z)).ToArray();
+        var repairs = new List<NativeWideRepair>();
+        // Continue the arc at both end columns, keeping its radius and texture
+        // density. Reflection in the end's radial plane mirrors the sky beyond it.
+        // The Great Hall's end columns are only nearly radial (within 0.1°), so
+        // the mirror reuses the original seam vertices to leave no crack.
+        foreach (int end in new[] { Array.IndexOf(angles, angles.Min()), Array.IndexOf(angles, angles.Max()) })
+        {
+            var radial = Vector2.Normalize(new Vector2((float)vertices[end].X, (float)vertices[end].Z));
+            NativeWideClipVertex Reflect(int index, short u, short texV)
+            {
+                var v = vertices[index];
+                if (Math.Abs(angles[index] - angles[end]) < MathF.PI / 180) return v with { U = u, V = texV };
                 var p = new Vector2((float)v.X, (float)v.Z);
                 var reflected = 2 * Vector2.Dot(p, radial) * radial - p;
                 return v with { X = reflected.X, Z = reflected.Y, U = u, V = texV };
@@ -336,10 +456,10 @@ public static partial class FramePacing
                 NativeWidePolygonVertices(m.ReadU32(poly), m.ReadU32(poly + 4), out int a, out int b, out int c);
                 if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
                     out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
-                repairs.Add(new(pi, Reflect(vertices[a], u0, v0), Reflect(vertices[b], u1, v1), Reflect(vertices[c], u2, v2)));
+                repairs.Add(new(pi, Reflect(a, u0, v0), Reflect(b, u1, v1), Reflect(c, u2, v2)));
             }
         }
-        _nativeWideBridgeSkies[key] = repairs;
+        _nativeWideSkyArcs[key] = repairs;
         return repairs;
     }
 
