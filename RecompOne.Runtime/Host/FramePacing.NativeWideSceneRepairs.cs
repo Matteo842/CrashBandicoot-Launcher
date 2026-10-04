@@ -26,7 +26,7 @@ public static partial class FramePacing
         uint level = m.ReadU32(Catalogs.Catalog.LevelIdAddr);
         if (NativeWideSkyArc(m, world, level))
             return NativeWideSkyArcRepairs(m, world, level);
-        if (level is not (9 or 12 or 15 or 17 or 18 or 24 or 26 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (level is not (7 or 9 or 12 or 15 or 17 or 18 or 24 or 26 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -91,6 +91,14 @@ public static partial class FramePacing
                 Complete: [2681, 2682], Mirror: [], MirrorZ: 0),
                 _ => null,
             };
+        // Toxic Waste starts in front of a hazard-striped doorway. Its jambs stop
+        // below the top of the 16:9 view, and the dark wall face beside them,
+        // fading to black, keeps one triangle per side. Each listed half cell is
+        // completed, then the whole cell is copied up by the given Y offsets.
+        NativeWideCell[]? doorCells = level == 7 && world.PolyCount == 711 && world.VertexCount == 703
+            && m.ReadU32(world.Header) == 8200 && m.ReadU32(world.Header + 4) == 6339
+            && m.ReadU32(world.Header + 8) == 123690
+            ? [new(653, []), new(658, [400]), new(650, [400, 800]), new(662, [400, 800])] : null;
         // Sunset Vista's temple interior: climbing shafts and the rooms between them.
         // The outdoor opening and its corridor are not included.
         bool sunset = level == 35 && world.PolyCount == 3463 && world.VertexCount == 3183
@@ -106,7 +114,7 @@ public static partial class FramePacing
             _ => float.NaN,
         };
         bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
-            || temple || hallWalls != null;
+            || temple || hallWalls != null || doorCells != null;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -121,6 +129,12 @@ public static partial class FramePacing
             var hall = NativeWideWallBlockRepairs(m, world, hallWalls);
             PaceLog($"native-wide level={level} wall blocks repairs={hall.Count}");
             return _nativeWideSceneryRepairs[key] = hall;
+        }
+        if (doorCells != null)
+        {
+            var door = NativeWideCellRepairs(m, world, doorCells);
+            PaceLog($"native-wide level={level} cell repairs={door.Count}");
+            return _nativeWideSceneryRepairs[key] = door;
         }
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
@@ -414,6 +428,44 @@ public static partial class FramePacing
                 return p with { Z = mirror - p.Z, U = u, V = v };
             }
             repairs.Add(new(pi, Mirror(a, u0, v0), Mirror(b, u1, v1), Mirror(c, u2, v2)));
+        }
+        return repairs;
+    }
+
+    // The surviving right-triangle half of a rectangular cell, and the Y offsets
+    // at which the completed cell is copied.
+    readonly record struct NativeWideCell(int Polygon, int[] Lifts);
+
+    static List<NativeWideRepair> NativeWideCellRepairs(IMemory m, NativeWideWorld world, NativeWideCell[] cells)
+    {
+        var repairs = new List<NativeWideRepair>();
+        foreach (var cell in cells)
+        {
+            uint poly = world.Polygons + (uint)cell.Polygon * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            if (!TryNativeWideMaterial(m, world, cell.Polygon, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+            NativeWideClipVertex[] t = [ReadNativeWideLocal(m, world, a) with { U = u0, V = v0 },
+                ReadNativeWideLocal(m, world, b) with { U = u1, V = v1 }, ReadNativeWideLocal(m, world, c) with { U = u2, V = v2 }];
+            for (int r = 0; r < 3; r++)
+            {
+                var right = t[r]; var p = t[(r + 1) % 3]; var q = t[(r + 2) % 3];
+                if (Vector3.Dot(Position(p) - Position(right), Position(q) - Position(right)) != 0) continue;
+                // The opposite corner continues both edges in position, texture
+                // and colour, so a fade to black stays black at its far edge.
+                var corner = new NativeWideClipVertex(p.X + q.X - right.X, p.Y + q.Y - right.Y, p.Z + q.Z - right.Z,
+                    Math.Clamp(p.R + q.R - right.R, 0, 255), Math.Clamp(p.G + q.G - right.G, 0, 255),
+                    Math.Clamp(p.B + q.B - right.B, 0, 255), p.U + q.U - right.U, p.V + q.V - right.V);
+                repairs.Add(new(cell.Polygon, p, q, corner));
+                foreach (int lift in cell.Lifts)
+                {
+                    repairs.Add(new(cell.Polygon, right with { Y = right.Y + lift }, p with { Y = p.Y + lift },
+                        q with { Y = q.Y + lift }));
+                    repairs.Add(new(cell.Polygon, p with { Y = p.Y + lift }, q with { Y = q.Y + lift },
+                        corner with { Y = corner.Y + lift }));
+                }
+                break;
+            }
         }
         return repairs;
     }
