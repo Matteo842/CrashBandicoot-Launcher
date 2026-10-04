@@ -103,10 +103,10 @@ public static partial class FramePacing
         // and front wall stop just outside the 4:3 view, the jungle backdrop
         // behind them a little further left. All of them repeat, so whole
         // periods of original polygons are copied (absolute box, offset).
-        NativeWideCopy[]? lostCity = level != 32 ? null
+        NativeWideCopies? lostCity = level != 32 ? null
             : (world.PolyCount, world.VertexCount, (int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8)) switch
             {
-                (699, 725, 6768, -5999) =>
+                (699, 725, 6768, -5999) => new(
                 [
                     // Floor and front wall cells repeat every 1600 units. The
                     // semi-transparent root decals on the floor stay behind.
@@ -127,11 +127,30 @@ public static partial class FramePacing
                     // segment here; polygon 0 has the even one and the same CLUT.
                     new(new(4400, -30176, -5607), new(6000, -28576, -5607), new(-1600, 0, 0), DU: -64, Material: 0),
                     new(new(4400, -30176, -5607), new(6000, -28576, -5607), new(-3200, 0, 0), Material: 0),
-                ],
+                ], []),
                 // The upper backdrop lacks the panel hidden behind the temple roof
                 // in 4:3; the same panel appears one period (6400 units) earlier.
                 (3127, 3297, 22967, -5998) =>
-                    [new(new(15599, -30176, -5606), new(17199, -28576, -5606), new(6400, 0, 0))],
+                    new([new(new(15599, -30176, -5606), new(17199, -28576, -5606), new(6400, 0, 0))], []),
+                // The climb: the shaft's side walls are only 1200-1600 units deep,
+                // with no front faces, so 16:9 sees past their near edges. Below
+                // the right wall the back wall stops at X 98793. Its last column
+                // pair is reflected, then repeated: the vertex colours stay
+                // continuous and the brazier glow further left is not copied.
+                // Mask pairs stay whole. The top row alternates two cells.
+                (2679, 2327, 93633, -5998) => new(
+                [
+                    new(new(97993, -34005, -6), new(98793, -28405, -6), Vector3.Zero, MirrorX: 98793),
+                    new(new(97993, -34005, -6), new(98793, -28405, -6), new(1600, 0, 0)),
+                    new(new(97593, -28405, -6), new(98393, -28005, -6), new(800, 0, 0)),
+                    new(new(97593, -28405, -6), new(98393, -28005, -6), new(1600, 0, 0)),
+                    new(new(97593, -28405, -6), new(97993, -28005, -6), new(2400, 0, 0)),
+                    // From below the right wall's bottom edge, the back wall shows
+                    // a little above it too.
+                    new(new(97593, -28805, -6), new(98393, -28005, -6), new(0, 800, 0)),
+                    new(new(97593, -28805, -6), new(98393, -28005, -6), new(800, 800, 0)),
+                ], [91193, 97593]),
+                (2457, 2298, 93679, -5998) => new([], [91199, 97599]),
                 _ => null,
             };
         // Sunset Vista's temple interior: climbing shafts and the rooms between them.
@@ -190,9 +209,7 @@ public static partial class FramePacing
             triangles[o + 2] = ReadNativeWideLocal(m, world, c);
             for (int ei = 0; ei < 3; ei++)
             {
-                Vector3 pa = Position(triangles[o + ei]), pb = Position(triangles[o + (ei + 1) % 3]);
-                bool swap = pa.X > pb.X || (pa.X == pb.X && (pa.Y > pb.Y || (pa.Y == pb.Y && pa.Z > pb.Z)));
-                var edge = swap ? new NativeWideEdge(pb, pa) : new NativeWideEdge(pa, pb);
+                var edge = NativeWideEdgeKey(triangles[o + ei], triangles[o + (ei + 1) % 3]);
                 edges[edge] = edges.TryGetValue(edge, out var owner)
                     ? owner with { Count = owner.Count + 1 } : new NativeWideEdgeOwner(pi, ei, 1);
             }
@@ -512,14 +529,17 @@ public static partial class FramePacing
     }
 
     // Polygons with every vertex inside an absolute box, copied by Offset with U
-    // moved by DU. MirrorY, when set, first reflects them about that absolute Y.
-    // Material, when set, supplies the texture page and CLUT instead of each
-    // source polygon. Opaque leaves semi-transparent polygons out.
+    // moved by DU. MirrorX / MirrorY, when set, first reflect them about that
+    // absolute X / Y. Material, when set, supplies the texture page and CLUT
+    // instead of each source polygon. Opaque leaves semi-transparent polygons out.
     readonly record struct NativeWideCopy(Vector3 Min, Vector3 Max, Vector3 Offset, int DU = 0,
-        int Material = -1, bool Opaque = false, float MirrorY = float.NaN);
+        int Material = -1, bool Opaque = false, float MirrorX = float.NaN, float MirrorY = float.NaN);
+    // Copies, and side walls (absolute X planes) whose open near edges continue toward the camera.
+    sealed record NativeWideCopies(NativeWideCopy[] Copies, float[] NearWalls);
 
-    static List<NativeWideRepair> NativeWideCopyRepairs(IMemory m, NativeWideWorld world, NativeWideCopy[] copies)
+    static List<NativeWideRepair> NativeWideCopyRepairs(IMemory m, NativeWideWorld world, NativeWideCopies scenery)
     {
+        var copies = scenery.Copies;
         var origin = new Vector3((int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 4), (int)m.ReadU32(world.Header + 8));
         var repairs = new List<NativeWideRepair>();
         Span<NativeWideClipVertex> t = stackalloc NativeWideClipVertex[3];
@@ -543,14 +563,61 @@ public static partial class FramePacing
                     || (copy.Opaque && flags.SemiTrans)) continue;
                 NativeWideClipVertex Move(NativeWideClipVertex v, short u, short texV) => v with
                 {
-                    X = v.X + copy.Offset.X, Z = v.Z + copy.Offset.Z, U = u + copy.DU, V = texV,
+                    X = (float.IsNaN(copy.MirrorX) ? v.X : 2 * (copy.MirrorX - origin.X) - v.X) + copy.Offset.X,
                     Y = (float.IsNaN(copy.MirrorY) ? v.Y : 2 * (copy.MirrorY - origin.Y) - v.Y) + copy.Offset.Y,
+                    Z = v.Z + copy.Offset.Z, U = u + copy.DU, V = texV,
                 };
                 repairs.Add(new(copy.Material >= 0 ? copy.Material : pi,
                     Move(t[0], u0, v0), Move(t[1], u1, v1), Move(t[2], u2, v2)));
             }
         }
+        if (scenery.NearWalls.Length > 0)
+            NativeWideNearWallRepairs(m, world, origin, scenery.NearWalls, repairs);
         return repairs;
+    }
+
+    // Each open edge of a wall face whose surface ends toward the camera (+Z)
+    // continues 1200 units further, as mirrored tiles of its own texture. Rows
+    // of a wall end at different depths but never overlap, so neither do their strips.
+    static void NativeWideNearWallRepairs(IMemory m, NativeWideWorld world, Vector3 origin, float[] planes,
+        List<NativeWideRepair> repairs)
+    {
+        var faces = new List<(int Polygon, NativeWideClipVertex[] T)>();
+        var edges = new Dictionary<NativeWideEdge, int>();
+        for (int pi = 0; pi < world.PolyCount; pi++)
+        {
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            NativeWideClipVertex[] t = [ReadNativeWideLocal(m, world, a), ReadNativeWideLocal(m, world, b),
+                ReadNativeWideLocal(m, world, c)];
+            if (t[0].X != t[1].X || t[1].X != t[2].X || Array.IndexOf(planes, t[0].X + origin.X) < 0) continue;
+            faces.Add((pi, t));
+            for (int ei = 0; ei < 3; ei++)
+            {
+                var edge = NativeWideEdgeKey(t[ei], t[(ei + 1) % 3]);
+                edges[edge] = edges.GetValueOrDefault(edge) + 1;
+            }
+        }
+        foreach (var (pi, t) in faces)
+        {
+            if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+            Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
+            for (int ei = 0; ei < 3; ei++)
+            {
+                var a = t[ei]; var b = t[(ei + 1) % 3]; var c = t[(ei + 2) % 3];
+                if (edges[NativeWideEdgeKey(a, b)] != 1 || !NativeWideWallNearEdge(a, b, c)) continue;
+                AddNativeWideSceneryStrip(repairs, pi, a, b, c, uv[ei], uv[(ei + 1) % 3], uv[(ei + 2) % 3],
+                    Vector3.UnitZ, distance: 1200);
+            }
+        }
+    }
+
+    static NativeWideEdge NativeWideEdgeKey(NativeWideClipVertex a, NativeWideClipVertex b)
+    {
+        Vector3 pa = Position(a), pb = Position(b);
+        bool swap = pa.X > pb.X || (pa.X == pb.X && (pa.Y > pb.Y || (pa.Y == pb.Y && pa.Z > pb.Z)));
+        return swap ? new(pb, pa) : new(pa, pb);
     }
 
     // Backdrop skies built as a camera-centred arc that ends inside the 16:9 view.
