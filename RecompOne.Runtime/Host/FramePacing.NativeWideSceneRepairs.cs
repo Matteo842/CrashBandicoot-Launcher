@@ -26,7 +26,7 @@ public static partial class FramePacing
         uint level = m.ReadU32(Catalogs.Catalog.LevelIdAddr);
         if (NativeWideSkyArc(m, world, level))
             return NativeWideSkyArcRepairs(m, world, level);
-        if (level is not (7 or 9 or 12 or 15 or 17 or 18 or 24 or 26 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
+        if (level is not (7 or 9 or 12 or 15 or 17 or 18 or 24 or 26 or 32 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
             && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
             && m.ReadU32(world.Header + 8) == 130513;
@@ -99,6 +99,41 @@ public static partial class FramePacing
             && m.ReadU32(world.Header) == 8200 && m.ReadU32(world.Header + 4) == 6339
             && m.ReadU32(world.Header + 8) == 123690
             ? [new(653, []), new(658, [400]), new(650, [400, 800]), new(662, [400, 800])] : null;
+        // The Lost City starts at the west end of the temple walkway. Its floor
+        // and front wall stop just outside the 4:3 view, the jungle backdrop
+        // behind them a little further left. All of them repeat, so whole
+        // periods of original polygons are copied (absolute box, offset).
+        NativeWideCopy[]? lostCity = level != 32 ? null
+            : (world.PolyCount, world.VertexCount, (int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8)) switch
+            {
+                (699, 725, 6768, -5999) =>
+                [
+                    // Floor and front wall cells repeat every 1600 units. The
+                    // semi-transparent root decals on the floor stay behind.
+                    new(new(10000, -33600, -7), new(11600, -32400, 1593), new(-1600, 0, 0), Opaque: true),
+                    new(new(10000, -33600, -7), new(11600, -32400, 1593), new(-3200, 0, 0), Opaque: true),
+                    // Backdrop panels alternate every 3200 units between two
+                    // adjacent 64-halfword segments of an 8-bit page, so U + 128
+                    // reads the other panel with the same material.
+                    new(new(4400, -32800, -4007), new(7600, -29600, -4007), new(-3200, 0, 0), DU: 128),
+                    new(new(4400, -33600, -4007), new(6000, -32800, -4007), new(-1600, 0, 0), DU: 192),
+                    new(new(4400, -33600, -4007), new(6000, -32800, -4007), new(-3200, 0, 0), DU: 128),
+                    // Its bottom edge shows above the walkway's back edge where no
+                    // bushes stand in front. Reflect the bottom row below it.
+                    new(new(4400, -33600, -4007), new(6000, -32800, -4007), Vector3.Zero, MirrorY: -33600),
+                    new(new(4400, -33600, -4007), new(6000, -32800, -4007), new(-1600, 0, 0), DU: 192, MirrorY: -33600),
+                    new(new(4400, -33600, -4007), new(6000, -32800, -4007), new(-3200, 0, 0), DU: 128, MirrorY: -33600),
+                    // The upper backdrop runs the other way and is in the odd
+                    // segment here; polygon 0 has the even one and the same CLUT.
+                    new(new(4400, -30176, -5607), new(6000, -28576, -5607), new(-1600, 0, 0), DU: -64, Material: 0),
+                    new(new(4400, -30176, -5607), new(6000, -28576, -5607), new(-3200, 0, 0), Material: 0),
+                ],
+                // The upper backdrop lacks the panel hidden behind the temple roof
+                // in 4:3; the same panel appears one period (6400 units) earlier.
+                (3127, 3297, 22967, -5998) =>
+                    [new(new(15599, -30176, -5606), new(17199, -28576, -5606), new(6400, 0, 0))],
+                _ => null,
+            };
         // Sunset Vista's temple interior: climbing shafts and the rooms between them.
         // The outdoor opening and its corridor are not included.
         bool sunset = level == 35 && world.PolyCount == 3463 && world.VertexCount == 3183
@@ -114,7 +149,7 @@ public static partial class FramePacing
             _ => float.NaN,
         };
         bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
-            || temple || hallWalls != null || doorCells != null;
+            || temple || hallWalls != null || doorCells != null || lostCity != null;
         bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
             && m.ReadU32(world.Header + 0x1C) == 1;
         if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
@@ -135,6 +170,12 @@ public static partial class FramePacing
             var door = NativeWideCellRepairs(m, world, doorCells);
             PaceLog($"native-wide level={level} cell repairs={door.Count}");
             return _nativeWideSceneryRepairs[key] = door;
+        }
+        if (lostCity != null)
+        {
+            var copies = NativeWideCopyRepairs(m, world, lostCity);
+            PaceLog($"native-wide level={level} copy repairs={copies.Count}");
+            return _nativeWideSceneryRepairs[key] = copies;
         }
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
@@ -465,6 +506,48 @@ public static partial class FramePacing
                         corner with { Y = corner.Y + lift }));
                 }
                 break;
+            }
+        }
+        return repairs;
+    }
+
+    // Polygons with every vertex inside an absolute box, copied by Offset with U
+    // moved by DU. MirrorY, when set, first reflects them about that absolute Y.
+    // Material, when set, supplies the texture page and CLUT instead of each
+    // source polygon. Opaque leaves semi-transparent polygons out.
+    readonly record struct NativeWideCopy(Vector3 Min, Vector3 Max, Vector3 Offset, int DU = 0,
+        int Material = -1, bool Opaque = false, float MirrorY = float.NaN);
+
+    static List<NativeWideRepair> NativeWideCopyRepairs(IMemory m, NativeWideWorld world, NativeWideCopy[] copies)
+    {
+        var origin = new Vector3((int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 4), (int)m.ReadU32(world.Header + 8));
+        var repairs = new List<NativeWideRepair>();
+        Span<NativeWideClipVertex> t = stackalloc NativeWideClipVertex[3];
+        for (int pi = 0; pi < world.PolyCount; pi++)
+        {
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            t[0] = ReadNativeWideLocal(m, world, a);
+            t[1] = ReadNativeWideLocal(m, world, b);
+            t[2] = ReadNativeWideLocal(m, world, c);
+            foreach (var copy in copies)
+            {
+                bool inside = true;
+                foreach (var v in t)
+                {
+                    var p = Position(v) + origin;
+                    inside &= p == Vector3.Clamp(p, copy.Min, copy.Max);
+                }
+                if (!inside || !TryNativeWideMaterial(m, world, pi, 0, out var flags, out _,
+                    out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)
+                    || (copy.Opaque && flags.SemiTrans)) continue;
+                NativeWideClipVertex Move(NativeWideClipVertex v, short u, short texV) => v with
+                {
+                    X = v.X + copy.Offset.X, Z = v.Z + copy.Offset.Z, U = u + copy.DU, V = texV,
+                    Y = (float.IsNaN(copy.MirrorY) ? v.Y : 2 * (copy.MirrorY - origin.Y) - v.Y) + copy.Offset.Y,
+                };
+                repairs.Add(new(copy.Material >= 0 ? copy.Material : pi,
+                    Move(t[0], u0, v0), Move(t[1], u1, v1), Move(t[2], u2, v2)));
             }
         }
         return repairs;
