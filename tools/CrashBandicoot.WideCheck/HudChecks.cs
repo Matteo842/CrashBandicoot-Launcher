@@ -69,6 +69,13 @@ static class HudChecks
             Tail(prim + 0x40);
             FramePacing.CloseNativeWideHudRange(memory);
             Check(FramePacing.NativeWideHudShift(0, 550, 0, 512, 86) == 86, "Parked token without 8.8 trans still shifts");
+            Call("ResetNativeWideHud");
+            memory.WriteU32(obj + 0x80, unchecked((uint)(-80 << 8))); // Pickup_Display_Slave
+            Tail(prim);
+            Call("NoteNativeWideHudTransform", memory, obj);
+            Tail(prim + 0x40);
+            FramePacing.CloseNativeWideHudRange(memory);
+            Check(FramePacing.NativeWideHudShift(0, 176, 0, 512, 86) == 0, "Earlier token portraits stay beside the strip (#98)");
             memory.WriteU32(obj + 0x80, 0);
             Call("ResetNativeWideHud");
             Check(Pickup(0.2f) == 0 && Pickup(-0.3f) == 0, "Tawna portrait prims stay centred");

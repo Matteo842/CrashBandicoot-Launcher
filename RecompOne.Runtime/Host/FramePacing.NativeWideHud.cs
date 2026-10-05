@@ -27,11 +27,12 @@ public static partial class FramePacing
     /// <summary>
     /// Fraction of the half-width from the screen centre where HUD elements
     /// start following the wider edges, and where they follow them fully.
-    /// Fruit (left) and lives (right) sit well beyond 0.35; the token strip
+    /// Fruit (left, -200) and lives (right, 130) sit beyond 0.45; the token
+    /// strip, including the earlier tokens' portraits at ±80 (±0.31, #98),
     /// stays centred; anything parked off-screen keeps moving outward.
     /// </summary>
-    const float NativeWideHudCentreBand = 0.15f;
-    const float NativeWideHudEdgeBand = 0.35f;
+    const float NativeWideHudCentreBand = 0.35f;
+    const float NativeWideHudEdgeBand = 0.45f;
 
     /// <summary>
     /// Counter icons sit 130 px from the centre (DispC trans 0x8200 in 8.8),
