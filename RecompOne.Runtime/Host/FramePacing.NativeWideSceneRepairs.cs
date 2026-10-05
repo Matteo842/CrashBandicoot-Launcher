@@ -149,8 +149,30 @@ public static partial class FramePacing
                     // a little above it too.
                     new(new(97593, -28805, -6), new(98393, -28005, -6), new(0, 800, 0)),
                     new(new(97593, -28805, -6), new(98393, -28005, -6), new(800, 800, 0)),
-                ], [91193, 97593]),
-                (2457, 2298, 93679, -5998) => new([], [91199, 97599]),
+                ], [NativeWideXPlane(91193), NativeWideXPlane(97593)]),
+                (2457, 2298, 93679, -5998) => new([], [NativeWideXPlane(91199), NativeWideXPlane(97599)]),
+                // The level's end: Crash warps out on a pillar between two
+                // platforms, each with the same symmetric tower (centres X 800 and
+                // 8796). Only the lower right half of the left one survived the
+                // 4:3 cull; the right one's left half and top fill it. The left
+                // platform's floor, slanted pit wall and merlons all stop short of
+                // the camera; the merlons repeat every 400.
+                (3336, 3178, 15200, -5998) => new(
+                [
+                    new(new(7990, -12000, -3000), new(8800, -9200, -6), new(-7996, 0, 0)),
+                    new(new(8800, -10400, -6), new(9240, -9200, -6), new(-7996, 0, 0)),
+                    // The floor: a back row of identical cells and an 800 cell in
+                    // front of it, of which only half survived.
+                    new(new(800, -12000, -6), new(1600, -12000, 394), new(-800, 0, 0)),
+                    new(new(800, -12000, -6), new(1600, -12000, 394), new(-1600, 0, 0)),
+                    new(new(800, -12000, 394), new(1600, -12000, 1194), Vector3.Zero, Complete: true),
+                    new(new(800, -12000, 394), new(1600, -12000, 1194), new(-800, 0, 0), Complete: true),
+                    new(new(800, -12000, 394), new(1600, -12000, 1194), new(0, 0, 800), Complete: true),
+                    new(new(1600, -12400, 1234), new(2000, -12000, 1554), new(0, 0, 400)),
+                    new(new(1600, -12400, 1234), new(2000, -12000, 1554), new(0, 0, 800)),
+                ],
+                // The pit wall; the merlons on it reach X 1992.
+                [new(new(1590, -14400, -3000), new(1990, -12000, 1600))]),
                 _ => null,
             };
         // Sunset Vista's temple interior: climbing shafts and the rooms between them.
@@ -532,10 +554,15 @@ public static partial class FramePacing
     // moved by DU. MirrorX / MirrorY, when set, first reflect them about that
     // absolute X / Y. Material, when set, supplies the texture page and CLUT
     // instead of each source polygon. Opaque leaves semi-transparent polygons out.
+    // Complete also adds the missing half of a rectangular cell (right angle at r:
+    // corner p + q - r in position, texture and colour).
     readonly record struct NativeWideCopy(Vector3 Min, Vector3 Max, Vector3 Offset, int DU = 0,
-        int Material = -1, bool Opaque = false, float MirrorX = float.NaN, float MirrorY = float.NaN);
-    // Copies, and side walls (absolute X planes) whose open near edges continue toward the camera.
-    sealed record NativeWideCopies(NativeWideCopy[] Copies, float[] NearWalls);
+        int Material = -1, bool Opaque = false, float MirrorX = float.NaN, float MirrorY = float.NaN,
+        bool Complete = false);
+    // Copies, and boxes of walls and floors whose open near edges continue toward the camera.
+    sealed record NativeWideCopies(NativeWideCopy[] Copies, NativeWideBox[] NearWalls);
+    readonly record struct NativeWideBox(Vector3 Min, Vector3 Max);
+    static NativeWideBox NativeWideXPlane(float x) => new(new(x, -65536, -65536), new(x, 65536, 65536));
 
     static List<NativeWideRepair> NativeWideCopyRepairs(IMemory m, NativeWideWorld world, NativeWideCopies scenery)
     {
@@ -567,8 +594,18 @@ public static partial class FramePacing
                     Y = (float.IsNaN(copy.MirrorY) ? v.Y : 2 * (copy.MirrorY - origin.Y) - v.Y) + copy.Offset.Y,
                     Z = v.Z + copy.Offset.Z, U = u + copy.DU, V = texV,
                 };
-                repairs.Add(new(copy.Material >= 0 ? copy.Material : pi,
-                    Move(t[0], u0, v0), Move(t[1], u1, v1), Move(t[2], u2, v2)));
+                NativeWideClipVertex[] moved = [Move(t[0], u0, v0), Move(t[1], u1, v1), Move(t[2], u2, v2)];
+                int material = copy.Material >= 0 ? copy.Material : pi;
+                repairs.Add(new(material, moved[0], moved[1], moved[2]));
+                for (int r = 0; copy.Complete && r < 3; r++)
+                {
+                    var right = moved[r]; var p = moved[(r + 1) % 3]; var q = moved[(r + 2) % 3];
+                    if (Vector3.Dot(Position(p) - Position(right), Position(q) - Position(right)) != 0) continue;
+                    repairs.Add(new(material, p, q, new(p.X + q.X - right.X, p.Y + q.Y - right.Y, p.Z + q.Z - right.Z,
+                        Math.Clamp(p.R + q.R - right.R, 0, 255), Math.Clamp(p.G + q.G - right.G, 0, 255),
+                        Math.Clamp(p.B + q.B - right.B, 0, 255), p.U + q.U - right.U, p.V + q.V - right.V)));
+                    break;
+                }
             }
         }
         if (scenery.NearWalls.Length > 0)
@@ -576,10 +613,11 @@ public static partial class FramePacing
         return repairs;
     }
 
-    // Each open edge of a wall face whose surface ends toward the camera (+Z)
-    // continues 1200 units further, as mirrored tiles of its own texture. Rows
-    // of a wall end at different depths but never overlap, so neither do their strips.
-    static void NativeWideNearWallRepairs(IMemory m, NativeWideWorld world, Vector3 origin, float[] planes,
+    // Faces inside the boxes whose planes run along Z (walls, floors): each open
+    // edge where the surface ends toward the camera (+Z) continues 1200 units
+    // further, as mirrored tiles of its own texture. Rows of a wall end at
+    // different depths but never overlap, so neither do their strips.
+    static void NativeWideNearWallRepairs(IMemory m, NativeWideWorld world, Vector3 origin, NativeWideBox[] boxes,
         List<NativeWideRepair> repairs)
     {
         var faces = new List<(int Polygon, NativeWideClipVertex[] T)>();
@@ -590,7 +628,9 @@ public static partial class FramePacing
             NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
             NativeWideClipVertex[] t = [ReadNativeWideLocal(m, world, a), ReadNativeWideLocal(m, world, b),
                 ReadNativeWideLocal(m, world, c)];
-            if (t[0].X != t[1].X || t[1].X != t[2].X || Array.IndexOf(planes, t[0].X + origin.X) < 0) continue;
+            var normal = Vector3.Cross(Position(t[1]) - Position(t[0]), Position(t[2]) - Position(t[0]));
+            if (Math.Abs(normal.Z) > normal.Length() * 0.001f || !boxes.Any(box => t.All(v =>
+                Position(v) + origin == Vector3.Clamp(Position(v) + origin, box.Min, box.Max)))) continue;
             faces.Add((pi, t));
             for (int ei = 0; ei < 3; ei++)
             {
@@ -606,7 +646,7 @@ public static partial class FramePacing
             for (int ei = 0; ei < 3; ei++)
             {
                 var a = t[ei]; var b = t[(ei + 1) % 3]; var c = t[(ei + 2) % 3];
-                if (edges[NativeWideEdgeKey(a, b)] != 1 || !NativeWideWallNearEdge(a, b, c)) continue;
+                if (edges[NativeWideEdgeKey(a, b)] != 1 || !NativeWideNearEdge(a, b, c)) continue;
                 AddNativeWideSceneryStrip(repairs, pi, a, b, c, uv[ei], uv[(ei + 1) % 3], uv[(ei + 2) % 3],
                     Vector3.UnitZ, distance: 1200);
             }
@@ -743,9 +783,12 @@ public static partial class FramePacing
     }
 
     // Open edge of a face lying in an X plane whose surface ends toward the camera (+Z).
-    static bool NativeWideWallNearEdge(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c)
+    static bool NativeWideWallNearEdge(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c) =>
+        a.X == b.X && b.X == c.X && NativeWideNearEdge(a, b, c);
+
+    // Edge a-b of triangle abc whose surface ends toward the camera (+Z).
+    static bool NativeWideNearEdge(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c)
     {
-        if (a.X != b.X || b.X != c.X) return false;
         Vector3 pa = Position(a), edge = Position(b) - pa, outward = pa - Position(c);
         outward -= edge * (Vector3.Dot(outward, edge) / Vector3.Dot(edge, edge));
         return outward.Z > 1;
