@@ -261,6 +261,13 @@ public class ViewConfig
         set => SetString("DevMenuSection", string.IsNullOrWhiteSpace(value) ? "cheats" : value);
     }
 
+    /// <summary>First-run "press F3" hint already shown (menu opened or timed out).</summary>
+    public bool DevMenuHintSeen
+    {
+        get => GetBool("DevMenuHintSeen");
+        set => SetBool("DevMenuHintSeen", value);
+    }
+
     /// <summary>Show FPS + Working Set HUD overlay (top-right).</summary>
     public bool ShowDevHud
     {

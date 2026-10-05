@@ -12,6 +12,11 @@ internal static class DevHudOverlay
     static string? _flash;
     static long _flashUntil;
 
+    // First-run Developer Menu hint: gone for good once the menu opens or
+    // after this many seconds on screen (time under pause/popups not counted).
+    const float HintSeconds = 180f;
+    static float _hintShown;
+
     public static void Flash(string message)
     {
         if (string.IsNullOrWhiteSpace(message)) return;
@@ -25,6 +30,44 @@ internal static class DevHudOverlay
         float ui = Math.Clamp(ImGui.GetIO().FontGlobalScale, 1f, 2.5f);
         DrawFlash(vp, ui);
         DrawStats(vp, ui);
+        DrawDevMenuHint(vp, ui);
+    }
+
+    static void DrawDevMenuHint(ImGuiViewportPtr vp, float ui)
+    {
+        var view = ConfigManager.View;
+        if (view.DevMenuHintSeen) return;
+        if (PanelManager.Get<DevMenuPopup>()?.IsOpen == true)
+        {
+            DismissDevMenuHint();
+            return;
+        }
+        if (StartupNotice.NeedsAck
+            || PanelManager.Get<DiscPickerPopup>()?.IsOpen == true
+            || PanelManager.Get<PauseMenuPopup>()?.IsOpen == true)
+            return;
+
+        _hintShown += Math.Min(ImGui.GetIO().DeltaTime, 0.25f);
+        if (_hintShown >= HintSeconds)
+        {
+            DismissDevMenuHint();
+            return;
+        }
+
+        float pad = 16 * ui;
+        ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(vp.WorkSize.X * 0.5f, vp.WorkSize.Y - pad), ImGuiCond.Always, new Vector2(0.5f, 1f));
+        ImGui.SetNextWindowBgAlpha(0.7f);
+        PushHudStyle(ui);
+        if (ImGui.Begin("##dev-menu-hint", HudFlags))
+            ImGui.TextUnformatted($"Press {view.CheatMenuKey} for the Developer Menu (FPS counter, level warp, cheats)");
+        ImGui.End();
+        ImGui.PopStyleVar(3);
+    }
+
+    static void DismissDevMenuHint()
+    {
+        ConfigManager.View.DevMenuHintSeen = true;
+        ConfigManager.SaveView(PanelManager.Panels);
     }
 
     static void DrawFlash(ImGuiViewportPtr vp, float ui)
