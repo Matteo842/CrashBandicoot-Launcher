@@ -18,7 +18,6 @@ public static partial class FramePacing
     readonly record struct NativeWideEdgeOwner(int Polygon, int Edge, int Count);
     readonly record struct NativeWideSceneryKey(uint Level, uint X, uint Y, uint Z, int Polygons, int Vertices);
     static readonly Dictionary<NativeWideSceneryKey, List<NativeWideRepair>> _nativeWideSceneryRepairs = [];
-    static List<NativeWideRepair>? _nativeWideBeachSky;
     static readonly Dictionary<NativeWideSceneryKey, List<NativeWideRepair>> _nativeWideSkyArcs = [];
 
     static IReadOnlyList<NativeWideRepair> NativeWideSceneRepairs(IMemory m, NativeWideWorld world)
@@ -27,9 +26,6 @@ public static partial class FramePacing
         if (NativeWideSkyArc(m, world, level))
             return NativeWideSkyArcRepairs(m, world, level);
         if (level is not (7 or 9 or 12 or 15 or 17 or 18 or 24 or 26 or 32 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
-        bool beach = level == 9 && world.PolyCount == 2664 && world.VertexCount == 3054
-            && m.ReadU32(world.Header) == 8355 && m.ReadU32(world.Header + 4) == 5547
-            && m.ReadU32(world.Header + 8) == 130513;
         bool gate = level == 18 && world.PolyCount == 2620 && world.VertexCount == 3114
             && m.ReadU32(world.Header) == 46280 && (int)m.ReadU32(world.Header + 4) == -45049
             && (int)m.ReadU32(world.Header + 8) == -2060;
@@ -103,7 +99,9 @@ public static partial class FramePacing
         // and front wall stop just outside the 4:3 view, the jungle backdrop
         // behind them a little further left. All of them repeat, so whole
         // periods of original polygons are copied (absolute box, offset).
-        NativeWideCopies? lostCity = level != 32 ? null
+        NativeWideCopies? copies = level == 9 ? NativeWideBeachCopies(world, (int)m.ReadU32(world.Header),
+                (int)m.ReadU32(world.Header + 8))
+            : level != 32 ? null
             : (world.PolyCount, world.VertexCount, (int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8)) switch
             {
                 (699, 725, 6768, -5999) => new(
@@ -189,16 +187,14 @@ public static partial class FramePacing
             (113200, -64800) => -2000,
             _ => float.NaN,
         };
-        bool scenery = beach || gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
-            || temple || hallWalls != null || doorCells != null || lostCity != null;
-        bool sky = level == 9 && world.PolyCount == 21 && world.VertexCount == 19
-            && m.ReadU32(world.Header + 0x1C) == 1;
-        if (!scenery && !sky) return Array.Empty<NativeWideRepair>();
+        bool scenery = gate || fortress || jungle || castle || slippery || upstream || creek || creekNext || hog
+            || temple || hallWalls != null || doorCells != null || copies != null;
+        if (!scenery) return Array.Empty<NativeWideRepair>();
         // Several loaded meshes can need different additions in the same level.
         // Identify the asset, not its transient RAM address or the level alone.
         var key = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
             m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
-        var cached = scenery ? _nativeWideSceneryRepairs.GetValueOrDefault(key) : _nativeWideBeachSky;
+        var cached = _nativeWideSceneryRepairs.GetValueOrDefault(key);
         if (cached != null) return cached;
         if (hallWalls != null)
         {
@@ -212,11 +208,11 @@ public static partial class FramePacing
             PaceLog($"native-wide level={level} cell repairs={door.Count}");
             return _nativeWideSceneryRepairs[key] = door;
         }
-        if (lostCity != null)
+        if (copies != null)
         {
-            var copies = NativeWideCopyRepairs(m, world, lostCity);
-            PaceLog($"native-wide level={level} copy repairs={copies.Count}");
-            return _nativeWideSceneryRepairs[key] = copies;
+            var copied = NativeWideCopyRepairs(m, world, copies);
+            PaceLog($"native-wide level={level} copy repairs={copied.Count}");
+            return _nativeWideSceneryRepairs[key] = copied;
         }
 
         var edges = new Dictionary<NativeWideEdge, NativeWideEdgeOwner>();
@@ -273,21 +269,11 @@ public static partial class FramePacing
             var a = triangles[o + owner.Edge];
             var b = triangles[o + (owner.Edge + 1) % 3];
             var c = triangles[o + (owner.Edge + 2) % 3];
-            if (sky)
-            {
-                if (a.Y != 64 || b.Y != 64) continue;
-                // Continue the horizon colour below the existing sky strip.
-                var bottomA = a with { Y = -4096 }; var bottomB = b with { Y = -4096 };
-                repairs.Add(new(-1, a, b, bottomB)); repairs.Add(new(-1, a, bottomB, bottomA));
-                continue;
-            }
             uint p0 = m.ReadU32(world.Polygons + (uint)owner.Polygon * 8);
             int material = (int)((p0 >> 8) & 4095);
             Vector3? direction = null;
             Vector3? endDirection = null;
             float distance = 1600;
-            if (beach && (material is not (593 or 595) || Math.Min(a.Z, b.Z) < 800 || Math.Max(a.Z, b.Z) > 4000
-                || Math.Min(Math.Abs(a.X), Math.Abs(b.X)) < 2400)) continue;
             if (gate || fortress)
             {
                 bool bank = gate ? material is (673 or 675) && Math.Max(a.Y, b.Y) <= -4800
@@ -440,9 +426,8 @@ public static partial class FramePacing
                     new Vector3(1, 0.5f, 0.4f), distance: 2400);
             }
         }
-        PaceLog($"native-wide level={level} {(scenery ? "scenery" : "sky")} repairs={repairs.Count}");
-        if (scenery) _nativeWideSceneryRepairs[key] = repairs; else _nativeWideBeachSky = repairs;
-        return repairs;
+        PaceLog($"native-wide level={level} scenery repairs={repairs.Count}");
+        return _nativeWideSceneryRepairs[key] = repairs;
     }
 
     readonly record struct NativeWideWallBlock(float X, float YLow, float YHigh, float ZFrom, float ZTo,
@@ -559,9 +544,13 @@ public static partial class FramePacing
     readonly record struct NativeWideCopy(Vector3 Min, Vector3 Max, Vector3 Offset, int DU = 0,
         int Material = -1, bool Opaque = false, float MirrorX = float.NaN, float MirrorY = float.NaN,
         bool Complete = false);
-    // Copies, and boxes of walls and floors whose open near edges continue toward the camera.
-    sealed record NativeWideCopies(NativeWideCopy[] Copies, NativeWideBox[] NearWalls);
-    readonly record struct NativeWideBox(Vector3 Min, Vector3 Max);
+    // Copies, boxes of walls and floors whose open near edges continue toward the
+    // camera, rows of cells to fill, and terrain to continue sideways.
+    sealed record NativeWideCopies(NativeWideCopy[] Copies, NativeWideBox[] NearWalls, NativeWideGrid[]? Grids = null,
+        NativeWideTerrain? Terrain = null);
+    // Direction, when set, continues open edges facing it instead of +Z, for faces
+    // in any plane, by Distance.
+    readonly record struct NativeWideBox(Vector3 Min, Vector3 Max, Vector3? Direction = null, float Distance = 1200);
     static NativeWideBox NativeWideXPlane(float x) => new(new(x, -65536, -65536), new(x, 65536, 65536));
 
     static List<NativeWideRepair> NativeWideCopyRepairs(IMemory m, NativeWideWorld world, NativeWideCopies scenery)
@@ -610,7 +599,260 @@ public static partial class FramePacing
         }
         if (scenery.NearWalls.Length > 0)
             NativeWideNearWallRepairs(m, world, origin, scenery.NearWalls, repairs);
+        if (scenery.Grids != null)
+            NativeWideGridRepairs(m, world, origin, scenery.Grids, repairs);
+        if (scenery.Terrain is NativeWideTerrain terrain)
+            NativeWideTerrainRepairs(m, world, origin, terrain, repairs);
         return repairs;
+    }
+
+    // Uneven ground built as a lattice of roughly square cells, cut by the 4:3
+    // cull along a staircase: faces with the listed texinfos inside Min..Max.
+    // Each lattice row continues Cells cells past both of its ends. Positions
+    // repeat the row's last step, heights and colours are reflected through the
+    // end vertex (the slope carries on, a valley's side keeps rising), and cells
+    // copy the texture of the row's nearest whole cell. Shared lattice vertices
+    // keep every new cell joined to its neighbours and to the original edge.
+    readonly record struct NativeWideTerrain(Vector3 Min, Vector3 Max, int[] Texinfos, int Cells);
+
+    static void NativeWideTerrainRepairs(IMemory m, NativeWideWorld world, Vector3 origin, NativeWideTerrain terrain,
+        List<NativeWideRepair> repairs)
+    {
+        var faces = new List<(int Polygon, NativeWideClipVertex[] T)>();
+        for (int pi = 0; pi < world.PolyCount; pi++)
+        {
+            uint poly = world.Polygons + (uint)pi * 8;
+            uint p0 = FastU32(m, poly);
+            if (Array.IndexOf(terrain.Texinfos, (int)((p0 >> 8) & 0xFFF)) < 0) continue;
+            NativeWidePolygonVertices(p0, FastU32(m, poly + 4), out int a, out int b, out int c);
+            if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+            NativeWideClipVertex[] t = [ReadNativeWideLocal(m, world, a) with { U = u0, V = v0 },
+                ReadNativeWideLocal(m, world, b) with { U = u1, V = v1 },
+                ReadNativeWideLocal(m, world, c) with { U = u2, V = v2 }];
+            if (t.All(v => Position(v) + origin == Vector3.Clamp(Position(v) + origin, terrain.Min, terrain.Max)))
+                faces.Add((pi, t));
+        }
+        if (faces.Count == 0) return;
+        // Edges running along X or Z (250-600 units) step the column or row;
+        // diagonals do not. Vertices are numbered breadth first; the largest
+        // connected part is the ground.
+        var links = new Dictionary<Vector3, List<(Vector3 To, int DI, int DJ)>>();
+        var vertices = new Dictionary<Vector3, NativeWideClipVertex>();
+        foreach (var (_, t) in faces)
+            for (int k = 0; k < 3; k++)
+            {
+                Vector3 a = Position(t[k]), b = Position(t[(k + 1) % 3]), d = b - a;
+                vertices[a] = t[k];
+                int di = 0, dj = 0;
+                if (Math.Abs(d.X) > 2 * Math.Abs(d.Z) && Math.Abs(d.X) is > 250 and < 600) di = Math.Sign(d.X);
+                else if (Math.Abs(d.Z) > 2 * Math.Abs(d.X) && Math.Abs(d.Z) is > 250 and < 600) dj = Math.Sign(d.Z);
+                else continue;
+                if (!links.TryGetValue(a, out var la)) links[a] = la = [];
+                if (!links.TryGetValue(b, out var lb)) links[b] = lb = [];
+                la.Add((b, di, dj)); lb.Add((a, -di, -dj));
+            }
+        var cellOf = new Dictionary<Vector3, (int I, int J)>();
+        var lattice = new Dictionary<(int I, int J), NativeWideClipVertex>();
+        var seen = new HashSet<Vector3>();
+        foreach (var start in vertices.Keys)
+        {
+            if (!seen.Add(start)) continue;
+            var part = new Dictionary<Vector3, (int I, int J)> { [start] = (0, 0) };
+            var queue = new Queue<Vector3>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                var v = queue.Dequeue();
+                var (i, j) = part[v];
+                if (!links.TryGetValue(v, out var list)) continue;
+                foreach (var (to, di, dj) in list)
+                {
+                    if (!part.TryAdd(to, (i + di, j + dj))) continue;
+                    seen.Add(to);
+                    queue.Enqueue(to);
+                }
+            }
+            if (part.Count > cellOf.Count) cellOf = part;
+        }
+        foreach (var (v, at) in cellOf) lattice.TryAdd(at, vertices[v]);
+        // Original faces per cell: the cell's lowest corner.
+        var cells = new Dictionary<(int I, int J), List<(int Polygon, NativeWideClipVertex[] T, (int I, int J)[] At)>>();
+        foreach (var (pi, t) in faces)
+        {
+            if (!t.All(v => cellOf.ContainsKey(Position(v)))) continue;
+            (int I, int J)[] at = [cellOf[Position(t[0])], cellOf[Position(t[1])], cellOf[Position(t[2])]];
+            int i0 = at.Min(e => e.I), j0 = at.Min(e => e.J);
+            if (at.Max(e => e.I) - i0 != 1 || at.Max(e => e.J) - j0 != 1) continue;
+            if (!cells.TryGetValue((i0, j0), out var list)) cells[(i0, j0)] = list = [];
+            list.Add((pi, t, at));
+        }
+        // Continue each row past both ends.
+        var added = new Dictionary<(int I, int J), NativeWideClipVertex>();
+        foreach (var row in lattice.Keys.GroupBy(e => e.J))
+        {
+            int j = row.Key, first = row.Min(e => e.I), last = row.Max(e => e.I);
+            foreach (var (end, side) in new[] { (last, 1), (first, -1) })
+            {
+                if (!lattice.TryGetValue((end - side, j), out var inner)) continue;
+                var edge = lattice[(end, j)];
+                Vector3 step = Position(edge) - Position(inner);
+                for (int k = 1; k <= terrain.Cells; k++)
+                {
+                    // The vertex k cells inward, or the nearest one short of it.
+                    var mirror = inner;
+                    for (int n = k; n > 1; n--)
+                        if (lattice.TryGetValue((end - side * n, j), out var found)) { mirror = found; break; }
+                    var p = Position(edge) + step * k;
+                    added.TryAdd((end + side * k, j), edge with
+                    {
+                        X = p.X, Y = 2 * edge.Y - mirror.Y, Z = p.Z,
+                        R = Math.Clamp(mirror.R, 0, 255), G = Math.Clamp(mirror.G, 0, 255), B = Math.Clamp(mirror.B, 0, 255),
+                    });
+                }
+            }
+        }
+        foreach (var (key, v) in added) lattice.TryAdd(key, v);
+        int jLow = lattice.Keys.Min(e => e.J), jHigh = lattice.Keys.Max(e => e.J);
+        int iLow = lattice.Keys.Min(e => e.I), iHigh = lattice.Keys.Max(e => e.I);
+        for (int j = jLow; j < jHigh; j++)
+            for (int i = iLow; i < iHigh; i++)
+            {
+                if (!lattice.ContainsKey((i, j)) || !lattice.ContainsKey((i + 1, j))
+                    || !lattice.ContainsKey((i, j + 1)) || !lattice.ContainsKey((i + 1, j + 1))) continue;
+                var own = cells.GetValueOrDefault((i, j));
+                if (own?.Count >= 2) continue;
+                if (own?.Count == 1)
+                {
+                    // Half a cell: the missing corner is a lattice vertex; its
+                    // texture coordinates continue both edges (p + q - r).
+                    var (pi, t, at) = own[0];
+                    for (int r = 0; r < 3; r++)
+                    {
+                        var p = t[(r + 1) % 3]; var q = t[(r + 2) % 3]; var right = t[r];
+                        // The right-angle corner shares a row with one and a column with the other.
+                        if (!((at[r].I == at[(r + 1) % 3].I && at[r].J == at[(r + 2) % 3].J)
+                            || (at[r].I == at[(r + 2) % 3].I && at[r].J == at[(r + 1) % 3].J))) continue;
+                        var missing = (at[(r + 1) % 3].I + at[(r + 2) % 3].I - at[r].I, at[(r + 1) % 3].J + at[(r + 2) % 3].J - at[r].J);
+                        repairs.Add(new(pi, p, q, lattice[missing] with { U = p.U + q.U - right.U, V = p.V + q.V - right.V }));
+                        break;
+                    }
+                    continue;
+                }
+                // Only cells beside the original ground, not holes inside it.
+                if (!added.ContainsKey((i, j)) && !added.ContainsKey((i + 1, j))
+                    && !added.ContainsKey((i, j + 1)) && !added.ContainsKey((i + 1, j + 1))) continue;
+                var template = cells.Where(e => e.Value.Count >= 2 && Math.Abs(e.Key.J - j) <= 1)
+                    .OrderBy(e => Math.Abs(e.Key.J - j)).ThenBy(e => Math.Abs(e.Key.I - i)).FirstOrDefault();
+                if (template.Value == null) continue;
+                foreach (var (pi, t, at) in template.Value)
+                {
+                    NativeWideClipVertex Corner(int k) =>
+                        lattice[(i + at[k].I - template.Key.I, j + at[k].J - template.Key.J)] with { U = t[k].U, V = t[k].V };
+                    repairs.Add(new(pi, Corner(0), Corner(1), Corner(2)));
+                }
+            }
+    }
+
+    // Rows of rectangular cells along X in axis-aligned faces inside Min..Max: Y
+    // planes form rows per Z band, Z planes per Y band. Each row is filled from
+    // absolute X From to To in steps of Cell, aligned to its own cells. A half cell
+    // (one triangle left by the 4:3 cull) gets its missing corner p + q - r; an
+    // empty slot gets a copy of the row's nearest whole cell. Repeat then copies
+    // each filled row across its band (Z for Y planes, Y for Z planes).
+    readonly record struct NativeWideGrid(Vector3 Min, Vector3 Max, float Cell, float From, float To,
+        float[]? Repeat = null);
+
+    static void NativeWideGridRepairs(IMemory m, NativeWideWorld world, Vector3 origin, NativeWideGrid[] grids,
+        List<NativeWideRepair> repairs)
+    {
+        foreach (var grid in grids)
+        {
+            var rows = new Dictionary<(int Axis, float Plane, float Low, float High),
+                SortedDictionary<float, List<(int Polygon, NativeWideClipVertex[] T)>>>();
+            for (int pi = 0; pi < world.PolyCount; pi++)
+            {
+                uint poly = world.Polygons + (uint)pi * 8;
+                NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+                if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                    out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+                NativeWideClipVertex[] t = [ReadNativeWideLocal(m, world, a) with { U = u0, V = v0 },
+                    ReadNativeWideLocal(m, world, b) with { U = u1, V = v1 },
+                    ReadNativeWideLocal(m, world, c) with { U = u2, V = v2 }];
+                if (!t.All(v => Position(v) + origin == Vector3.Clamp(Position(v) + origin, grid.Min, grid.Max))) continue;
+                bool top = t[0].Y == t[1].Y && t[1].Y == t[2].Y, front = t[0].Z == t[1].Z && t[1].Z == t[2].Z;
+                if (top == front) continue;
+                float Band(NativeWideClipVertex v) => top ? v.Z : v.Y;
+                // Only cells of the grid's width: foliage cards in the same planes stay single.
+                float x0 = t.Min(v => v.X);
+                if (Math.Abs(t.Max(v => v.X) - x0 - grid.Cell) > grid.Cell / 16) continue;
+                var rowKey = (top ? 1 : 2, top ? t[0].Y : t[0].Z, t.Min(Band), t.Max(Band));
+                if (!rows.TryGetValue(rowKey, out var cells)) rows[rowKey] = cells = [];
+                if (!cells.TryGetValue(x0, out var cell)) cells[x0] = cell = [];
+                cell.Add((pi, t));
+            }
+            float from = grid.From - origin.X, to = grid.To - origin.X, slack = grid.Cell / 4;
+            foreach (var (row, cells) in rows)
+            {
+                var filled = new List<NativeWideRepair>();
+                // Whole cells, half cells included once completed.
+                var whole = new List<(float X, List<NativeWideRepair> T)>();
+                foreach (var (x0, cell) in cells)
+                {
+                    var tris = cell.Select(e => new NativeWideRepair(e.Polygon, e.T[0], e.T[1], e.T[2])).ToList();
+                    if (cell.Count == 1)
+                    {
+                        if (!NativeWideOppositeCorner(cell[0].T, out var p, out var q, out var corner)) continue;
+                        filled.Add(new(cell[0].Polygon, p, q, corner));
+                        tris.Add(filled[^1]);
+                    }
+                    whole.Add((x0, tris));
+                }
+                if (whole.Count > 0)
+                {
+                    float anchor = cells.Keys.First();
+                    for (float x = anchor + MathF.Ceiling((from - anchor) / grid.Cell - 0.25f) * grid.Cell;
+                        x + grid.Cell <= to + slack; x += grid.Cell)
+                    {
+                        if (cells.Keys.Any(k => Math.Abs(k - x) < slack)) continue;
+                        var source = whole.MinBy(e => Math.Abs(e.X - x));
+                        float dx = x - source.X;
+                        foreach (var t in source.T)
+                            filled.Add(new(t.Polygon, t.A with { X = t.A.X + dx }, t.B with { X = t.B.X + dx },
+                                t.C with { X = t.C.X + dx }));
+                    }
+                }
+                repairs.AddRange(filled);
+                if (grid.Repeat == null) continue;
+                // The whole row, original cells included, moves across its band.
+                var all = cells.Values.SelectMany(e => e).Select(e => new NativeWideRepair(e.Polygon, e.T[0], e.T[1], e.T[2]))
+                    .Concat(filled).ToList();
+                foreach (float d in grid.Repeat)
+                    foreach (var r in all)
+                    {
+                        NativeWideClipVertex Move(NativeWideClipVertex v) => row.Axis == 1 ? v with { Z = v.Z + d } : v with { Y = v.Y + d };
+                        repairs.Add(new(r.Polygon, Move(r.A), Move(r.B), Move(r.C)));
+                    }
+            }
+        }
+    }
+
+    // The right-angle corner r of a half cell and its other vertices p, q: the
+    // missing corner continues both edges in position, texture and colour.
+    static bool NativeWideOppositeCorner(NativeWideClipVertex[] t, out NativeWideClipVertex p,
+        out NativeWideClipVertex q, out NativeWideClipVertex corner)
+    {
+        for (int r = 0; r < 3; r++)
+        {
+            var right = t[r]; p = t[(r + 1) % 3]; q = t[(r + 2) % 3];
+            if (Vector3.Dot(Position(p) - Position(right), Position(q) - Position(right)) != 0) continue;
+            corner = new(p.X + q.X - right.X, p.Y + q.Y - right.Y, p.Z + q.Z - right.Z,
+                Math.Clamp(p.R + q.R - right.R, 0, 255), Math.Clamp(p.G + q.G - right.G, 0, 255),
+                Math.Clamp(p.B + q.B - right.B, 0, 255), p.U + q.U - right.U, p.V + q.V - right.V);
+            return true;
+        }
+        p = q = corner = default;
+        return false;
     }
 
     // Faces inside the boxes whose planes run along Z (walls, floors): each open
@@ -620,7 +862,7 @@ public static partial class FramePacing
     static void NativeWideNearWallRepairs(IMemory m, NativeWideWorld world, Vector3 origin, NativeWideBox[] boxes,
         List<NativeWideRepair> repairs)
     {
-        var faces = new List<(int Polygon, NativeWideClipVertex[] T)>();
+        var faces = new List<(int Polygon, NativeWideClipVertex[] T, NativeWideBox Box)>();
         var edges = new Dictionary<NativeWideEdge, int>();
         for (int pi = 0; pi < world.PolyCount; pi++)
         {
@@ -629,26 +871,28 @@ public static partial class FramePacing
             NativeWideClipVertex[] t = [ReadNativeWideLocal(m, world, a), ReadNativeWideLocal(m, world, b),
                 ReadNativeWideLocal(m, world, c)];
             var normal = Vector3.Cross(Position(t[1]) - Position(t[0]), Position(t[2]) - Position(t[0]));
-            if (Math.Abs(normal.Z) > normal.Length() * 0.001f || !boxes.Any(box => t.All(v =>
-                Position(v) + origin == Vector3.Clamp(Position(v) + origin, box.Min, box.Max)))) continue;
-            faces.Add((pi, t));
+            int box = Array.FindIndex(boxes, box => t.All(v =>
+                Position(v) + origin == Vector3.Clamp(Position(v) + origin, box.Min, box.Max)));
+            if (box < 0 || (boxes[box].Direction == null && Math.Abs(normal.Z) > normal.Length() * 0.001f)) continue;
+            faces.Add((pi, t, boxes[box]));
             for (int ei = 0; ei < 3; ei++)
             {
                 var edge = NativeWideEdgeKey(t[ei], t[(ei + 1) % 3]);
                 edges[edge] = edges.GetValueOrDefault(edge) + 1;
             }
         }
-        foreach (var (pi, t) in faces)
+        foreach (var (pi, t, box) in faces)
         {
             if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
                 out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
             Vector2[] uv = [new(u0, v0), new(u1, v1), new(u2, v2)];
+            var direction = box.Direction ?? Vector3.UnitZ;
             for (int ei = 0; ei < 3; ei++)
             {
                 var a = t[ei]; var b = t[(ei + 1) % 3]; var c = t[(ei + 2) % 3];
-                if (edges[NativeWideEdgeKey(a, b)] != 1 || !NativeWideNearEdge(a, b, c)) continue;
+                if (edges[NativeWideEdgeKey(a, b)] != 1 || Vector3.Dot(NativeWideOutward(a, b, c), direction) <= 1) continue;
                 AddNativeWideSceneryStrip(repairs, pi, a, b, c, uv[ei], uv[(ei + 1) % 3], uv[(ei + 2) % 3],
-                    Vector3.UnitZ, distance: 1200);
+                    direction, distance: box.Distance);
             }
         }
     }
@@ -668,7 +912,9 @@ public static partial class FramePacing
             // The Great Hall: the hall's sky (+/-45°) and the ending's (-117° to +45°).
             or (44, 38, 30) or (44, 81, 57)
             // The Lost City's upper temple: +/-45°.
-            or (32, 40, 30);
+            or (32, 40, 30)
+            // N. Sanity Beach: +/-54°; its upper row reaches only +/-36°.
+            or (9, 21, 19);
 
     static IReadOnlyList<NativeWideRepair> NativeWideSkyArcRepairs(IMemory m, NativeWideWorld world, uint level)
     {
@@ -694,11 +940,11 @@ public static partial class FramePacing
                 edges[(Math.Min(i, j), Math.Max(i, j))] = edges.GetValueOrDefault((Math.Min(i, j), Math.Max(i, j))) + 1;
         }
         int originals = triangles.Count;
-        // The Lost City's arc lost half of some cells to the 4:3 cull, one at a
-        // corner the 16:9 view reaches. A half cell's corner shares a column with
-        // one vertex and a row with the other, and its diagonal has no partner;
-        // the missing corner continues both edges (position and texture).
-        if (level == 32)
+        // The Lost City's and the Beach's arcs lost half of some cells to the 4:3
+        // cull, at corners the 16:9 view reaches. A half cell's corner shares a
+        // column with one vertex and a row with the other, and its diagonal has
+        // no partner; the missing corner continues both edges (position and texture).
+        if (level is 9 or 32)
             for (int pi = 0; pi < world.PolyCount; pi++)
             {
                 uint poly = world.Polygons + (uint)pi * 8;
@@ -722,6 +968,38 @@ public static partial class FramePacing
                     break;
                 }
             }
+        var column = Enumerable.Range(0, angles.Length)
+            .Where(i => angles.Where((a, j) => j != i && Math.Abs(a - angles[i]) < degree).Any()).ToArray();
+        int first = column.MinBy(i => angles[i]), last = column.MaxBy(i => angles[i]);
+        // The Beach's upper row ends a column short of both arc ends. A row ending
+        // inside the arc (a lone vertical edge) mirrors its last cell about that
+        // column; the far side snaps onto the arc's end column, so the row meets
+        // the end without a crack.
+        if (level == 9)
+            foreach (var ((i, j), count) in edges)
+            {
+                float edgeAngle = angles[i];
+                if (count != 1 || Math.Abs(angles[j] - edgeAngle) >= degree
+                    || edgeAngle - angles[first] < degree || angles[last] - edgeAngle < degree) continue;
+                float yLow = Math.Min(vertices[i].Y, vertices[j].Y), yHigh = Math.Max(vertices[i].Y, vertices[j].Y);
+                var row = triangles.Take(originals).Where(e => e.T.All(v => v.Y >= yLow && v.Y <= yHigh)).ToList();
+                float inward = Math.Sign(row.SelectMany(e => e.T).Select(Angle)
+                    .First(a => Math.Abs(a - edgeAngle) >= degree) - edgeAngle);
+                float next = angles.Where(a => (a - edgeAngle) * inward >= degree).MinBy(a => (a - edgeAngle) * inward);
+                var end = vertices[inward > 0 ? first : last];
+                var radial = Vector2.Normalize(new Vector2(vertices[i].X, vertices[i].Z));
+                NativeWideClipVertex Mirror(NativeWideClipVertex v)
+                {
+                    if (Math.Abs(Angle(v) - edgeAngle) < degree) return v;
+                    var p = new Vector2(v.X, v.Z);
+                    var reflected = 2 * Vector2.Dot(p, radial) * radial - p;
+                    v = v with { X = reflected.X, Z = reflected.Y };
+                    return Math.Abs(Angle(v) - Angle(end)) < degree ? v with { X = end.X, Z = end.Z } : v;
+                }
+                foreach (var (pi, t) in row)
+                    if (t.All(v => (Angle(v) - edgeAngle) * inward > -degree && (Angle(v) - next) * inward < degree))
+                        triangles.Add((pi, [Mirror(t[0]), Mirror(t[1]), Mirror(t[2])]));
+            }
         var repairs = triangles.Skip(originals).Select(e => new NativeWideRepair(e.Polygon, e.T[0], e.T[1], e.T[2])).ToList();
         // Continue the arc at both end columns, keeping its radius and texture
         // density. Reflection in the end's radial plane mirrors the sky beyond it.
@@ -729,9 +1007,6 @@ public static partial class FramePacing
         // the mirror reuses the original seam vertices to leave no crack. The
         // Lost City's sky has a lone vertex beyond each end column; triangles
         // reaching past the column stay unreflected.
-        var column = Enumerable.Range(0, angles.Length)
-            .Where(i => angles.Where((a, j) => j != i && Math.Abs(a - angles[i]) < degree).Any()).ToArray();
-        int first = column.MinBy(i => angles[i]), last = column.MaxBy(i => angles[i]);
         foreach (int end in new[] { first, last })
         {
             float side = end == first ? -1 : 1, endAngle = angles[end];
@@ -746,6 +1021,29 @@ public static partial class FramePacing
             foreach (var (pi, t) in triangles)
                 if (!t.Any(v => (Angle(v) - endAngle) * side > degree))
                     repairs.Add(new(pi, Reflect(t[0]), Reflect(t[1]), Reflect(t[2])));
+        }
+        // The Beach's sky ends just above the horizon, where its scenery stops
+        // in the 16:9 view. Its bottom texel row continues straight down (the
+        // vertex colours are a neutral grey modulation, not the horizon colour).
+        if (level == 9)
+        {
+            float bottom = vertices.Min(v => v.Y);
+            var arc = triangles.Take(originals).Select(e => new NativeWideRepair(e.Polygon, e.T[0], e.T[1], e.T[2]))
+                .Concat(repairs).ToList();
+            foreach (var t in arc)
+            {
+                NativeWideClipVertex[] corners = [t.A, t.B, t.C];
+                for (int k = 0; k < 3; k++)
+                {
+                    var a = corners[k]; var b = corners[(k + 1) % 3]; var c = corners[(k + 2) % 3];
+                    if (a.Y != bottom || b.Y != bottom || c.Y == bottom) continue;
+                    NativeWideClipVertex top0 = a with { V = a.V - 0.5f * Math.Sign(a.V - c.V) },
+                        top1 = b with { V = b.V - 0.5f * Math.Sign(b.V - c.V) };
+                    NativeWideClipVertex low0 = top0 with { Y = -4096 }, low1 = top1 with { Y = -4096 };
+                    repairs.Add(new(t.Polygon, top0, top1, low1));
+                    repairs.Add(new(t.Polygon, top0, low1, low0));
+                }
+            }
         }
         _nativeWideSkyArcs[key] = repairs;
         return repairs;
@@ -787,11 +1085,14 @@ public static partial class FramePacing
         a.X == b.X && b.X == c.X && NativeWideNearEdge(a, b, c);
 
     // Edge a-b of triangle abc whose surface ends toward the camera (+Z).
-    static bool NativeWideNearEdge(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c)
+    static bool NativeWideNearEdge(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c) =>
+        NativeWideOutward(a, b, c).Z > 1;
+
+    // From edge a-b of triangle abc away from c, perpendicular to the edge.
+    static Vector3 NativeWideOutward(NativeWideClipVertex a, NativeWideClipVertex b, NativeWideClipVertex c)
     {
         Vector3 pa = Position(a), edge = Position(b) - pa, outward = pa - Position(c);
-        outward -= edge * (Vector3.Dot(outward, edge) / Vector3.Dot(edge, edge));
-        return outward.Z > 1;
+        return outward - edge * (Vector3.Dot(outward, edge) / Vector3.Dot(edge, edge));
     }
 
     // True when another face in the same plane lies beyond the edge (axis 0 = X,

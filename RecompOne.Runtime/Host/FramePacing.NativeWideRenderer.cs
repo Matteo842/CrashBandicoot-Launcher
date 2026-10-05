@@ -236,7 +236,6 @@ public static partial class FramePacing
         ResetNativeWideHud();
         _nativeWideLogCount = 0;
         _nativeWideSceneryRepairs.Clear();
-        _nativeWideBeachSky = null;
         _nativeWideSkyArcs.Clear();
     }
 
@@ -461,6 +460,9 @@ public static partial class FramePacing
             }
         }
 
+        if (m.ReadU32(Catalog.LevelIdAddr) == 9)
+            AddNativeWideBeachCanopy(m, worldCount, matrix, projection, screenX, screenY,
+                gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
         _nativeWideTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
         _nativeWideDrawX = gpu.DrawOffsetX;
         _nativeWideDrawY = gpu.DrawOffsetY;
