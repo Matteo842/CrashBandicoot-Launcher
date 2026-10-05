@@ -389,6 +389,14 @@ public static partial class FramePacing
 
     /// <summary>WillC <c>spd(vely, 5454.0)</c> at 34 ticks.</summary>
     const int HangStep = 46359;
+    /// <summary>
+    /// Original StopAtFloor zeroes vy and gravity still runs, so a landing
+    /// frame ends at −4000×34. Gated enemies send EventHit on their next
+    /// 30 Hz step, often before Crash's trans stomps; Jump_Flip / Land only
+    /// reject or stomp for <c>vely &lt; 0</c>. Writing 0 killed Crash on top
+    /// of the enemy at high FPS (#102, Heavy Machinery robots).
+    /// </summary>
+    const int LandedVy = 4000 * 34;
     /// <summary>NTSC-U <c>pads[0].held</c> Cross (PAD_X).</summary>
     const uint PadCross = 0x40u;
 
@@ -471,7 +479,7 @@ public static partial class FramePacing
             ClearAirFractions();
             NoteCrashLanding(vyBeforeGravity);
             m.WriteU32(o + ObjTransOff + 4, (uint)yPhys);
-            m.WriteU32(o + ObjVelYOff, 0);
+            m.WriteU32(o + ObjVelYOff, unchecked((uint)-LandedVy));
             return;
         }
 

@@ -1868,7 +1868,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _cheatLevel.Location = new Point(36, y);
         card.Controls.Add(_cheatLevel);
         y += 40;
-        _cheatGod = MakeCheck("God Mode (on by default)");
+        _cheatGod = MakeCheck("God Mode");
         _cheatGod.Location = new Point(36, y);
         card.Controls.Add(_cheatGod);
         y += 40;

@@ -315,7 +315,7 @@ sealed partial class LauncherWindow
     {
         var lives = new ThemeCheck("Infinite Lives") { Checked = CheatConfig.InfiniteLives };
         var level = new ThemeCheck("Level Select") { Checked = CheatConfig.LevelSelect };
-        var god = new ThemeCheck("God Mode (on by default)") { Checked = CheatConfig.GodMode };
+        var god = new ThemeCheck("God Mode") { Checked = CheatConfig.GodMode };
         var fly = new ThemeCheck("Fly  (D-pad/stick, Cross/R1 up, Triangle/L2 down)") { Checked = CheatConfig.Fly };
 
         var body = new StackPanel
