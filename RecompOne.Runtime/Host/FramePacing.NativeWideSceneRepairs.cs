@@ -626,7 +626,9 @@ public static partial class FramePacing
             // Road to Nowhere / The High Road bridges: +/-41°.
             (20 or 22, 12, 14)
             // The Great Hall: the hall's sky (+/-45°) and the ending's (-117° to +45°).
-            or (44, 38, 30) or (44, 81, 57);
+            or (44, 38, 30) or (44, 81, 57)
+            // The Lost City's upper temple: +/-45°.
+            or (32, 40, 30);
 
     static IReadOnlyList<NativeWideRepair> NativeWideSkyArcRepairs(IMemory m, NativeWideWorld world, uint level)
     {
@@ -635,31 +637,75 @@ public static partial class FramePacing
         if (_nativeWideSkyArcs.TryGetValue(key, out var cached)) return cached;
         var vertices = Enumerable.Range(0, world.VertexCount).Select(i => ReadNativeWideLocal(m, world, i)).ToArray();
         // Angle around the camera, 0 straight ahead (-Z).
-        var angles = vertices.Select(v => MathF.Atan2((float)v.X, -(float)v.Z)).ToArray();
-        var repairs = new List<NativeWideRepair>();
-        // Continue the arc at both end columns, keeping its radius and texture
-        // density. Reflection in the end's radial plane mirrors the sky beyond it.
-        // The Great Hall's end columns are only nearly radial (within 0.1°), so
-        // the mirror reuses the original seam vertices to leave no crack.
-        foreach (int end in new[] { Array.IndexOf(angles, angles.Min()), Array.IndexOf(angles, angles.Max()) })
+        static float Angle(NativeWideClipVertex v) => MathF.Atan2(v.X, -v.Z);
+        var angles = vertices.Select(Angle).ToArray();
+        float degree = MathF.PI / 180;
+        var triangles = new List<(int Polygon, NativeWideClipVertex[] T)>();
+        var edges = new Dictionary<(int, int), int>();
+        for (int pi = 0; pi < world.PolyCount; pi++)
         {
-            var radial = Vector2.Normalize(new Vector2((float)vertices[end].X, (float)vertices[end].Z));
-            NativeWideClipVertex Reflect(int index, short u, short texV)
-            {
-                var v = vertices[index];
-                if (Math.Abs(angles[index] - angles[end]) < MathF.PI / 180) return v with { U = u, V = texV };
-                var p = new Vector2((float)v.X, (float)v.Z);
-                var reflected = 2 * Vector2.Dot(p, radial) * radial - p;
-                return v with { X = reflected.X, Z = reflected.Y, U = u, V = texV };
-            }
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(m.ReadU32(poly), m.ReadU32(poly + 4), out int a, out int b, out int c);
+            if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+            triangles.Add((pi, [vertices[a] with { U = u0, V = v0 }, vertices[b] with { U = u1, V = v1 },
+                vertices[c] with { U = u2, V = v2 }]));
+            foreach (var (i, j) in new[] { (a, b), (b, c), (c, a) })
+                edges[(Math.Min(i, j), Math.Max(i, j))] = edges.GetValueOrDefault((Math.Min(i, j), Math.Max(i, j))) + 1;
+        }
+        int originals = triangles.Count;
+        // The Lost City's arc lost half of some cells to the 4:3 cull, one at a
+        // corner the 16:9 view reaches. A half cell's corner shares a column with
+        // one vertex and a row with the other, and its diagonal has no partner;
+        // the missing corner continues both edges (position and texture).
+        if (level == 32)
             for (int pi = 0; pi < world.PolyCount; pi++)
             {
                 uint poly = world.Polygons + (uint)pi * 8;
                 NativeWidePolygonVertices(m.ReadU32(poly), m.ReadU32(poly + 4), out int a, out int b, out int c);
-                if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
-                    out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
-                repairs.Add(new(pi, Reflect(a, u0, v0), Reflect(b, u1, v1), Reflect(c, u2, v2)));
+                int[] index = [a, b, c];
+                var t = triangles.FirstOrDefault(e => e.Polygon == pi).T;
+                if (t == null) continue;
+                for (int r = 0; r < 3; r++)
+                {
+                    int pr = index[(r + 1) % 3], qr = index[(r + 2) % 3];
+                    var corner = t[r]; var p = t[(r + 1) % 3]; var q = t[(r + 2) % 3];
+                    if (edges[(Math.Min(pr, qr), Math.Max(pr, qr))] != 1) continue;
+                    bool pColumn = Math.Abs(angles[index[r]] - angles[pr]) < degree && corner.Y == q.Y;
+                    bool qColumn = Math.Abs(angles[index[r]] - angles[qr]) < degree && corner.Y == p.Y;
+                    if (pColumn == qColumn) continue;
+                    triangles.Add((pi, [p, q, p with
+                    {
+                        X = p.X + q.X - corner.X, Y = p.Y + q.Y - corner.Y, Z = p.Z + q.Z - corner.Z,
+                        U = p.U + q.U - corner.U, V = p.V + q.V - corner.V,
+                    }]));
+                    break;
+                }
             }
+        var repairs = triangles.Skip(originals).Select(e => new NativeWideRepair(e.Polygon, e.T[0], e.T[1], e.T[2])).ToList();
+        // Continue the arc at both end columns, keeping its radius and texture
+        // density. Reflection in the end's radial plane mirrors the sky beyond it.
+        // The Great Hall's end columns are only nearly radial (within 0.1°), so
+        // the mirror reuses the original seam vertices to leave no crack. The
+        // Lost City's sky has a lone vertex beyond each end column; triangles
+        // reaching past the column stay unreflected.
+        var column = Enumerable.Range(0, angles.Length)
+            .Where(i => angles.Where((a, j) => j != i && Math.Abs(a - angles[i]) < degree).Any()).ToArray();
+        int first = column.MinBy(i => angles[i]), last = column.MaxBy(i => angles[i]);
+        foreach (int end in new[] { first, last })
+        {
+            float side = end == first ? -1 : 1, endAngle = angles[end];
+            var radial = Vector2.Normalize(new Vector2(vertices[end].X, vertices[end].Z));
+            NativeWideClipVertex Reflect(NativeWideClipVertex v)
+            {
+                if (Math.Abs(Angle(v) - endAngle) < degree) return v;
+                var p = new Vector2(v.X, v.Z);
+                var reflected = 2 * Vector2.Dot(p, radial) * radial - p;
+                return v with { X = reflected.X, Z = reflected.Y };
+            }
+            foreach (var (pi, t) in triangles)
+                if (!t.Any(v => (Angle(v) - endAngle) * side > degree))
+                    repairs.Add(new(pi, Reflect(t[0]), Reflect(t[1]), Reflect(t[2])));
         }
         _nativeWideSkyArcs[key] = repairs;
         return repairs;
