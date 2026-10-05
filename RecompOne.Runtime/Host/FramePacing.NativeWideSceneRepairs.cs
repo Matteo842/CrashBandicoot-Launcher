@@ -547,7 +547,7 @@ public static partial class FramePacing
     // Copies, boxes of walls and floors whose open near edges continue toward the
     // camera, rows of cells to fill, and terrain to continue sideways.
     sealed record NativeWideCopies(NativeWideCopy[] Copies, NativeWideBox[] NearWalls, NativeWideGrid[]? Grids = null,
-        NativeWideTerrain? Terrain = null);
+        NativeWideTerrain? Terrain = null, NativeWideSymmetry? Symmetry = null);
     // Direction, when set, continues open edges facing it instead of +Z, for faces
     // in any plane, by Distance.
     readonly record struct NativeWideBox(Vector3 Min, Vector3 Max, Vector3? Direction = null, float Distance = 1200);
@@ -603,7 +603,76 @@ public static partial class FramePacing
             NativeWideGridRepairs(m, world, origin, scenery.Grids, repairs);
         if (scenery.Terrain is NativeWideTerrain terrain)
             NativeWideTerrainRepairs(m, world, origin, terrain, repairs);
+        if (scenery.Symmetry != null)
+            NativeWideSymmetryRepairs(m, world, origin, scenery.Symmetry, repairs);
         return repairs;
+    }
+
+    // An object symmetric about the absolute plane X = Axis, of which the 4:3
+    // cull kept mostly one half. Corners complete a half cell whose missing
+    // corner lies at an absolute position (texture and colour continue both
+    // edges from the opposite vertex); Shifts copy a polygon by an offset; Mirror
+    // polygons are reflected across the plane, as are corners and shifts marked
+    // so. The pattern keeps its orientation: the texture axis that runs along X
+    // is flipped within the triangle's range.
+    readonly record struct NativeWideCorner(int Polygon, Vector3 At, bool Mirror);
+    readonly record struct NativeWideShift(int Polygon, Vector3 Offset, bool Mirror);
+    sealed record NativeWideSymmetry(float Axis, NativeWideCorner[] Corners, NativeWideShift[] Shifts, int[] Mirror);
+
+    static void NativeWideSymmetryRepairs(IMemory m, NativeWideWorld world, Vector3 origin, NativeWideSymmetry symmetry,
+        List<NativeWideRepair> repairs)
+    {
+        NativeWideClipVertex[]? Read(int pi)
+        {
+            if ((uint)pi >= (uint)world.PolyCount) return null;
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) return null;
+            return [ReadNativeWideLocal(m, world, a) with { U = u0, V = v0 },
+                ReadNativeWideLocal(m, world, b) with { U = u1, V = v1 }, ReadNativeWideLocal(m, world, c) with { U = u2, V = v2 }];
+        }
+        float axis = symmetry.Axis - origin.X;
+        var mirror = new List<NativeWideRepair>();
+        foreach (var corner in symmetry.Corners)
+        {
+            if (Read(corner.Polygon) is not { } t) continue;
+            var at = corner.At - origin;
+            int r = Enumerable.Range(0, 3).MaxBy(k => Vector3.DistanceSquared(Position(t[k]), at));
+            var right = t[r]; var p = t[(r + 1) % 3]; var q = t[(r + 2) % 3];
+            var added = new NativeWideRepair(corner.Polygon, p, q, new(at.X, at.Y, at.Z,
+                Math.Clamp(p.R + q.R - right.R, 0, 255), Math.Clamp(p.G + q.G - right.G, 0, 255),
+                Math.Clamp(p.B + q.B - right.B, 0, 255), p.U + q.U - right.U, p.V + q.V - right.V));
+            repairs.Add(added);
+            if (corner.Mirror) mirror.Add(added);
+        }
+        foreach (var shift in symmetry.Shifts)
+        {
+            if (Read(shift.Polygon) is not { } t) continue;
+            NativeWideClipVertex Move(NativeWideClipVertex v) =>
+                v with { X = v.X + shift.Offset.X, Y = v.Y + shift.Offset.Y, Z = v.Z + shift.Offset.Z };
+            var added = new NativeWideRepair(shift.Polygon, Move(t[0]), Move(t[1]), Move(t[2]));
+            repairs.Add(added);
+            if (shift.Mirror) mirror.Add(added);
+        }
+        foreach (int pi in symmetry.Mirror)
+            if (Read(pi) is { } t) mirror.Add(new(pi, t[0], t[1], t[2]));
+        foreach (var t in mirror)
+        {
+            NativeWideClipVertex[] v = [t.A, t.B, t.C];
+            // How U and V change along X across the triangle.
+            Vector3 e1 = Position(v[1]) - Position(v[0]), e2 = Position(v[2]) - Position(v[0]);
+            float du = Math.Abs(e1.X * (v[2].U - v[0].U) - e2.X * (v[1].U - v[0].U));
+            float dv = Math.Abs(e1.X * (v[2].V - v[0].V) - e2.X * (v[1].V - v[0].V));
+            float uSum = v.Min(e => e.U) + v.Max(e => e.U), vSum = v.Min(e => e.V) + v.Max(e => e.V);
+            NativeWideClipVertex Reflect(NativeWideClipVertex e) => e with
+            {
+                X = 2 * axis - e.X,
+                U = du > dv ? uSum - e.U : e.U,
+                V = dv > du ? vSum - e.V : e.V,
+            };
+            repairs.Add(new(t.Polygon, Reflect(v[0]), Reflect(v[1]), Reflect(v[2])));
+        }
     }
 
     // Uneven ground built as a lattice of roughly square cells, cut by the 4:3

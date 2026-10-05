@@ -37,7 +37,15 @@ public static partial class FramePacing
             [
                 .. NativeWideBeachTerrace(3590, 6020, 395, 5995),
                 .. NativeWideBeachTerrace(9190, 11600, 9195, 14795),
-            ]),
+            ],
+            // The tapered pillar left of the stairs (axis X 6395) lost the upper
+            // left of its front face and half of its top. The front's last
+            // half cells are completed, the top's missing front half repeats its
+            // back half, and the right half is reflected onto the left.
+            Symmetry: new(6395,
+                [new(596, new(6115, 11353, 101072), false), new(603, new(6395, 12153, 101040), true)],
+                [new(594, new(0, 0, 240), true), new(595, new(0, 0, 240), true)],
+                [601, 602, 603, 594, 595])),
             // The start: the beach's sand is a lattice of 400-unit cells, the
             // rows nearest the camera in their own transition tiles. Both sides
             // were cut along the 4:3 frustum and continue as rising dunes.
