@@ -53,11 +53,19 @@ public static partial class FramePacing
         PaceLog("save UI pad");
     }
 
+    /// <summary>
+    /// Attract-mode demo. Each GpuUpdate replays the recorded ticks_elapsed
+    /// and PadUpdate one recorded pad per game loop, so the recording only
+    /// stays in sync at the original 30 Hz loop (#103).
+    /// </summary>
+    static bool IsDemoPlayback(IMemory m) => m.ReadU32(PbakStateAddr) != 0;
+
     static bool WantsOriginalPad(IMemory m)
     {
         if (_saveUiPad) return true;
         try
         {
+            if (IsDemoPlayback(m)) return true;
             if (IsWarpOut(m))
             {
                 ArmSaveUiPad();

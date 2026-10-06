@@ -447,7 +447,7 @@ public static partial class FramePacing
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
             NoteSaveUiWorld(m);
-            if (!Catalog.Levels.AllowsUnlockedFps(id) || _saveUiPad)
+            if (!Catalog.Levels.AllowsUnlockedFps(id) || _saveUiPad || IsDemoPlayback(m))
             {
                 _holdLocked = 0;
                 _warpHold = 0;

@@ -234,6 +234,11 @@ public static partial class FramePacing
     const uint ObjBoundOff = 0x8u;
     const uint LevelUpdateAddr = 0x80025A60u;
     const uint GpuUpdateAddr = 0x80016E5Cu;
+    /// <summary>
+    /// <c>pbak_state</c>: 3 = attract demo chosen / pad zeroed, 2 = playing.
+    /// LdatInit clears it on every level load.
+    /// </summary>
+    const uint PbakStateAddr = 0x80061A30u;
     /// <summary>NTSC-U <c>fade_counter</c> / <c>fade_step</c>. GpuUpdate steps these every present.</summary>
     const uint FadeCounterAddr = 0x80061A34u;
     const uint FadeStepAddr = 0x80061A38u;
