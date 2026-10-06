@@ -22,6 +22,7 @@ public static partial class FramePacing
     static readonly List<NativeWideTriangle> _nativeWideOpaque = new(1024);
     static readonly List<NativeWideTriangle> _nativeWideTransparent = new(128);
     static readonly List<NativeWideTriangle> _nativeWideExtensions = new(256);
+    static readonly List<NativeWideTriangle> _nativeWideUnderBackdrop = new(256);
     static readonly short[] _nativeWideMatrix = new short[9];
     // Eight meshes of the current zone plus resident meshes of its neighbours.
     const int NativeWideMaxWorlds = 16;
@@ -398,17 +399,15 @@ public static partial class FramePacing
         _nativeWideOpaque.Clear();
         _nativeWideTransparent.Clear();
         _nativeWideExtensions.Clear();
+        _nativeWideUnderBackdrop.Clear();
+        bool underBackdrop = NativeWideFillsUnderBackdrop(m);
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
         int clippedPolygons = 0;
         int candidates = 0;
         for (int wi = 0; wi < drawWorldCount; wi++)
         {
             var world = worlds[wi];
-            // Heavy Machinery's back wall fill also overlaps neighbouring meshes'
-            // coplanar walls, which round their depth differently: it too must
-            // stay behind all real scenery and only cover what nothing else does.
-            bool behind = world.PolyCount > 0 && (NativeWideSunsetTemple(m, world)
-                || m.ReadU32(Catalog.LevelIdAddr) == 6);
+            bool behind = NativeWideRepairsBehind(m, world);
             // Repairs were tuned with each mesh's own zone; neighbours draw only authored polygons.
             var repairs = world.Neighbor ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world);
             foreach (var chunk in NativeWideRepairChunksOf(repairs))
@@ -443,6 +442,11 @@ public static partial class FramePacing
                     {
                         NativeWideBehindScenery(_nativeWideOpaque, opaqueStart);
                         NativeWideBehindScenery(_nativeWideTransparent, transparentStart);
+                        if (underBackdrop)
+                        {
+                            NativeWideMoveRange(_nativeWideOpaque, opaqueStart, _nativeWideUnderBackdrop);
+                            NativeWideMoveRange(_nativeWideTransparent, transparentStart, _nativeWideUnderBackdrop);
+                        }
                     }
                 }
             }
@@ -481,6 +485,10 @@ public static partial class FramePacing
         _nativeWideTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
         _nativeWideDrawX = gpu.DrawOffsetX;
         _nativeWideDrawY = gpu.DrawOffsetY;
+        // Fills behind all scenery go first, so the backdrop (no depth) paints
+        // over them where it shows, e.g. through The Lab's windows.
+        _nativeWideUnderBackdrop.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        _nativeWidePending.AddRange(_nativeWideUnderBackdrop);
         for (int i = 0; i < _nativeWideOpaque.Count; i++)
         {
             var t = _nativeWideOpaque[i];
@@ -1291,6 +1299,24 @@ public static partial class FramePacing
 
     static int NativeWideSign13(int value) => (value & 0x1000) != 0 ? value - 0x2000 : value;
     static bool NativeWideGuestPointer(uint value) => (value & 0xFFE00000u) == 0x80000000u;
+
+    // Heavy Machinery's back wall fill also overlaps neighbouring meshes'
+    // coplanar walls, which round their depth differently: it too must stay
+    // behind all real scenery and only cover what nothing else does. So do
+    // The Lab's wall continuations (its towers are boundary repairs and keep
+    // their true depth).
+    static bool NativeWideRepairsBehind(IMemory m, NativeWideWorld world) =>
+        world.PolyCount > 0 && (NativeWideSunsetTemple(m, world) || m.ReadU32(Catalog.LevelIdAddr) is 6 or 41);
+
+    // Fills behind all scenery must not hide the sky: in The Lab, back wall
+    // continuations run past the side walls' windows.
+    static bool NativeWideFillsUnderBackdrop(IMemory m) => m.ReadU32(Catalog.LevelIdAddr) == 41;
+
+    static void NativeWideMoveRange(List<NativeWideTriangle> from, int start, List<NativeWideTriangle> to)
+    {
+        for (int i = start; i < from.Count; i++) to.Add(from[i]);
+        from.RemoveRange(start, from.Count - start);
+    }
 
     static bool NativeWideLevelSupported(uint level) => level is not (25 or 45 or 56 or 57);
 }
