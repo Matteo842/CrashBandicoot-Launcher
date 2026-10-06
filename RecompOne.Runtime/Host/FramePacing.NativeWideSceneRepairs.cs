@@ -25,6 +25,15 @@ public static partial class FramePacing
         uint level = m.ReadU32(Catalogs.Catalog.LevelIdAddr);
         if (NativeWideSkyArc(m, world, level))
             return NativeWideSkyArcRepairs(m, world, level);
+        if (level == 6)
+        {
+            var machineryKey = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
+                m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
+            if (_nativeWideSceneryRepairs.TryGetValue(machineryKey, out var machinery)) return machinery;
+            machinery = NativeWideMachineryRepairs(m, world);
+            PaceLog($"native-wide level={level} back wall repairs={machinery.Count}");
+            return _nativeWideSceneryRepairs[machineryKey] = machinery;
+        }
         if (level is not (7 or 9 or 12 or 15 or 17 or 18 or 24 or 26 or 32 or 35 or 44 or 46 or 55)) return Array.Empty<NativeWideRepair>();
         bool gate = level == 18 && world.PolyCount == 2620 && world.VertexCount == 3114
             && m.ReadU32(world.Header) == 46280 && (int)m.ReadU32(world.Header + 4) == -45049

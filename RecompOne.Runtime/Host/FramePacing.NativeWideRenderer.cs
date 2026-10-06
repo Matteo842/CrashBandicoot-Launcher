@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using RecompOne.Runtime.Catalogs;
@@ -406,29 +407,39 @@ public static partial class FramePacing
             bool temple = world.PolyCount > 0 && NativeWideSunsetTemple(m, world);
             // Repairs were tuned with each mesh's own zone; neighbours draw only authored polygons.
             var repairs = world.Neighbor ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world);
-            foreach (var repair in repairs)
+            foreach (var chunk in NativeWideRepairChunksOf(repairs))
             {
-                PrimFlags repairFlags;
-                if (repair.Polygon < 0)
-                    repairFlags = new PrimFlags { Gouraud = true, WideMode = WidePrimitiveMode.BackdropSides };
-                else
+                if (!NativeWideBoxTouchesSides(chunk.Min, chunk.Max, world, matrix, near, projection, screenX, screenY,
+                        gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight))
+                    continue;
+                for (int ri = chunk.Start; ri < chunk.End; ri++)
                 {
-                    if (!TryNativeWideMaterial(m, world, repair.Polygon, drawCount, out repairFlags,
-                        out _, out _, out _, out _, out _, out _, out _)) continue;
-                    if (repairFlags.WideMode != WidePrimitiveMode.BackdropSides)
-                        repairFlags.WideMode = WidePrimitiveMode.WorldExtensionSides;
-                }
-                repairVertices[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
-                repairVertices[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
-                repairVertices[2] = NativeWideRepairToCamera(m, repair.C, world, matrix);
-                int opaqueStart = _nativeWideOpaque.Count, transparentStart = _nativeWideTransparent.Count;
-                AddNativeWideClippedTriangle(repairVertices, projection, screenX, screenY,
-                    gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
-                    repairFlags, true, _nativeWideOpaque, _nativeWideTransparent);
-                if (temple && !repair.Boundary)
-                {
-                    NativeWideBehindScenery(_nativeWideOpaque, opaqueStart);
-                    NativeWideBehindScenery(_nativeWideTransparent, transparentStart);
+                    var repair = repairs[ri];
+                    if (!NativeWideRepairTouchesSides(repair, world, matrix, near, projection, screenX, screenY,
+                            gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight))
+                        continue;
+                    PrimFlags repairFlags;
+                    if (repair.Polygon < 0)
+                        repairFlags = new PrimFlags { Gouraud = true, WideMode = WidePrimitiveMode.BackdropSides };
+                    else
+                    {
+                        if (!TryNativeWideMaterial(m, world, repair.Polygon, drawCount, out repairFlags,
+                            out _, out _, out _, out _, out _, out _, out _)) continue;
+                        if (repairFlags.WideMode != WidePrimitiveMode.BackdropSides)
+                            repairFlags.WideMode = WidePrimitiveMode.WorldExtensionSides;
+                    }
+                    repairVertices[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
+                    repairVertices[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
+                    repairVertices[2] = NativeWideRepairToCamera(m, repair.C, world, matrix);
+                    int opaqueStart = _nativeWideOpaque.Count, transparentStart = _nativeWideTransparent.Count;
+                    AddNativeWideClippedTriangle(repairVertices, projection, screenX, screenY,
+                        gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
+                        repairFlags, true, _nativeWideOpaque, _nativeWideTransparent);
+                    if (temple && !repair.Boundary)
+                    {
+                        NativeWideBehindScenery(_nativeWideOpaque, opaqueStart);
+                        NativeWideBehindScenery(_nativeWideTransparent, transparentStart);
+                    }
                 }
             }
             if (world.PolyCount == 0) continue;
@@ -1058,6 +1069,81 @@ public static partial class FramePacing
         float cy = NativeWideProjectAxis(c.Y, c.Z, projection, oy);
         float minY = Math.Min(ay, Math.Min(by, cy));
         float maxY = Math.Max(ay, Math.Max(by, cy));
+        return maxY >= viewCenterY - halfHeight && minY <= viewCenterY + halfHeight;
+    }
+
+    // The same test for repairs, from their positions alone: levels with
+    // thousands of repairs skip material lookup and shading for the ones
+    // outside the side bands. Repairs come in spatially coherent runs (the
+    // cells of a row, the strips of an edge), so whole runs are tested first.
+    readonly record struct NativeWideRepairChunk(int Start, int End, Vector3 Min, Vector3 Max);
+    const int NativeWideRepairChunkSize = 32;
+    static readonly ConditionalWeakTable<IReadOnlyList<NativeWideRepair>, NativeWideRepairChunk[]> _nativeWideRepairChunks = new();
+
+    static NativeWideRepairChunk[] NativeWideRepairChunksOf(IReadOnlyList<NativeWideRepair> repairs)
+    {
+        if (repairs.Count == 0) return [];
+        if (_nativeWideRepairChunks.TryGetValue(repairs, out var cached)) return cached;
+        var chunks = new NativeWideRepairChunk[(repairs.Count + NativeWideRepairChunkSize - 1) / NativeWideRepairChunkSize];
+        for (int ci = 0; ci < chunks.Length; ci++)
+        {
+            int start = ci * NativeWideRepairChunkSize, end = Math.Min(start + NativeWideRepairChunkSize, repairs.Count);
+            Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+            for (int i = start; i < end; i++)
+            {
+                var r = repairs[i];
+                min = Vector3.Min(min, Vector3.Min(Position(r.A), Vector3.Min(Position(r.B), Position(r.C))));
+                max = Vector3.Max(max, Vector3.Max(Position(r.A), Vector3.Max(Position(r.B), Position(r.C))));
+            }
+            chunks[ci] = new(start, end, min, max);
+        }
+        _nativeWideRepairChunks.AddOrUpdate(repairs, chunks);
+        return chunks;
+    }
+
+    static bool NativeWideBoxTouchesSides(
+        Vector3 min, Vector3 max, NativeWideWorld world, short[] matrix, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float wideHalf, float halfHeight)
+    {
+        Span<Vector3> corners = stackalloc Vector3[8];
+        for (int i = 0; i < 8; i++)
+            corners[i] = new((i & 1) != 0 ? max.X : min.X, (i & 2) != 0 ? max.Y : min.Y, (i & 4) != 0 ? max.Z : min.Z);
+        return NativeWidePointsTouchSides(corners, world, matrix, near, projection, screenX, screenY, drawX, drawY,
+            viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
+    }
+
+    static bool NativeWideRepairTouchesSides(
+        in NativeWideRepair repair, NativeWideWorld world, short[] matrix, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float wideHalf, float halfHeight)
+    {
+        Span<Vector3> corners = [Position(repair.A), Position(repair.B), Position(repair.C)];
+        return NativeWidePointsTouchSides(corners, world, matrix, near, projection, screenX, screenY, drawX, drawY,
+            viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
+    }
+
+    // Local points of a convex shape: false when it is wholly inside the 4:3
+    // core or wholly outside the 16:9 view.
+    static bool NativeWidePointsTouchSides(
+        ReadOnlySpan<Vector3> points, NativeWideWorld world, short[] matrix, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float wideHalf, float halfHeight)
+    {
+        float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+        foreach (var p in points)
+        {
+            float z = MathF.Floor((matrix[6] * p.X + matrix[7] * p.Y + matrix[8] * p.Z) / 4096f) + world.Z;
+            if (z < near) return true;
+            float x = MathF.Floor((matrix[0] * p.X + matrix[1] * p.Y + matrix[2] * p.Z) / 4096f) + world.X;
+            float y = MathF.Floor((matrix[3] * p.X + matrix[4] * p.Y + matrix[5] * p.Z) / 4096f) + world.Y;
+            float sx = NativeWideProjectAxis(x, z, projection, drawX + screenX);
+            float sy = NativeWideProjectAxis(y, z, projection, drawY + screenY);
+            minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx);
+            minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
+        }
+        if (maxX < viewCenterX - wideHalf || minX > viewCenterX + wideHalf) return false;
+        if (minX >= viewCenterX - coreHalf && maxX <= viewCenterX + coreHalf) return false;
         return maxY >= viewCenterY - halfHeight && minY <= viewCenterY + halfHeight;
     }
 
