@@ -404,7 +404,11 @@ public static partial class FramePacing
         for (int wi = 0; wi < drawWorldCount; wi++)
         {
             var world = worlds[wi];
-            bool temple = world.PolyCount > 0 && NativeWideSunsetTemple(m, world);
+            // Heavy Machinery's back wall fill also overlaps neighbouring meshes'
+            // coplanar walls, which round their depth differently: it too must
+            // stay behind all real scenery and only cover what nothing else does.
+            bool behind = world.PolyCount > 0 && (NativeWideSunsetTemple(m, world)
+                || m.ReadU32(Catalog.LevelIdAddr) == 6);
             // Repairs were tuned with each mesh's own zone; neighbours draw only authored polygons.
             var repairs = world.Neighbor ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world);
             foreach (var chunk in NativeWideRepairChunksOf(repairs))
@@ -435,7 +439,7 @@ public static partial class FramePacing
                     AddNativeWideClippedTriangle(repairVertices, projection, screenX, screenY,
                         gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
                         repairFlags, true, _nativeWideOpaque, _nativeWideTransparent);
-                    if (temple && !repair.Boundary)
+                    if (behind && !repair.Boundary)
                     {
                         NativeWideBehindScenery(_nativeWideOpaque, opaqueStart);
                         NativeWideBehindScenery(_nativeWideTransparent, transparentStart);

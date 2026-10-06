@@ -11,8 +11,9 @@ public static partial class FramePacing
     // level start, the vertical shafts, the turns) the 16:9 bands saw past
     // their ends and through cells missing between them. Each row is filled
     // with copies of its own cells, in every free slot of its grid and a few
-    // past both ends. Extensions only reach the side bands and yield to every
-    // original surface, so cells filled behind scenery stay hidden.
+    // past both ends. Extensions only reach the side bands and are drawn
+    // behind all real scenery, so they show only where the 16:9 view saw
+    // nothing.
     const float NativeWideMachineryCell = 400;
     const int NativeWideMachinerySlots = 10;
     // A new cell repeats the cell this far towards the row's middle (or a
