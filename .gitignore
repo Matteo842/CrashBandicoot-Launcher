@@ -17,6 +17,8 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 *~
+__pycache__/
+*.pyc
 
 # --- Build / publish outputs (never the release zip with a dump inside) ------
 bin/
