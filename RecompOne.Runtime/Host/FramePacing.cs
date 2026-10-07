@@ -172,9 +172,11 @@ namespace RecompOne.Runtime.Host;
 /// GROUNDLAND, not 0x80. Do not pin vy=0 on 0x80 — jump hang
 /// (spd 5454 while X held) re-hits the roof every present and stuck.
 /// Willy_Success (third Aku Aku / Event39 Tawna tokens) SETs vely and
-/// has AIR (stateflag 0x48) but is not a jump hang. Treating it as
-/// airborne rebuilt Y at dt and cleared GROUNDLAND, so the hop fell
-/// through the floor whenever dt&lt;34. Keep grounded 34+scale.
+/// has AIR (stateflag 0x48). The rise is airborne (keeps the SET; grounded
+/// dt/34 of it barely left the floor, #110). The apex hover clears
+/// GRAVITY | PHYSICS_ENGINE: airborne there rebuilt Y with gravity×dt and
+/// no floor test, so Crash fell through the floor whenever dt&lt;34 (#40).
+/// Keep only the hover grounded 34+scale.
 /// Hog spawn calcpath is a checkpoint snap — do not lerp XZ from the
 /// death pose. Death cine is stateflag 0x4000 (not a WillC index).
 /// CamFollow look-behind is cam_offset_z += 0x3200 per display frame

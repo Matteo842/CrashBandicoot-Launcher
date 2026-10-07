@@ -523,13 +523,13 @@ public static partial class FramePacing
     /// when flags are stale. vy&gt;0 is the bounce takeoff present: CODE SETs
     /// vely while GROUNDLAND is still on from the crate. Walk/stance stay
     /// 34+scale when vy≤0 even if leftover fall vy is large.
-    /// Willy_Success also has AIR and SETs vely; that hop is not hang.
+    /// Willy_Success rises like a jump; only its apex hover is grounded.
     /// </summary>
     static bool CrashAirborne(IMemory m, uint obj)
     {
         try
         {
-            if (CrashSuccessHop(m, obj))
+            if (CrashSuccessHover(m, obj))
                 return false;
             if ((m.ReadU32(obj + ObjStateFlagsOff) & FlagStateAir) != 0)
                 return true;
@@ -548,18 +548,24 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Third-mask / 3-Tawna hop. AIR is on so FlagStateAir would take
-    /// FinishJumpScale, clear GROUNDLAND, and drop Crash through the floor
-    /// at dt&lt;34. Same 34+scale as 1.9.2.
+    /// Third-mask / 3-Tawna hop (AnimWillySuccess). The rise is a plain
+    /// ballistic hop with GRAVITY | PHYSICS_ENGINE on: airborne, so the
+    /// 12.6 m SET is kept. Grounded 34+scale kept dt/34 of that SET — a
+    /// quarter of the hop at 120 FPS (#110). At the apex CODE clears both
+    /// flags and Crash hovers .7 s with no guest motion; airborne there
+    /// still added gravity×dt with the floor test off and dropped him
+    /// through the floor at dt&lt;34 (#40). Only the hover is grounded.
     /// </summary>
-    static bool CrashSuccessHop(IMemory m, uint obj)
+    static bool CrashSuccessHover(IMemory m, uint obj)
     {
         try
         {
             uint flags = m.ReadU32(obj + ObjStateFlagsOff);
-            if ((flags & (FlagStateSuccess | FlagStateAir)) == (FlagStateSuccess | FlagStateAir))
-                return true;
-            return m.ReadU32(obj + ObjStateOff) == StateWillySuccess;
+            if ((flags & (FlagStateSuccess | FlagStateAir)) != (FlagStateSuccess | FlagStateAir)
+                && m.ReadU32(obj + ObjStateOff) != StateWillySuccess)
+                return false;
+            const uint hop = FlagGravity | FlagTransMotion;
+            return (m.ReadU32(obj + ObjStatusBOff) & hop) != hop;
         }
         catch
         {
@@ -844,9 +850,8 @@ public static partial class FramePacing
         {
             _crashAir = CrashAirborne(m, _obj);
             // Land→Bounce CODE SETs vely this present; flags/index can lag.
-            // Success hop is also a SET (~12.6 m) — do not steal that into
-            // FinishJumpScale (AIR + dvy would both trip).
-            if (!_crashAir && !CrashSuccessHop(m, _obj))
+            // The success hover has no guest motion — keep it grounded.
+            if (!_crashAir && !CrashSuccessHover(m, _obj))
             {
                 int dvy = (int)m.ReadU32(_obj + ObjVelYOff) - _ovy;
                 if (dvy > Teleport || dvy < -Teleport)

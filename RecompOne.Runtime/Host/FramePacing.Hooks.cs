@@ -341,7 +341,11 @@ public static partial class FramePacing
             DropStalePathPlatCollider(m, _obj);
         // Keep the full XZ wall query, but give Y collision the same dt-scaled
         // hang velocity and integer displacement that FinishPacedScale commits.
-        if (_crashObj && (_crashAir || HogNeedsJumpY(m)))
+        // A land-locked update (_objScaled at Pre) is one original 34-tick
+        // step and FinishPacedScale never restores vy. Mask hit: Death_Spin /
+        // Death_Flat TakeDamage → Willy_Hurt SETs vely 12.6 m in that same
+        // update; dt-encoding it left dt/34 of the hurt hop (#110).
+        if (_crashObj && (_crashAir || HogNeedsJumpY(m)) && !_objScaled)
         {
             PrepareAirborneY(m);
             WriteAllTicks(m, RefTicks);
