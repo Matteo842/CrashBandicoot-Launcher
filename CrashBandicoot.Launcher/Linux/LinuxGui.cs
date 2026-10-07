@@ -15,7 +15,7 @@ static class LinuxGui
 
     static bool _windowShown;
 
-    /// <summary>"v2.0" from the assembly version (without the +commit suffix).</summary>
+    /// <summary>"v2.1" from the assembly version (without the +commit suffix).</summary>
     public static string VersionLabel { get; } = "v" + (Assembly.GetEntryAssembly()?
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?").Split('+')[0];
 
