@@ -171,7 +171,7 @@ public static partial class FramePacing
             // A crate break waits for the next gate (see IsCrateBreakStep).
             if (IsFirstFrame(m, _obj) && !crateBreak)
             {
-                LagCrashStampForBox(m, _obj);
+                LagCrashStampForEntity(m, _obj);
                 SeedObjectGate(_obj);
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
@@ -195,7 +195,7 @@ public static partial class FramePacing
             }
             else
             {
-                LagCrashStampForBox(m, _obj);
+                LagCrashStampForEntity(m, _obj);
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
                 SnapshotGatedCarry(m, _obj);

@@ -503,6 +503,10 @@ public static partial class FramePacing
     const uint StatePoPlWait = 6;
     const uint StatePoPlActive = 7;
     const uint StatePoPlAuto = 8;
+    /// <summary>PoObC (Heavy Machinery springs, steam, conveyor belts).</summary>
+    const uint GoolTypePoOb = 14u;
+    /// <summary>PoObC <c>Conveyor</c>. Trans does <c>collider-&gt;x = spd(...)</c>, no wall test.</summary>
+    const uint StatePoObConveyor = 3;
     /// <summary>0.5 m. Wait/Active carry tests <c>player.y - y &gt; -0.5m</c>.</summary>
     const int HalfMeter = 0xC800;
     /// <summary>NTSC-U <c>s</c> / <c>t</c> — only lids with PoPlC 70deg + 0.985 carry.</summary>

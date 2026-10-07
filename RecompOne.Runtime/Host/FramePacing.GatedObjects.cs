@@ -73,6 +73,17 @@ public static partial class FramePacing
         catch { return false; }
     }
 
+    static bool IsPoObConveyor(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypePoOb
+                && m.ReadU32(obj + ObjStateOff) == StatePoObConveyor;
+        }
+        catch { return false; }
+    }
+
     static void NoteCrateFlight(IMemory m, uint obj)
     {
         try
@@ -167,10 +178,17 @@ public static partial class FramePacing
     /// down, the bottom accepted, and <c>eventaccepted</c> after the forward
     /// broke all three in one present (Generator Room). Give a running
     /// crate the original view: Crash's stamp is the previous frame.
+    /// Heavy Machinery conveyors too (#108): that same-stamp GoolCollide
+    /// ignores Crash's state, so the belt kept carrying a burnt Crash (no
+    /// COLLIDABLE / TRANS_MOTION, so no walls) through the hot pipe. Original
+    /// only gets the belt touch from Crash's own physics (PlotObjWalls), which
+    /// a dead Crash no longer runs. It also let two overlapping belts both
+    /// push him (double speed); PlotObjWalls keeps only the nearest one.
     /// </summary>
-    static void LagCrashStampForBox(IMemory m, uint obj)
+    static void LagCrashStampForEntity(IMemory m, uint obj)
     {
-        if (_crashStampLagged || !IsBoxObj(m, obj) || !TryReadCrash(m, out uint crash)) return;
+        if (_crashStampLagged || !(IsBoxObj(m, obj) || IsPoObConveyor(m, obj))
+            || !TryReadCrash(m, out uint crash)) return;
         try
         {
             uint fe = m.ReadU32(FramesElapsedAddr);
