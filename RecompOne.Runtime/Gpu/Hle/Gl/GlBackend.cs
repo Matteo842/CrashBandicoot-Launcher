@@ -597,7 +597,7 @@ public sealed class GlBackend : IGpuBackend
         _pendingWideMode = f.WideMode;
         if (_count > 0 && (target != _kTarget || !DesiredMatches(transparent, blend))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
-        if (!IsNativeWideSideDraw(f.WideMode))
+        if (!IsNativeWidePass(f.WideMode))
             CheckTextureFeedback(f);
 
         _kTarget = target;
@@ -796,6 +796,11 @@ public sealed class GlBackend : IGpuBackend
         WidePrimitiveMode.WorldExtensionSides or
         WidePrimitiveMode.DepthTest;
 
+    // Primitives of the native-wide renderer itself (side bands and the core
+    // fill): they sample VRAM textures only, never the display target.
+    static bool IsNativeWidePass(WidePrimitiveMode mode) =>
+        IsNativeWideSideDraw(mode) || mode == WidePrimitiveMode.WorldCore;
+
     int BuildScissorBands(GlDisplayRt? rt, Span<ScissorBand> bands)
     {
         if (rt == null)
@@ -806,7 +811,7 @@ public sealed class GlBackend : IGpuBackend
 
         int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
         int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
-        if (_kWideMode == WidePrimitiveMode.CoreOnly && rt.Margin > 0)
+        if (_kWideMode is WidePrimitiveMode.CoreOnly or WidePrimitiveMode.WorldCore && rt.Margin > 0)
         {
             cx0 = rt.Margin;
             cx1 = rt.Margin + rt.W - 1;
@@ -881,7 +886,8 @@ public sealed class GlBackend : IGpuBackend
         }
 
         bool extension = _kWideMode == WidePrimitiveMode.WorldExtensionSides;
-        bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides
+        bool worldPass = _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore;
+        bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore
             or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.DepthTest;
         if (extension)
         {
@@ -900,7 +906,7 @@ public sealed class GlBackend : IGpuBackend
             // texels blend. The opaque texels still form solid world surfaces,
             // so the native-wide world pass must establish depth for the whole
             // triangle. Object translucency keeps the conventional no-write path.
-            _gl.DepthMask(_kWideMode == WidePrimitiveMode.WorldSides || extension || !_kTransparent);
+            _gl.DepthMask(worldPass || extension || !_kTransparent);
         }
         else
         {
@@ -916,7 +922,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         bool splitFetch = _glesFramebufferFetchPath != GlesFramebufferFetchPath.None && _progPrimFast != 0 &&
                           rt != null && _kCheckMask == 0 &&
-                          (GlVram.Scale >= 8 || IsNativeWideSideDraw(_kWideMode));
+                          (GlVram.Scale >= 8 || IsNativeWidePass(_kWideMode));
         if (splitFetch)
         {
             // Upload the complete PS1 draw list once, then switch shaders only

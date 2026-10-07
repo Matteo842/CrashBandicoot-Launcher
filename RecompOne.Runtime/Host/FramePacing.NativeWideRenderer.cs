@@ -23,6 +23,11 @@ public static partial class FramePacing
     static readonly List<NativeWideTriangle> _nativeWideTransparent = new(128);
     static readonly List<NativeWideTriangle> _nativeWideExtensions = new(256);
     static readonly List<NativeWideTriangle> _nativeWideUnderBackdrop = new(256);
+    // Neighbour-zone scenery inside the 4:3 core (#105), submitted just before
+    // the first retail world primitive so the original image paints over it.
+    static readonly List<NativeWideTriangle> _nativeWideCorePending = new(512);
+    static readonly List<NativeWideTriangle> _nativeWideCoreOpaque = new(512);
+    static readonly List<NativeWideTriangle> _nativeWideCoreTransparent = new(64);
     static readonly short[] _nativeWideMatrix = new short[9];
     // Eight meshes of the current zone plus resident meshes of its neighbours.
     const int NativeWideMaxWorlds = 16;
@@ -97,6 +102,7 @@ public static partial class FramePacing
     {
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
+        _nativeWideCorePending.Clear();
         _nativeWideFogBackground = null;
         _nativeWideView = null;
         GpuHle.NativeWideRendererActive = false;
@@ -137,12 +143,14 @@ public static partial class FramePacing
             if (!RenderNativeWideWorldSides(m))
             {
                 _nativeWidePending.Clear();
+                _nativeWideCorePending.Clear();
                 GpuHle.NativeWideRendererActive = false;
             }
         }
         catch (Exception ex)
         {
             _nativeWidePending.Clear();
+            _nativeWideCorePending.Clear();
             GpuHle.NativeWideRendererActive = false;
             if (_nativeWideLogCount < 8)
             {
@@ -175,6 +183,36 @@ public static partial class FramePacing
             backend.DrawTri(a, b, c, triangle.Flags);
         }
         _nativeWidePending.Clear();
+    }
+
+    /// <summary>
+    /// The 4:3 core draws only the camera zone's world list, so a doorway of
+    /// the next zone at the end of a corridor stays black until the camera
+    /// crosses into that zone (#105, retail behaviour). Fill the core with
+    /// the resident neighbour meshes just before the first retail world
+    /// primitive: after the background fill, under everything the game draws.
+    /// </summary>
+    public static void DrawNativeWideCore()
+    {
+        if (_nativeWideCorePending.Count == 0) return;
+        var gpu = Runtime.Gpu;
+        var backend = GpuHle.Backend;
+        if (GpuHle.WideFovActive && gpu != null && backend is { Ready: true })
+        {
+            backend.SetDrawEnv(gpu.CurrentHleDrawEnv);
+            float dx = gpu.DrawOffsetX - _nativeWideDrawX;
+            float dy = gpu.DrawOffsetY - _nativeWideDrawY;
+            for (int i = 0; i < _nativeWideCorePending.Count; i++)
+            {
+                var triangle = _nativeWideCorePending[i];
+                var a = triangle.A; var b = triangle.B; var c = triangle.C;
+                a.X += dx; a.Y += dy;
+                b.X += dx; b.Y += dy;
+                c.X += dx; c.Y += dy;
+                backend.DrawTri(a, b, c, triangle.Flags);
+            }
+        }
+        _nativeWideCorePending.Clear();
     }
 
     static void CaptureNativeWideWorldStart(IMemory m)
@@ -226,6 +264,7 @@ public static partial class FramePacing
         _nativeWideWorldRanges.Clear();
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
+        _nativeWideCorePending.Clear();
         _nativeWideView = null;
         ClearNativeWideHudRanges();
         GpuHle.NativeWideRendererActive = false;
@@ -400,6 +439,8 @@ public static partial class FramePacing
         _nativeWideTransparent.Clear();
         _nativeWideExtensions.Clear();
         _nativeWideUnderBackdrop.Clear();
+        _nativeWideCoreOpaque.Clear();
+        _nativeWideCoreTransparent.Clear();
         bool underBackdrop = NativeWideFillsUnderBackdrop(m);
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
         int clippedPolygons = 0;
@@ -451,8 +492,12 @@ public static partial class FramePacing
                 }
             }
             if (world.PolyCount == 0) continue;
-            if (!NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
-                    viewCenterX, coreHalf))
+            // Neighbour meshes also fill the 4:3 core (#105); the zone's own
+            // meshes are drawn there by the game itself.
+            bool fillCore = world.Neighbor;
+            bool worldSides = NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
+                viewCenterX, coreHalf);
+            if (!worldSides && !fillCore)
                 continue;
             int gemColumn = gemTempleHidden && NativeWideGemColumnMesh(m, world) ? NativeWideGemColumnFirst : -1;
             for (int pi = 0; pi < world.PolyCount; pi++)
@@ -463,19 +508,32 @@ public static partial class FramePacing
                 uint p0 = FastU32(m, poly);
                 uint p1 = FastU32(m, poly + 4u);
                 NativeWidePolygonVertices(p0, p1, out int indexA, out int indexB, out int indexC);
-                if (!NativeWideTouchesSides(world, indexA, indexB, indexC, near,
+                bool sides = worldSides && NativeWideTouchesSides(world, indexA, indexB, indexC, near,
                         projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
-                        viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight))
+                        viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
+                bool core = fillCore && NativeWideTouchesCore(world, indexA, indexB, indexC, near,
+                        projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
+                        viewCenterX, viewCenterY, coreHalf, halfHeight);
+                if (!sides && !core)
                     continue;
                 if (!TryNativeWideMaterial(m, world, pi, drawCount, out PrimFlags flags, out bool noCull,
                         out short u0, out short v0, out short u1, out short v1, out short u2, out short v2))
                     continue;
-                clippedPolygons += AddNativeWideClippedPolygon(
-                    m, world, indexA, indexB, indexC, u0, v0, u1, v1, u2, v2,
-                    projection, screenX, screenY,
-                    gpu.DrawOffsetX, gpu.DrawOffsetY,
-                    viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
-                    flags, noCull, _nativeWideOpaque, _nativeWideTransparent);
+                if (sides)
+                    clippedPolygons += AddNativeWideClippedPolygon(
+                        m, world, indexA, indexB, indexC, u0, v0, u1, v1, u2, v2,
+                        projection, screenX, screenY,
+                        gpu.DrawOffsetX, gpu.DrawOffsetY,
+                        viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
+                        flags, noCull, _nativeWideOpaque, _nativeWideTransparent);
+                if (core)
+                    clippedPolygons += AddNativeWideClippedPolygon(
+                        m, world, indexA, indexB, indexC, u0, v0, u1, v1, u2, v2,
+                        projection, screenX, screenY,
+                        gpu.DrawOffsetX, gpu.DrawOffsetY,
+                        viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
+                        flags with { WideMode = WidePrimitiveMode.WorldCore }, noCull,
+                        _nativeWideCoreOpaque, _nativeWideCoreTransparent);
             }
         }
 
@@ -509,6 +567,9 @@ public static partial class FramePacing
         for (int i = 0; i < _nativeWideTransparent.Count; i++)
             if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
                 _nativeWidePending.Add(_nativeWideTransparent[i]);
+        _nativeWideCoreTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        _nativeWideCorePending.AddRange(_nativeWideCoreOpaque);
+        _nativeWideCorePending.AddRange(_nativeWideCoreTransparent);
         _nativeWideView = new NativeWideView(projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
             viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
 
@@ -519,6 +580,7 @@ public static partial class FramePacing
             PaceLog($"native-wide renderer source={totalPolygons} candidates={candidates} "
                 + $"clipped={clippedPolygons} "
                 + $"side={_nativeWideOpaque.Count}+{_nativeWideTransparent.Count} "
+                + $"core={_nativeWideCorePending.Count} "
                 + $"cpu={LastNativeWideCpuMs:0.0}ms winding={GpuHle.WideWorldFrontSign} "
                 + $"samples={GpuHle.WideWorldPositiveSamples}/{GpuHle.WideWorldNegativeSamples}");
         }
@@ -801,12 +863,22 @@ public static partial class FramePacing
             if (maxX < viewCenterX - wideHalf || minX > viewCenterX + wideHalf
                 || maxY < viewCenterY - halfHeight || minY > viewCenterY + halfHeight)
                 continue;
+            float y0 = viewCenterY - halfHeight, y1 = viewCenterY + halfHeight;
+            if (flags.WideMode == WidePrimitiveMode.WorldCore)
+            {
+                // Core fill: the 4:3 view only, the side bands have their own pass.
+                float core0 = viewCenterX - coreHalf, core1 = viewCenterX + coreHalf;
+                if (maxX <= core0 || minX >= core1) continue;
+                added += minX >= core0 && maxX <= core1 && minY >= y0 && maxY <= y1
+                    ? EmitNativeWideUnclipped(a, b, c, flags, opaque, transparent)
+                    : EmitNativeWideBand(a, b, c, core0, core1, y0, y1, flags, opaque, transparent);
+                continue;
+            }
             if (minX >= viewCenterX - coreHalf && maxX <= viewCenterX + coreHalf)
                 continue;
             // Clip spanning sky/ground triangles to the two 16:9 side bands so
             // they are not rasterized across the 4:3 core. Triangles already
             // wholly in one band skip the Sutherland–Hodgman pass.
-            float y0 = viewCenterY - halfHeight, y1 = viewCenterY + halfHeight;
             float left0 = viewCenterX - wideHalf, left1 = viewCenterX - coreHalf + 2f;
             float right0 = viewCenterX + coreHalf - 2f, right1 = viewCenterX + wideHalf;
             if (maxX <= left1)
@@ -1082,6 +1154,35 @@ public static partial class FramePacing
         float minY = Math.Min(ay, Math.Min(by, cy));
         float maxY = Math.Max(ay, Math.Max(by, cy));
         return maxY >= viewCenterY - halfHeight && minY <= viewCenterY + halfHeight;
+    }
+
+    // Counterpart of NativeWideTouchesSides for the core fill: does the
+    // triangle reach the 4:3 view?
+    static bool NativeWideTouchesCore(
+        NativeWideWorld world, int ia, int ib, int ic, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float halfHeight)
+    {
+        var verts = world.CameraVertices;
+        if (verts == null || (uint)ia >= (uint)verts.Length
+            || (uint)ib >= (uint)verts.Length || (uint)ic >= (uint)verts.Length)
+            return false;
+        var a = verts[ia]; var b = verts[ib]; var c = verts[ic];
+        if (a.Z < near && b.Z < near && c.Z < near) return false;
+        if (a.Z < near || b.Z < near || c.Z < near) return true;
+
+        int ox = drawX + screenX, oy = drawY + screenY;
+        float ax = NativeWideProjectAxis(a.X, a.Z, projection, ox);
+        float bx = NativeWideProjectAxis(b.X, b.Z, projection, ox);
+        float cx = NativeWideProjectAxis(c.X, c.Z, projection, ox);
+        if (Math.Max(ax, Math.Max(bx, cx)) <= viewCenterX - coreHalf
+            || Math.Min(ax, Math.Min(bx, cx)) >= viewCenterX + coreHalf) return false;
+
+        float ay = NativeWideProjectAxis(a.Y, a.Z, projection, oy);
+        float by = NativeWideProjectAxis(b.Y, b.Z, projection, oy);
+        float cy = NativeWideProjectAxis(c.Y, c.Z, projection, oy);
+        return Math.Max(ay, Math.Max(by, cy)) >= viewCenterY - halfHeight
+            && Math.Min(ay, Math.Min(by, cy)) <= viewCenterY + halfHeight;
     }
 
     // The same test for repairs, from their positions alone: levels with

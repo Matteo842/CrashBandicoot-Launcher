@@ -9,6 +9,9 @@ public enum WidePrimitiveMode : byte
     CoreOnly,
     DepthTest,
     WorldExtensionSides,
+    // Neighbour-zone scenery inside the 4:3 core, drawn before the retail
+    // world so the game paints over it: only fills what it leaves empty.
+    WorldCore,
 }
 
 public struct HleVertex

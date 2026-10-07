@@ -31,6 +31,9 @@ public static class LibGpu
                     GpuHle.CurrentOtSlot = (int)((addr - otBase) >> 2);
                 if (Host.FramePacing.IsNativeWideWorldPrimitive(addr))
                 {
+                    // Neighbour scenery in the 4:3 core goes after the background
+                    // fill and under the retail world (no-op once drawn).
+                    Host.FramePacing.DrawNativeWideCore();
                     GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.World;
                     GpuHle.CurrentHudRange = -1;
                 }
