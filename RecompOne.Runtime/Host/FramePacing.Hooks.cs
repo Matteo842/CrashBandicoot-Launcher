@@ -523,6 +523,10 @@ public static partial class FramePacing
     /// <c>if (!collider) statetime = frametime</c>; Active CarryCollider
     /// (and Temple 0.985 / RWaOC wall mill) need the same pointer. Rewrite after Bound.
     /// Any lid: Cortex Power discs are the same PoPlC without 70deg rot.
+    /// GemsC Gem_Active too (#112): the ride path only advances
+    /// <c>pathprog</c> while <c>collider</c> is Crash, so in that phase the
+    /// gem never left its start (Jungle Rollers green gem lift) and
+    /// <c>GEMTIME</c> went stale for the gem-path kill blocks.
     /// </summary>
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
     {
@@ -572,6 +576,7 @@ public static partial class FramePacing
         {
             if (!TryReadGoolClass(m, obj, out uint type, out uint cat)
                 || (type != GoolTypePoPl && !IsGatedRwaocMover(m, obj, type)
+                    && !IsActiveGem(m, obj, type)
                     && !IsGatedRiverObject(m, type, cat) && !IsRiverRideSurface(m, obj)))
                 return;
             uint b = m.ReadU32(obj + ObjStatusBOff);

@@ -101,11 +101,7 @@ public static partial class FramePacing
     {
         if (type == GoolTypeRuiO) return true;
         if (IsGatedRwaocMover(m, obj, type)) return true;
-        if (type == GoolTypeGems)
-        {
-            try { return m.ReadU32(obj + ObjStateOff) == StateGemActive; }
-            catch { return false; }
-        }
+        if (type == GoolTypeGems) return IsActiveGem(m, obj, type);
         if (type != GoolTypePoPl) return false;
         try
         {
@@ -121,6 +117,14 @@ public static partial class FramePacing
         {
             return false;
         }
+    }
+
+    /// <summary>GemsC <c>Gem_Active</c>: an owned gem (bob, ride path or ping-pong path).</summary>
+    static bool IsActiveGem(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypeGems) return false;
+        try { return m.ReadU32(obj + ObjStateOff) == StateGemActive; }
+        catch { return false; }
     }
 
     /// <summary>
