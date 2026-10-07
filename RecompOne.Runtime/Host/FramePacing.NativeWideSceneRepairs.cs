@@ -34,6 +34,15 @@ public static partial class FramePacing
             PaceLog($"native-wide level={level} back wall repairs={machinery.Count}");
             return _nativeWideSceneryRepairs[machineryKey] = machinery;
         }
+        if (level == 3)
+        {
+            var powerKey = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
+                m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
+            if (_nativeWideSceneryRepairs.TryGetValue(powerKey, out var power)) return power;
+            power = NativeWidePowerRepairs(m, world);
+            PaceLog($"native-wide level={level} wall repairs={power.Count}");
+            return _nativeWideSceneryRepairs[powerKey] = power;
+        }
         if (level == 41)
         {
             var labKey = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),

@@ -210,8 +210,8 @@ public static partial class FramePacing
             Vector3.Max(Position(t[0]), Vector3.Max(Position(t[1]), Position(t[2]))), t);
 
     // Triangles a and b overlap in their interiors while a lies within 24 units
-    // of b's plane: drawn together they would fight in the depth test.
-    static bool NativeWideCoplanarOverlap(NativeWideClipVertex[] a, NativeWideClipVertex[] b)
+    // (or Tolerance) of b's plane: drawn together they would fight in the depth test.
+    static bool NativeWideCoplanarOverlap(NativeWideClipVertex[] a, NativeWideClipVertex[] b, float tolerance = 24)
     {
         Vector3 b0 = Position(b[0]);
         var normal = Vector3.Cross(Position(b[1]) - b0, Position(b[2]) - b0);
@@ -219,7 +219,7 @@ public static partial class FramePacing
         if (length < 1) return false;
         normal /= length;
         foreach (var v in a)
-            if (Math.Abs(Vector3.Dot(Position(v) - b0, normal)) > 24) return false;
+            if (Math.Abs(Vector3.Dot(Position(v) - b0, normal)) > tolerance) return false;
         // Project onto the plane's two longest axes and look for a separating edge.
         var n = Vector3.Abs(normal);
         int drop = n.X >= n.Y && n.X >= n.Z ? 0 : n.Y >= n.Z ? 1 : 2;
@@ -489,11 +489,12 @@ public static partial class FramePacing
                     }
         }
 
-        // True when t overlaps a nearly coplanar triangle of the grid.
-        public bool Overlaps(NativeWideClipVertex[] t)
+        // True when t overlaps a nearly coplanar triangle of the grid (within
+        // Tolerance of its plane; only triangles lying wholly above Above count).
+        public bool Overlaps(NativeWideClipVertex[] t, float tolerance = 24, float above = float.MinValue)
         {
             var (min, max, _) = NativeWideBounded(t);
-            var pad = new Vector3(24);
+            var pad = new Vector3(tolerance);
             var (x0, y0, z0) = Key(min - pad);
             var (x1, y1, z1) = Key(max + pad);
             for (int x = x0; x <= x1; x++)
@@ -502,7 +503,7 @@ public static partial class FramePacing
                         if (_cells.TryGetValue((x, y, z), out var list))
                             foreach (var e in list)
                                 if (min == Vector3.Min(min, e.Max + pad) && max == Vector3.Max(max, e.Min - pad)
-                                    && NativeWideCoplanarOverlap(t, e.T)) return true;
+                                    && e.Min.Y >= above && NativeWideCoplanarOverlap(t, e.T, tolerance)) return true;
             return false;
         }
     }

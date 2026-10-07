@@ -1405,13 +1405,15 @@ public static partial class FramePacing
     // coplanar walls, which round their depth differently: it too must stay
     // behind all real scenery and only cover what nothing else does. So do
     // The Lab's wall continuations (its towers are boundary repairs and keep
-    // their true depth).
+    // their true depth), and Cortex Power's wall ends (its raised wall tops
+    // are boundary repairs).
     static bool NativeWideRepairsBehind(IMemory m, NativeWideWorld world) =>
-        world.PolyCount > 0 && (NativeWideSunsetTemple(m, world) || m.ReadU32(Catalog.LevelIdAddr) is 6 or 41);
+        world.PolyCount > 0 && (NativeWideSunsetTemple(m, world) || m.ReadU32(Catalog.LevelIdAddr) is 3 or 6 or 41);
 
     // Fills behind all scenery must not hide the sky: in The Lab, back wall
-    // continuations run past the side walls' windows.
-    static bool NativeWideFillsUnderBackdrop(IMemory m) => m.ReadU32(Catalog.LevelIdAddr) == 41;
+    // continuations run past the side walls' windows; in Cortex Power, the
+    // building front of the opening camera continues past the sky band.
+    static bool NativeWideFillsUnderBackdrop(IMemory m) => m.ReadU32(Catalog.LevelIdAddr) is 3 or 41;
 
     static void NativeWideMoveRange(List<NativeWideTriangle> from, int start, List<NativeWideTriangle> to)
     {
