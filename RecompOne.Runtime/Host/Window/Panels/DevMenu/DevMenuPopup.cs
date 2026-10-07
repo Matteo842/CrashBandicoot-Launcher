@@ -150,7 +150,8 @@ internal sealed class DevMenuPopup : IPanel
 
         ImGui.Spacing();
         ImGui.Separator();
-        ImGuiEx.TextDisabled($"Toggle: {ConfigManager.View.CheatMenuKey}");
+        ImGuiEx.TextDisabled($"Toggle: {ConfigManager.View.CheatMenuKey} · Menu bar: F1");
+        ImGuiEx.TextDisabled($"Version {AppVersion.Version}");
     }
 
     void DrawSectionPage(IReadOnlyList<IDevMenuSection> sections, float ui)

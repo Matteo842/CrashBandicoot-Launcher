@@ -299,9 +299,11 @@ internal static class HostWindow
         {
             if (!ExitToMapInjector.Active)
             {
-                // Single Esc pipeline: Dev Menu first, otherwise pause overlay.
+                // Single Esc pipeline: Dev Menu, then Settings (back to pause), then pause overlay.
                 if (PanelManager.Get<DevMenuPopup>() is { IsOpen: true } dev)
                     dev.HandleEscape();
+                else if (PanelManager.Get<SettingsPopup>() is { IsOpen: true } settings)
+                    settings.IsOpen = false;
                 else if (PanelManager.Get<PauseMenuPopup>() is { } pause)
                     pause.IsOpen = !pause.IsOpen;
             }
@@ -633,6 +635,7 @@ internal static class HostWindow
         DevMenuRegistry.Register(new DisplayDevMenuSection());
         DevMenuRegistry.Register(new RenderingDevMenuSection());
         DevMenuRegistry.Register(new AudioDevMenuSection());
+        DevMenuRegistry.Register(new ModsDevMenuSection());
         DevMenuRegistry.Register(new DebugDevMenuSection());
         DevMenuRegistry.Register(new EngineDevMenuSection());
 

@@ -54,7 +54,7 @@ internal sealed class DisplayDevMenuSection : IDevMenuSection
             ConfigManager.View.HideTopBar = !showBar;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Also F1");
+        ImGuiEx.TextDisabled("Debug tools bar, off by default (F1)");
         ImGuiEx.TextDisabled("More options: Rendering");
     }
 }

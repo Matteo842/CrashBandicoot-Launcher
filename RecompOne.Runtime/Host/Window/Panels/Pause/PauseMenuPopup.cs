@@ -6,7 +6,7 @@ using RecompOne.Runtime.Host.Cheats;
 namespace RecompOne.Runtime.Host.Window;
 
 /// <summary>
-/// ESC pause overlay: resume, open the in-game save/exit flow, or leave the session.
+/// ESC pause overlay: resume, settings, open the in-game save/exit flow, or leave the session.
 /// </summary>
 internal sealed class PauseMenuPopup : IPanel
 {
@@ -85,6 +85,11 @@ internal sealed class PauseMenuPopup : IPanel
 
         if (BookRow("Resume", "resume"))
             open = false;
+
+        // Pause stays open behind Settings so gameplay input stays muted; Esc closes Settings first.
+        if (BookRow("Settings...", "settings")
+            && PanelManager.Get<SettingsPopup>() is { } settings)
+            settings.IsOpen = true;
 
         bool onMap = CheatManager.IsOnTitleMenuMap();
         if (onMap)

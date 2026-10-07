@@ -124,7 +124,7 @@ public static class LibEtc
             if (FramePacing.IsActive(m))
             {
                 _lastVblankTs = now;
-                Runtime.DispatchIrq(0);
+                DispatchVblankIrq();
                 FramePacing.NoteVblankIrq();
                 return;
             }
@@ -153,9 +153,16 @@ public static class LibEtc
     static uint TickSequencer(CpuContext? c, IMemory m)
     {
         _lastVblankTs = Stopwatch.GetTimestamp();
-        Runtime.DispatchIrq(0);
+        DispatchVblankIrq();
         FramePacing.NoteVblankIrq();
         return TickCounters(c, m, addTicks: true);
+    }
+
+    /// <summary>Vblank-clocked audio renders and dispatches whatever IRQs are due.</summary>
+    static void DispatchVblankIrq()
+    {
+        if (SpuStream.Enabled) SpuStream.PumpVblanks();
+        else Runtime.DispatchIrq(0);
     }
 
     static uint TickCounters(CpuContext? c, IMemory m, bool addTicks)

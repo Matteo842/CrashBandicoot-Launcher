@@ -5,16 +5,18 @@ namespace CrashBandicoot.AndroidRuntime;
 
 /// <summary>
 /// Streams the emulated SPU/XA output to an Android <see cref="AudioTrack"/>.
-/// The blocking Write() call paces the mixer thread the same way the OpenAL
-/// buffer queue paces the desktop host.
+/// Audio is rendered per VBlank into <see cref="SpuStream"/>; this thread only
+/// resamples that queue to the device rate and writes it, so the device's
+/// pull pattern no longer decides when notes start (#23).
 /// </summary>
 sealed class AndroidAudioOutput : IDisposable
 {
     const string Tag = "CrashAudio";
-    const int SampleRate = 44100;
-    const int FramesPerBuffer = 1024; // ~23 ms per chunk, same as the desktop host
+    const int FramesPerWrite = 256;  // ~5 ms at 48 kHz
+    /// <summary>Device-side buffer: covers GC pauses without the 200+ ms deep-buffer latency.</summary>
+    const int TrackBufferMs = 40;
 
-    readonly short[] _sampleBuf = new short[FramesPerBuffer * 2];
+    readonly short[] _sampleBuf = new short[FramesPerWrite * 2];
     readonly object _sync = new();
     readonly ManualResetEventSlim _resumeSignal = new(initialState: true);
 
@@ -23,6 +25,7 @@ sealed class AndroidAudioOutput : IDisposable
     volatile bool _running;
     volatile bool _paused;
     Spu? _spu;
+    int _outRate = 48000;
     float _masterVolume = 1f;
     bool _initFailed;
 
@@ -67,30 +70,39 @@ sealed class AndroidAudioOutput : IDisposable
                 return;
             try
             {
-                int chunkBytes = FramesPerBuffer * 2 * sizeof(short);
-                int minBuffer = AudioTrack.GetMinBufferSize(SampleRate, ChannelOut.Stereo, Encoding.Pcm16bit);
-                int bufferBytes = Math.Max(minBuffer, chunkBytes * 6);
+                _outRate = NativeOutputRate();
+                int frameBytes = 2 * sizeof(short);
+                int minBuffer = AudioTrack.GetMinBufferSize(_outRate, ChannelOut.Stereo, Encoding.Pcm16bit);
+                int bufferBytes = Math.Max(minBuffer, _outRate / 10 * frameBytes); // capacity 100 ms
 
                 var attributes = new AudioAttributes.Builder()!
                     .SetUsage(AudioUsageKind.Game)!
                     .SetContentType(AudioContentType.Music)!
                     .Build()!;
                 var format = new AudioFormat.Builder()!
-                    .SetSampleRate(SampleRate)!
+                    .SetSampleRate(_outRate)!
                     .SetEncoding(Encoding.Pcm16bit)!
                     .SetChannelMask(ChannelOut.Stereo)!
                     .Build()!;
-                var track = new AudioTrack.Builder()!
+                var builder = new AudioTrack.Builder()!
                     .SetAudioAttributes(attributes)!
                     .SetAudioFormat(format)!
                     .SetTransferMode(AudioTrackMode.Stream)!
-                    .SetBufferSizeInBytes(bufferBytes)!
-                    .Build()!;
+                    .SetBufferSizeInBytes(bufferBytes)!;
+                // Default media tracks land on the deep-buffer output (~90 ms
+                // HAL latency on Snapdragon). Low-latency keeps SFX responsive.
+                if (OperatingSystem.IsAndroidVersionAtLeast(26))
+                    builder.SetPerformanceMode(AudioTrackPerformanceMode.LowLatency);
+                var track = builder.Build()!;
 
                 if (track.State != AudioTrackState.Initialized)
                     throw new InvalidOperationException($"AudioTrack failed to initialize (state={track.State}).");
 
                 track.SetVolume(_masterVolume);
+                if (OperatingSystem.IsAndroidVersionAtLeast(24))
+                    track.SetBufferSizeInFrames(Math.Max(FramesPerWrite * 2, _outRate * TrackBufferMs / 1000));
+                SpuStream.ResetConsumer();
+                SpuStream.Enabled = true;
                 _track = track;
                 _running = true;
                 _mixerThread = new Thread(MixerLoop)
@@ -102,7 +114,9 @@ sealed class AndroidAudioOutput : IDisposable
                 _mixerThread.Start();
                 track.Play();
                 Android.Util.Log.Info(Tag,
-                    $"AudioTrack started: {SampleRate} Hz stereo, buffer {bufferBytes} B (min {minBuffer} B).");
+                    $"AudioTrack started: {_outRate} Hz stereo, capacity {bufferBytes} B (min {minBuffer} B), " +
+                    $"buffer {(OperatingSystem.IsAndroidVersionAtLeast(24) ? track.BufferSizeInFrames : -1)} frames, " +
+                    $"perf {(OperatingSystem.IsAndroidVersionAtLeast(26) ? track.PerformanceMode.ToString() : "?")}.");
             }
             catch (Exception ex)
             {
@@ -115,22 +129,40 @@ sealed class AndroidAudioOutput : IDisposable
         }
     }
 
+    static int NativeOutputRate()
+    {
+        try
+        {
+            var manager = Android.App.Application.Context.GetSystemService(Android.Content.Context.AudioService) as AudioManager;
+            if (int.TryParse(manager?.GetProperty(AudioManager.PropertyOutputSampleRate), out int rate) &&
+                rate >= 8000 && rate <= 192000)
+                return rate;
+        }
+        catch
+        {
+            // fall back below
+        }
+        return 48000;
+    }
+
     void MixerLoop()
     {
+        try { Android.OS.Process.SetThreadPriority(Android.OS.ThreadPriority.UrgentAudio); }
+        catch { /* best effort */ }
+
         while (_running)
         {
             _resumeSignal.Wait();
             if (!_running) break;
 
-            var spu = _spu;
             var track = _track;
-            if (spu == null || track == null)
+            if (track == null)
             {
                 Thread.Sleep(5);
                 continue;
             }
 
-            spu.Mix(_sampleBuf, FramesPerBuffer);
+            SpuStream.ReadResampled(_sampleBuf, FramesPerWrite, _outRate);
             try
             {
                 int written = 0;
@@ -155,6 +187,7 @@ sealed class AndroidAudioOutput : IDisposable
 
     public void Dispose()
     {
+        SpuStream.Enabled = false;
         _running = false;
         _resumeSignal.Set();
         lock (_sync)

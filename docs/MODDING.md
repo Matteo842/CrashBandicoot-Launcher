@@ -73,7 +73,7 @@ Until you save once, every discovered mod loads (`ModsConfigured = false`). Afte
 
 **Open mods folder** creates `mods/` if needed and opens it in the file explorer.
 
-In-game: Developer menu bar → **Mods → Mods…** lists what actually loaded this session. **Mods → Reload assets** refreshes PNG / disc packs without restarting (see Hot-reload below).
+In-game: Developer Menu (**F3**) → **Mods → Mods…** lists what actually loaded this session. **Mods → Reload assets** refreshes PNG / disc packs without restarting (see Hot-reload below). The same items are in the debug menu bar (**F1**, off by default).
 
 ## Compiling
 
@@ -259,7 +259,7 @@ Texture PNG replacements and disc overlays can refresh **without restarting** th
 
 **Triggers**
 
-1. **Menu:** Developer menu bar → **Mods → Reload assets**, or the **Reload assets** button in **Mods → Mods…**
+1. **Menu:** Developer Menu (**F3**) → **Mods → Reload assets**, or the **Reload assets** button in **Mods → Mods…**
 2. **File watch (default on):** edits under `mods/<id>/textures/*.png`, `mods/<id>/disc/**`, `mod.json`, or replacing a mod `.zip` debounce (~600 ms) then reload automatically. Disable with `"AssetHotWatch": false` in `settings.json`.
 3. **API:**
 
@@ -453,5 +453,5 @@ Do **not** ship copyrighted game dumps, NSF/NSD extracted from the retail disc, 
 - Prefer named SDK functions (`VSync`, `PutDrawEnv`, …) over raw addresses when renames exist.
 - One **Replace** owner wins; later mods are ignored with a log line.
 - Cache invalidates when host or entry assembly MVID / sources change. Delete `mods/.cache` if a fix does not seem to apply.
-- PNG / disc packs hot-reload via **Mods → Reload assets** or file watch; C# hook edits still need a restart.
+- PNG / disc packs hot-reload via **F3 → Mods → Reload assets** or file watch; C# hook edits still need a restart.
 - Frame timing background: [CRASH_BANDICOOT_RECOMP.md §3](CRASH_BANDICOOT_RECOMP.md).

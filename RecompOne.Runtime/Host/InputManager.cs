@@ -153,12 +153,14 @@ internal static unsafe class InputManager
     }
 
     // Embedded child HWND often doesn't get Silk KeyDown (focus on parent / lost focus).
-    // Edge-detect F11 / Alt+Enter / cheat menu / Esc / 1–5 via GetAsyncKeyState so toggles always work.
+    // Edge-detect F1 / F11 / Alt+Enter / cheat menu / Esc / 1–5 via GetAsyncKeyState so toggles always work.
+    static bool _asyncF1;
     static bool _asyncF11;
     static bool _asyncAltEnter;
     static bool _asyncCheatMenu;
     static bool _asyncPauseMenu;
     static readonly bool[] _asyncFrameRate = new bool[5];
+    const int VkF1 = 0x70;
     const int VkF11 = 0x7A;
     const int VkShift = 0x10;
     const int VkControl = 0x11;
@@ -173,6 +175,11 @@ internal static unsafe class InputManager
         // Win32 fallback for embedded HWND (focus often stays on the WinForms parent).
         // Standalone Silk windows get F11 / Alt+Enter via OnKeyDown.
         if (!OperatingSystem.IsWindows()) return;
+
+        // F1 = menu bar; only while the game window is in front (GetAsyncKeyState is global).
+        bool f1 = AsyncDown(VkF1);
+        if (f1 && !_asyncF1 && HostWindow.IsInputActive) _topBarToggle = true;
+        _asyncF1 = f1;
 
         bool f11 = (GetAsyncKeyState(VkF11) & 0x8000) != 0;
         if (f11 && !_asyncF11) _fullscreenToggle = true;

@@ -901,6 +901,11 @@ public static partial class FramePacing
     /// </summary>
     public static void PulseVblankIrq()
     {
+        if (SpuStream.Enabled)
+        {
+            SpuStream.PumpVblanks();
+            return;
+        }
         if (!IsActive(Runtime.Mem))
         {
             Runtime.DispatchIrq(0);

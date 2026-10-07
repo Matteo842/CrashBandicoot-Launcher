@@ -32,10 +32,19 @@ public class ViewConfig
 
     public void SetString(string key, string value) => Values[key] = value;
 
+    /// <summary>
+    /// Debug menu bar (Settings / Mods / Debug / Help) hidden. Off by default:
+    /// players use Esc and the Developer Menu; F1 shows the bar. Stored as
+    /// ShowMenuBar so configs from when the bar was on by default start hidden.
+    /// </summary>
     public bool HideTopBar
     {
-        get => GetBool("HideTopBar");
-        set => SetBool("HideTopBar", value);
+        get => !GetBool("ShowMenuBar");
+        set
+        {
+            SetBool("ShowMenuBar", !value);
+            Values.Remove("HideTopBar");
+        }
     }
 
     public bool Fullscreen

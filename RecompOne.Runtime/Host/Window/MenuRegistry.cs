@@ -21,6 +21,9 @@ public static class MenuRegistry
         _windows.Add(draw);
     }
 
+    internal static bool HasMenus => _menus.Count > 0;
+
+    /// <summary>Draws mod menus in the menu bar or, as sub-menus, in the Developer Menu.</summary>
     internal static void DrawMenus()
     {
         foreach (var (label, draw, parent) in _menus)

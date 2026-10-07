@@ -7,6 +7,8 @@ internal static class MainMenuBar
 {
     public static void Draw()
     {
+        // EndMainMenuBar only after a successful Begin (ImGui asserts otherwise).
+        if (!ImGui.BeginMainMenuBar()) return;
 
         ConfigMenu();
         ModsMenu();
@@ -18,39 +20,36 @@ internal static class MainMenuBar
 
     static void ConfigMenu()
     {
-        if (!ImGui.BeginMainMenuBar()) return;
+        if (!ImGui.BeginMenu("Settings")) return;
 
-        if (ImGui.BeginMenu("Settings"))
+        if (ImGui.MenuItem("Settings..."))
+            if (PanelManager.Get<SettingsPopup>() is { } popup) popup.IsOpen = true;
+
+        var cheatKey = ConfigManager.View.CheatMenuKey;
+        if (ImGui.MenuItem("Developer Menu...", cheatKey))
+            if (PanelManager.Get<DevMenuPopup>() is { } dev) dev.OpenTo("cheats");
+
+        if (ImGui.MenuItem("Pause Menu...", "Esc"))
+            if (PanelManager.Get<PauseMenuPopup>() is { } pause) pause.IsOpen = true;
+
+        ImGui.Separator();
+
+        bool showBar = !ConfigManager.View.HideTopBar;
+        if (ImGui.MenuItem("Show Menu Bar", "F1", showBar))
         {
-            if (ImGui.MenuItem("Settings..."))
-                if (PanelManager.Get<SettingsPopup>() is { } popup) popup.IsOpen = true;
-
-            var cheatKey = ConfigManager.View.CheatMenuKey;
-            if (ImGui.MenuItem("Developer Menu...", cheatKey))
-                if (PanelManager.Get<DevMenuPopup>() is { } dev) dev.OpenTo("cheats");
-
-            if (ImGui.MenuItem("Pause Menu...", "Esc"))
-                if (PanelManager.Get<PauseMenuPopup>() is { } pause) pause.IsOpen = true;
-
-            ImGui.Separator();
-
-            bool showBar = !ConfigManager.View.HideTopBar;
-            if (ImGui.MenuItem("Show Menu Bar", "F1", showBar))
-            {
-                ConfigManager.View.HideTopBar = showBar;
-                ConfigManager.SaveView(PanelManager.Panels);
-            }
-
-            bool fs = ConfigManager.View.Fullscreen;
-            if (ImGui.MenuItem("Fullscreen", "F11 / Alt+Enter", fs))
-            {
-                ConfigManager.View.Fullscreen = !fs;
-                HostWindow.SetFullscreen(!fs);
-                ConfigManager.SaveView(PanelManager.Panels);
-            }
-
-            ImGui.EndMenu();
+            ConfigManager.View.HideTopBar = showBar;
+            ConfigManager.SaveView(PanelManager.Panels);
         }
+
+        bool fs = ConfigManager.View.Fullscreen;
+        if (ImGui.MenuItem("Fullscreen", "F11 / Alt+Enter", fs))
+        {
+            ConfigManager.View.Fullscreen = !fs;
+            HostWindow.SetFullscreen(!fs);
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+
+        ImGui.EndMenu();
     }
     static void ModsMenu()
     {
