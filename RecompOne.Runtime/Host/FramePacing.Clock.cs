@@ -18,7 +18,7 @@ public static partial class FramePacing
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            if (!Catalog.Levels.AllowsUnlockedFps(id) || WantsOriginalPad(m))
+            if (!AllowsUnlock(m, id) || WantsOriginalPad(m))
             {
                 DropToOriginalPad(m, id);
                 return false;
@@ -505,13 +505,14 @@ public static partial class FramePacing
     /// <summary>
     /// Hog Wild / Whole Hog. Spawn sets TRACK_PATH_SIGN and trans does
     /// <c>pathprog = spd(pathprog, 4)</c> then calcpath — not walk physics.
-    /// State indices differ by region; the flag does not.
+    /// State indices differ by region; the flag does not. The island map
+    /// traveler (IsldC) also has TRACK_PATH_SIGN: not a hog.
     /// </summary>
     static bool CrashOnWarthog(IMemory m, uint obj)
     {
         try
         {
-            if (IsLandLockedState(m, obj)) return false;
+            if (IsLandLockedState(m, obj) || IsScreenMain(m, obj)) return false;
             return (m.ReadU32(obj + ObjStatusBOff) & FlagTrackPathSign) != 0;
         }
         catch
@@ -758,7 +759,7 @@ public static partial class FramePacing
             uint obj = c.A0;
             uint crash = m.ReadU32(CrashPtrAddr);
             if (obj != crash || (obj & 0xFF000000u) != 0x80000000u) return true;
-            if (IsGamoMain(m, obj)) return true;
+            if (IsScreenMain(m, obj)) return true;
             uint next = c.A1;
             uint cur = m.ReadU32(obj + ObjStateOff);
             if (cur != next) return true;

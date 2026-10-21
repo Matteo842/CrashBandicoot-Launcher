@@ -231,6 +231,8 @@ public static partial class FramePacing
     /// last run (a short ring of PadUpdate samples), held_prev / tapped_prev =
     /// what it saw on that run. Restored after its Update. Ring size is a
     /// power of two and covers one gate at the 4000 Hz MinStepSeconds cap.
+    /// The island map traveler (IsldC, gated, buttonbuffer X/O) uses the same
+    /// latch; see <c>RunSkippedMapPad</c>.
     /// </summary>
     const int CardTapRing = 256;
     static readonly uint[] _cardTaps = new uint[CardTapRing];
@@ -249,6 +251,8 @@ public static partial class FramePacing
     static int _cardPadLog;
     /// <summary>This GoolObjectUpdate ran PadUpdate (crash's run or land-lock skip).</summary>
     static bool _padRan;
+    /// <summary>Map traveler whose Update is running: latch on its first interpret.</summary>
+    static uint _padLatchOwner;
 
     /// <summary>After crash's PadUpdate: one ring entry per pad sample.</summary>
     static void NoteCardPadTaps(IMemory m)
@@ -273,23 +277,46 @@ public static partial class FramePacing
     static void ApplyCardTaps(IMemory m, uint obj)
     {
         if (!_haveObj || _crashObj || obj != _obj || !IsCardUi(m, obj)) return;
+        ApplyPadLatch(m, obj, owner: false);
+    }
+
+    /// <summary>
+    /// <paramref name="owner"/>: the gated map traveler, called after its own
+    /// PadUpdate (first interpret of its Update). Its fresh tap is not in the
+    /// ring yet (sampled at Post), so add it and count that sample as seen.
+    /// </summary>
+    static void ApplyPadLatch(IMemory m, uint obj, bool owner)
+    {
+        if (_cardPadApplied) return;
         try
         {
+            uint tapped = m.ReadU32(PadsAddr);
             uint held = m.ReadU32(PadsAddr + 4);
+            uint heldPrevReal = m.ReadU32(PadsAddr + 8);
+            uint tappedPrevReal = m.ReadU32(PadsAddr + 12);
             uint taps = 0, heldPrev = held, tapsPrev = 0;
-            if (!_newObj && _cardPad.TryGetValue(obj, out CardPad last))
+            if (owner)
             {
-                uint n = Math.Min(unchecked(_cardTapSeq - last.Seq), (uint)CardTapRing);
-                for (uint i = 0; i < n; i++)
-                    taps |= _cardTaps[unchecked(_cardTapSeq - i) & (CardTapRing - 1)];
+                taps = tapped;
+                heldPrev = heldPrevReal;
+                tapsPrev = tappedPrevReal;
+            }
+            bool newborn = _newObj && obj == _obj;
+            if (!newborn && _cardPad.TryGetValue(obj, out CardPad last))
+            {
+                int behind = unchecked((int)(_cardTapSeq - last.Seq));
+                int n = Math.Clamp(behind, 0, CardTapRing);
+                for (int i = 0; i < n; i++)
+                    taps |= _cardTaps[unchecked(_cardTapSeq - (uint)i) & (CardTapRing - 1)];
                 heldPrev = last.Held;
                 tapsPrev = last.Taps;
             }
-            _cardPad[obj] = new CardPad { Seq = _cardTapSeq, Held = held, Taps = taps };
+            uint seen = owner ? unchecked(_cardTapSeq + 1) : _cardTapSeq;
+            _cardPad[obj] = new CardPad { Seq = seen, Held = held, Taps = taps };
             EvictDictDown(_cardPad, obj, ObjectPoolMax);
-            _cardSaveTapped = m.ReadU32(PadsAddr);
-            _cardSaveHeldPrev = m.ReadU32(PadsAddr + 8);
-            _cardSaveTappedPrev = m.ReadU32(PadsAddr + 12);
+            _cardSaveTapped = tapped;
+            _cardSaveHeldPrev = heldPrevReal;
+            _cardSaveTappedPrev = tappedPrevReal;
             m.WriteU32(PadsAddr, taps);
             m.WriteU32(PadsAddr + 8, heldPrev);
             m.WriteU32(PadsAddr + 12, tapsPrev);
@@ -417,7 +444,7 @@ public static partial class FramePacing
             || !TryReadCrash(m, out uint crash)) return;
         // Completion screen boxes are the GamOC Willy's children: the PS1 ran
         // them after him, same stamp. Nothing to lag.
-        if (IsGamoMain(m, crash)) return;
+        if (IsScreenMain(m, crash)) return;
         try
         {
             uint fe = m.ReadU32(FramesElapsedAddr);

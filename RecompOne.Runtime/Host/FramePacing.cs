@@ -148,9 +148,11 @@ namespace RecompOne.Runtime.Host;
 /// wall clock. Worlds run before object AdvanceWallClock, so they must not
 /// reuse leftover ticks (that is +1 per display frame).
 /// Bonus rounds use the same wall dt as gameplay, the CardC save UI and the
-/// level completion screen too (its main object is GamOC Level_End_Willy,
-/// gated like any GOOL, see <c>IsGamoMain</c>). CardUpdate is gated to one
-/// step per 30 Hz frame (<c>GateCardIo</c>).
+/// level completion screen and the island map too (their main object is
+/// GamOC Level_End_Willy / IsldC, gated like any GOOL, see
+/// <c>IsScreenMain</c>; title, menus and game over on the map lid stay on
+/// the original pad). CardUpdate is gated to one step per 30 Hz frame
+/// (<c>GateCardIo</c>).
 /// CardC is gated like any GOOL; BonoC/CardC spawn() skip the 30 Hz burst
 /// cap (it would eat the menu). Its buttonpress reads the per-present tap
 /// through a per-object latch (<c>ApplyCardTaps</c>). Warp_Out is land-locked

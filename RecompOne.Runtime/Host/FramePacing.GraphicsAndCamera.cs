@@ -337,6 +337,8 @@ public static partial class FramePacing
         {
             if (c.A0 != m.ReadU32(CamZoneAddr) || c.A1 != m.ReadU32(CamPathAddr))
             {
+                if (PaceIslandCamLeaveStart(c, m))
+                    return true;
                 if (c.RA != CamAdjustRa || !PaceCamPathChange(c, m))
                     _cameraProgressFrac = 0;
                 DropNativeWidePickupsOnZoneChange(c, m);
@@ -349,7 +351,7 @@ public static partial class FramePacing
                 _cameraProgressPath = c.A1;
             }
             int cur = (int)m.ReadU32(CamProgressAddr);
-            int req = (int)c.A2;
+            int req = IslandCamBackStep(m, cur, (int)c.A2);
             c.A2 = (uint)KeepCrashDelta(cur, req, PathWrap, ref _cameraProgressFrac);
         }
         catch

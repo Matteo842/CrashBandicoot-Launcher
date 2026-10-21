@@ -107,6 +107,7 @@ public static partial class FramePacing
         _platChild = false;
         _platCarry = false;
         _padRan = false;
+        _padLatchOwner = 0;
         RestorePadSpin(m);
         RestoreCrashStamp(m);
         _inCrashUpdate = false;
@@ -195,6 +196,7 @@ public static partial class FramePacing
                 _gatedSolid = true;
                 DrawGatedObject(c, m, _obj);
                 c.V0 = GoolSuccess;
+                RunSkippedMapPad(c, m);
                 return false;
             }
             else if (!GatedShouldInterpret(m, _obj))
@@ -202,6 +204,7 @@ public static partial class FramePacing
                 _gatedSolid = true;
                 DrawGatedObject(c, m, _obj);
                 c.V0 = GoolSuccess;
+                RunSkippedMapPad(c, m);
                 return false;
             }
             else
@@ -245,6 +248,8 @@ public static partial class FramePacing
         // GoolObjectUpdate(crash) starts with PadUpdate. On the completion
         // screen crash is the gated GamOC Willy: only its runs sample the pad.
         _padRan = TryReadCrash(m, out uint padOwner) && c.A0 == padOwner;
+        // The map traveler gets its taps after that PadUpdate (first interpret).
+        _padLatchOwner = _padRan && IsMapTraveler(m, c.A0) ? c.A0 : 0;
         return true;
     }
 
@@ -291,6 +296,7 @@ public static partial class FramePacing
                 RestorePadSpin(m);
                 RestoreCrashStamp(m);
                 RestoreCardTaps(m);
+                _padLatchOwner = 0;
                 // Crash's Update began with PadUpdate; a land-locked skip ran
                 // it in RunSkippedCrashPad. Either way this is its one sample.
                 if (_padRan)
@@ -483,7 +489,7 @@ public static partial class FramePacing
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            if (!Catalog.Levels.AllowsUnlockedFps(id) || IsDemoPlayback(m))
+            if (!AllowsUnlock(m, id) || IsDemoPlayback(m))
             {
                 _holdLocked = 0;
                 return;
@@ -516,6 +522,8 @@ public static partial class FramePacing
             _clockArmed = false;
             _frameTimeReady = false;
             _ticksTakenThisLoop = false;
+            // The map re-arms without NSInit (menu zone and back): no stale taps.
+            _cardPad.Clear();
             ResetWaterClock();
             PaceLog($"unlock armed lid={id} crash=0x{crash:X8}");
         }
@@ -554,6 +562,11 @@ public static partial class FramePacing
     public static bool PreGoolInterpret(CpuContext c, IMemory m)
     {
         if (!IsActive(m)) return true;
+        if (_padLatchOwner != 0 && c.A0 == _padLatchOwner)
+        {
+            _padLatchOwner = 0;
+            ApplyPadLatch(m, c.A0, owner: true);
+        }
         MaskSpinForYoungCrate(m, c.A0);
         TryFillTemplePlatCollider(m, c.A0);
         PrimeDropPlatTouch(m, c.A0);
