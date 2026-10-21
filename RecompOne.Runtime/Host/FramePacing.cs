@@ -147,11 +147,12 @@ namespace RecompOne.Runtime.Host;
 /// World UV anim (draw_count @ 0x80057960) and water ripple use a dedicated
 /// wall clock. Worlds run before object AdvanceWallClock, so they must not
 /// reuse leftover ticks (that is +1 per display frame).
-/// Bonus rounds use the same wall dt as gameplay. CardC save UI (Tawna
-/// Congrats spawn, Warp_Out playnull) and the crate-tally complete lid
-/// stay on the original 30 Hz pad — playnull is per interpret, and BonoC
-/// spawn() is not Crash so the 30 Hz burst cap would eat CardC. Sticky
-/// until NSInit so TryArmUnlock cannot re-arm a few presents later.
+/// Bonus rounds use the same wall dt as gameplay, the CardC save UI too.
+/// Only the crate-tally complete lid stays on the original 30 Hz pad.
+/// CardC is gated like any GOOL; BonoC/CardC spawn() skip the 30 Hz burst
+/// cap (it would eat the menu). Its buttonpress reads the per-present tap
+/// through a per-object latch (<c>ApplyCardTaps</c>). Warp_Out is land-locked
+/// like Warp_In: Crash flies up on one original step per 34 wall ticks.
 /// Crash on the warthog (Hog Wild / Whole Hog) writes pathprog with
 /// spd() then calcpath into x/z. Grounded 34+scale keeps StopAtWalls
 /// but leaves pathprog at the full 30 Hz step, so the hog runs at
@@ -548,11 +549,6 @@ public static partial class FramePacing
     /// <summary>BonoC / CardC (NTSC-U GOOL header type).</summary>
     const uint GoolTypeBono = 56u;
     const uint GoolTypeCard = 57u;
-    /// <summary>BonoC <c>Tawna_Congrats</c> — spawns CardC-34 after the wave.</summary>
-    const uint StateTawnaCongrats = 1;
-    /// <summary>BonoC <c>Brio_Escape</c> / <c>Cortex_Escape</c> at the round end.</summary>
-    const uint StateBrioEscape = 6;
-    const uint StateCortexEscape = 8;
     const uint HandlesAddr = 0x80060DB8u;
     const int HandleCount = 8;
     const uint HandleChildrenOff = 4u;
@@ -650,8 +646,6 @@ public static partial class FramePacing
     static bool _inNsInit;
     /// <summary>Unlocked VSync only after a gameplay GpuUpdate with Crash spawned.</summary>
     static bool _levelReady;
-    /// <summary>CardC / Warp_Out / Tawna Congrats — stay on the 30 Hz pad until NSInit.</summary>
-    static bool _saveUiPad;
     /// <summary>GpuUpdates left at 30 FPS after the first real DrawOTag.</summary>
     static int _holdLocked;
     /// <summary>

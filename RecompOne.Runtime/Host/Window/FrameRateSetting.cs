@@ -14,7 +14,7 @@ internal static class FrameRateSetting
             HostWindow.ApplyFramePacing();
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGuiEx.TextDisabled("Gameplay and bonus. Menus, crate tally, and bonus save stay 30 FPS.");
+        ImGuiEx.TextDisabled("Gameplay, bonus and bonus save. Menus and crate tally stay 30 FPS.");
         if (ConfigManager.View.FrameRateHotkeys)
             ImGuiEx.TextDisabled("Keys 1-5: original, 60, 120, 240, uncapped.");
         ImGuiEx.TextDisabled("This is a refresh cap. Speed is delta time (60 and 120 play the same).");

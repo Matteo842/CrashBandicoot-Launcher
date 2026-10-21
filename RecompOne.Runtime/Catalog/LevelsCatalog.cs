@@ -71,9 +71,8 @@ public sealed class LevelsCatalog
         TryGet(id, out var info) ? info.Kind == LevelKind.Gameplay : !IsUiOrCinema(id);
 
     /// <summary>
-    /// Gameplay and bonus rounds. CardC / crate-tally UI still drop to the
-    /// original 30 Hz pad in FramePacing — not a whole-bonus lock.
-    /// Complete/title/cinema stay excluded via kind.
+    /// Gameplay and bonus rounds, including the bonus CardC save screen.
+    /// Complete (crate tally)/title/cinema stay excluded via kind.
     /// </summary>
     public bool AllowsUnlockedFps(uint id)
     {

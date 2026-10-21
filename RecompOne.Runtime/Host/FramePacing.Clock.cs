@@ -32,120 +32,28 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Crash flies up, then CardC save/continue. That GOOL is per display
-    /// frame — keep the original 30 Hz pad until NSInit.
-    /// </summary>
-    static bool IsWarpOut(IMemory m)
-    {
-        uint crash = m.ReadU32(CrashPtrAddr);
-        if ((crash & 0xFF000000u) != 0x80000000u) return false;
-        return m.ReadU32(crash + ObjStateOff) == StateWarpOut;
-    }
-
-    /// <summary>
-    /// Warp_Out, Tawna/Brio/Cortex end, or a live CardC object. Sticky so
-    /// TryArmUnlock cannot re-arm a few presents later.
-    /// </summary>
-    static void ArmSaveUiPad()
-    {
-        if (_saveUiPad) return;
-        _saveUiPad = true;
-        PaceLog("save UI pad");
-    }
-
-    /// <summary>
     /// Attract-mode demo. Each GpuUpdate replays the recorded ticks_elapsed
     /// and PadUpdate one recorded pad per game loop, so the recording only
     /// stays in sync at the original 30 Hz loop (#103).
     /// </summary>
     static bool IsDemoPlayback(IMemory m) => m.ReadU32(PbakStateAddr) != 0;
 
+    /// <summary>
+    /// The CardC save UI (Tawna / Cortex bonus, Warp_Out) used to drop the
+    /// whole level to this pad. It runs unlocked now: CardC is gated like any
+    /// GOOL and reads the pad through <see cref="ApplyCardTaps"/>, Warp_Out is
+    /// land-locked like Warp_In.
+    /// </summary>
     static bool WantsOriginalPad(IMemory m)
     {
-        if (_saveUiPad) return true;
         try
         {
-            if (IsDemoPlayback(m)) return true;
-            if (IsWarpOut(m))
-            {
-                ArmSaveUiPad();
-                return true;
-            }
+            return IsDemoPlayback(m);
         }
         catch
         {
             // overlay swap
-        }
-        return false;
-    }
-
-    static void NoteSaveUiObject(IMemory m, uint obj)
-    {
-        if (_saveUiPad) return;
-        if ((obj & 0xFF000000u) != 0x80000000u) return;
-        try
-        {
-            if (m.ReadU32(obj) == HandleListType) return;
-            if (!TryReadGoolClass(m, obj, out uint type, out _)) return;
-            if (type == GoolTypeCard)
-            {
-                ArmSaveUiPad();
-                return;
-            }
-            if (type != GoolTypeBono) return;
-            uint state = m.ReadU32(obj + ObjStateOff);
-            if (state is StateTawnaCongrats or StateBrioEscape or StateCortexEscape)
-                ArmSaveUiPad();
-        }
-        catch
-        {
-            // object freed
-        }
-    }
-
-    static void NoteSaveUiWorld(IMemory m)
-    {
-        if (_saveUiPad) return;
-        try
-        {
-            if (IsWarpOut(m))
-            {
-                ArmSaveUiPad();
-                return;
-            }
-            int left = ObjectPoolMax;
-            for (int h = 0; h < HandleCount && left > 0; h++)
-            {
-                uint handle = HandlesAddr + (uint)(h * 8);
-                uint child = m.ReadU32(handle + HandleChildrenOff);
-                WalkSaveUi(m, child, ref left);
-                if (_saveUiPad) return;
-            }
-        }
-        catch
-        {
-            // overlay swap
-        }
-    }
-
-    static void WalkSaveUi(IMemory m, uint obj, ref int left)
-    {
-        int n = 0;
-        while ((obj & 0xFF000000u) == 0x80000000u && n++ < ObjectPoolMax && left-- > 0)
-        {
-            uint kind = m.ReadU32(obj);
-            if (kind == HandleListType)
-            {
-                WalkSaveUi(m, m.ReadU32(obj + HandleChildrenOff), ref left);
-            }
-            else
-            {
-                NoteSaveUiObject(m, obj);
-                if (_saveUiPad) return;
-                WalkSaveUi(m, m.ReadU32(obj + ObjChildrenOff), ref left);
-                if (_saveUiPad) return;
-            }
-            obj = m.ReadU32(obj + ObjSiblingOff);
+            return false;
         }
     }
 
@@ -227,7 +135,6 @@ public static partial class FramePacing
         _loggedUnlockGpu = false;
         _inNsInit = false;
         _levelReady = false;
-        _saveUiPad = false;
         _holdLocked = 0;
         _lastVsyncHleTs = 0;
         _armedThisGpu = false;
@@ -278,6 +185,9 @@ public static partial class FramePacing
         _gateFrame.Clear();
         _crateFlight.Clear();
         _turtleTouch.Clear();
+        _cardPad.Clear();
+        _cardPadLog = 0;
+        _cardIoFrame = uint.MaxValue;
         _cameraSeekFrac.Clear();
         _cameraProgressFrac = 0;
         _cameraProgressZone = 0;
@@ -648,13 +558,20 @@ public static partial class FramePacing
         }
     }
 
+    /// <summary>
+    /// Warp_Out is the mirror of Warp_In: <c>playframes</c>, a <c>vely = 20m</c>
+    /// SET with no jump hang, the boss Willy_Success hop, then the bonus save
+    /// wait (<c>playnull until GLOBALVAL == 0</c>). It used to drop the whole
+    /// level to 30 FPS; land-locked it keeps the original steps and the rest of
+    /// the frame (camera, CardC save menu) runs unlocked.
+    /// </summary>
     static bool IsLandLockedState(IMemory m, uint obj)
     {
         try
         {
             uint state = m.ReadU32(obj + ObjStateOff);
-            if (state == StateForceFall || state == StateWarpIn || state == StateDeathFlat
-                || state == StateDeathWarthog
+            if (state == StateForceFall || state == StateWarpIn || state == StateWarpOut
+                || state == StateDeathFlat || state == StateDeathWarthog
                 || (state >= StateDeathFall && state <= StateDeathFast))
                 return true;
             // NTSC-U vs J shifts WillC indices; 0x4000 is on the death cine itself.
@@ -694,7 +611,7 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Death cine / Warp_In / Force_Fall: one original 34-tick interpret
+    /// Death cine / Warp_In / Warp_Out / Force_Fall: one original 34-tick interpret
     /// per 34 wall ticks. Extra presents only draw. Wall dt, not an FPS cap.
     /// </summary>
     static bool CrashLandShouldUpdate(IMemory m, CpuContext c)

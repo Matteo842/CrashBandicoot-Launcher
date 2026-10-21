@@ -652,6 +652,8 @@ public static partial class FramePacing
         // portrait between 30 Hz poses swings it across the top of the frame.
         if (IsNativeWideHudObject(m, obj, out _)) return;
         if (IsBossHealthSprite(m, obj)) return;
+        // CardC save menu text, block icons and arrow snap like at 30 FPS.
+        if (IsCardUi(m, obj)) return;
         if (_exactTicks >= RefTicks - 0.01) return;
 
         if (!TryGetGatePhase(m, obj, out double acc)) return;
@@ -723,6 +725,19 @@ public static partial class FramePacing
             return TryReadGoolClass(m, obj, out uint type, out _)
                 && type == GoolTypeShad
                 && (m.ReadU32(obj + ObjStatusBOff) & Flag2D) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>CardC: memory card / password / save point screens.</summary>
+    static bool IsCardUi(IMemory m, uint obj)
+    {
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypeCard;
         }
         catch
         {

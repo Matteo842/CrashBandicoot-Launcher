@@ -34,7 +34,6 @@ public static partial class FramePacing
         if (UnstickPause(m))
             c.A0 = 1;
         NotePauseClock(m);
-        NoteSaveUiWorld(m);
         if (IsActive(m))
         {
             EnsureFrameTime(m);
@@ -240,6 +239,7 @@ public static partial class FramePacing
             TryFillTemplePlatCollider(m, c.A0);
         if (_solidObj)
             FillTurtleShellTouch(m, c.A0);
+        ApplyCardTaps(m, c.A0);
         return true;
     }
 
@@ -285,6 +285,11 @@ public static partial class FramePacing
                 ApplySingleBoxDrop(m);
                 RestorePadSpin(m);
                 RestoreCrashStamp(m);
+                RestoreCardTaps(m);
+                // Crash's Update began with PadUpdate; a land-locked skip ran
+                // it in RunSkippedCrashPad. Either way this is its one sample.
+                if (_crashObj)
+                    NoteCardPadTaps(m);
                 _inCrashUpdate = false;
                 break;
             default:
@@ -292,10 +297,7 @@ public static partial class FramePacing
         }
         NoteSpawnUsed();
         if (_haveObj)
-        {
-            NoteSaveUiObject(m, _obj);
             RestoreGatedDisplayRot(m, _obj);
-        }
         if (_solidObj && !_gatedSolid && _haveObj)
         {
             CaptureGateRot(m, _obj);
@@ -387,6 +389,7 @@ public static partial class FramePacing
         // drawn lerp. FinishPacedScale may have used last present's t.
         RideAfterCrash(m);
         PaceFade(m);
+        GateCardIo(m);
         NoteIntroOnNewGame(m);
         if (_levelReady && !_loggedUnlockGpu)
         {
@@ -398,6 +401,7 @@ public static partial class FramePacing
 
     public static void PostGpuUpdate(CpuContext c, IMemory m)
     {
+        RestoreCardIo(m);
         FinishGpuUpdate(m);
         // Quick save / load (#130) only where the recompiled call chain is fixed.
         SaveStates.AtSafePoint(c, m);
@@ -416,7 +420,6 @@ public static partial class FramePacing
         _frameTimeReady = false;
         _ticksTakenThisLoop = false;
         _levelReady = false;
-        _saveUiPad = false;
         _holdLocked = 0;
         _loggedUnlockGpu = false;
         ResetWaterClock();
@@ -474,8 +477,7 @@ public static partial class FramePacing
         try
         {
             uint id = m.ReadU32(Catalog.LevelIdAddr);
-            NoteSaveUiWorld(m);
-            if (!Catalog.Levels.AllowsUnlockedFps(id) || _saveUiPad || IsDemoPlayback(m))
+            if (!Catalog.Levels.AllowsUnlockedFps(id) || IsDemoPlayback(m))
             {
                 _holdLocked = 0;
                 return;

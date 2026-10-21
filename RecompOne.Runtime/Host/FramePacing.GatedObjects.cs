@@ -220,6 +220,159 @@ public static partial class FramePacing
 
     public static void PostGoolInterpret(CpuContext c, IMemory m) => RestorePadSpin(m);
 
+    /// <summary>
+    /// CardC save UI (Tawna / Cortex bonus save: memory card, password,
+    /// continue). <c>buttonpress</c> tests <c>pads[0].tapped</c>; <c>dirpress</c>
+    /// (PAD_N/S/E/W) is a move_states edge of <c>held</c> vs <c>held_prev</c>.
+    /// Crash's PadUpdate rewrites both every present, but the menu is gated to
+    /// one original interpret per 34 wall ticks, so at 120 FPS most X / △ /
+    /// d-pad presses were gone before it ran and saving looked broken. Each
+    /// CardC run gets its own 30 Hz pad instead: tapped = every tap since its
+    /// last run (a short ring of PadUpdate samples), held_prev / tapped_prev =
+    /// what it saw on that run. Restored after its Update. Ring size is a
+    /// power of two and covers one gate at the 4000 Hz MinStepSeconds cap.
+    /// </summary>
+    const int CardTapRing = 256;
+    static readonly uint[] _cardTaps = new uint[CardTapRing];
+    static uint _cardTapSeq;
+
+    struct CardPad
+    {
+        public uint Seq;
+        public uint Held;
+        public uint Taps;
+    }
+
+    static readonly Dictionary<uint, CardPad> _cardPad = new();
+    static bool _cardPadApplied;
+    static uint _cardSaveTapped, _cardSaveHeldPrev, _cardSaveTappedPrev;
+    static int _cardPadLog;
+
+    /// <summary>After Crash's PadUpdate: one ring entry per pad sample.</summary>
+    static void NoteCardPadTaps(IMemory m)
+    {
+        try
+        {
+            uint taps = m.ReadU32(PadsAddr);
+            _cardTapSeq++;
+            _cardTaps[_cardTapSeq & (CardTapRing - 1)] = taps;
+        }
+        catch
+        {
+            // pad unmapped
+        }
+    }
+
+    /// <summary>
+    /// Before a CardC Update that runs (gate or first frame). A newborn starts
+    /// with no taps and no d-pad edge: the press that spawned it belongs to
+    /// its creator (Ask_Overwrite yes/no would take the X again).
+    /// </summary>
+    static void ApplyCardTaps(IMemory m, uint obj)
+    {
+        if (!_haveObj || _crashObj || obj != _obj || !IsCardUi(m, obj)) return;
+        try
+        {
+            uint held = m.ReadU32(PadsAddr + 4);
+            uint taps = 0, heldPrev = held, tapsPrev = 0;
+            if (!_newObj && _cardPad.TryGetValue(obj, out CardPad last))
+            {
+                uint n = Math.Min(unchecked(_cardTapSeq - last.Seq), (uint)CardTapRing);
+                for (uint i = 0; i < n; i++)
+                    taps |= _cardTaps[unchecked(_cardTapSeq - i) & (CardTapRing - 1)];
+                heldPrev = last.Held;
+                tapsPrev = last.Taps;
+            }
+            _cardPad[obj] = new CardPad { Seq = _cardTapSeq, Held = held, Taps = taps };
+            EvictDictDown(_cardPad, obj, ObjectPoolMax);
+            _cardSaveTapped = m.ReadU32(PadsAddr);
+            _cardSaveHeldPrev = m.ReadU32(PadsAddr + 8);
+            _cardSaveTappedPrev = m.ReadU32(PadsAddr + 12);
+            m.WriteU32(PadsAddr, taps);
+            m.WriteU32(PadsAddr + 8, heldPrev);
+            m.WriteU32(PadsAddr + 12, tapsPrev);
+            _cardPadApplied = true;
+            if ((taps != 0 || held != heldPrev) && _cardPadLog < 24)
+            {
+                _cardPadLog++;
+                PaceLog($"card pad obj=0x{obj:X8} st={m.ReadU32(obj + ObjStateOff)} taps=0x{taps:X} held=0x{held:X} prev=0x{heldPrev:X}");
+            }
+        }
+        catch
+        {
+            // pad / object unmapped
+        }
+    }
+
+    /// <summary>GAMEFLAGS 0x100000: GpuUpdate runs CardUpdate (memory card I/O).</summary>
+    const uint FlagCardIo = 0x100000u;
+    static uint _cardIoFrame = uint.MaxValue;
+    static bool _cardIoMasked;
+
+    /// <summary>
+    /// CardC tests CARDSTATUS once per 30 Hz step; GpuUpdate steps the card
+    /// state machine (CardUpdate) once per present. The menu relies on 1:1:
+    /// Look_For_Card has to see CHECKING (0x8) for one frame to go through
+    /// Check_Formatted, the only state that clears the new-card flag 0x20
+    /// (<c>memcardfn(2)</c>). At 1200 FPS the check was already over, so it went
+    /// straight to Read_Card, which saw 0x20 and went back to Look_For_Card,
+    /// which re-armed detection (<c>memcardfn(10)</c>): "searching / reading
+    /// card directory" forever. Run the card I/O on the first GpuUpdate of each
+    /// gate frame — after that frame's gated CardC step, as on the PS1 — and
+    /// hide the flag from the other presents' GpuUpdate.
+    /// </summary>
+    static void GateCardIo(IMemory m)
+    {
+        if (!IsActive(m)) return;
+        try
+        {
+            uint flags = m.ReadU32(DisplayFlagsAddr);
+            if ((flags & FlagCardIo) == 0) return;
+            uint frame = CurrentGateFrame(out _);
+            if (frame != _cardIoFrame)
+            {
+                _cardIoFrame = frame;
+                return;
+            }
+            m.WriteU32(DisplayFlagsAddr, flags & ~FlagCardIo);
+            _cardIoMasked = true;
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void RestoreCardIo(IMemory m)
+    {
+        if (!_cardIoMasked) return;
+        _cardIoMasked = false;
+        try
+        {
+            m.WriteU32(DisplayFlagsAddr, m.ReadU32(DisplayFlagsAddr) | FlagCardIo);
+        }
+        catch
+        {
+            // overlay swap
+        }
+    }
+
+    static void RestoreCardTaps(IMemory m)
+    {
+        if (!_cardPadApplied) return;
+        _cardPadApplied = false;
+        try
+        {
+            m.WriteU32(PadsAddr, _cardSaveTapped);
+            m.WriteU32(PadsAddr + 8, _cardSaveHeldPrev);
+            m.WriteU32(PadsAddr + 12, _cardSaveTappedPrev);
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
     /// <summary>gool_process.anim_stamp (frames_elapsed of the last Update).</summary>
     const uint ObjAnimStampOff = 0xFCu;
     static bool _crashStampLagged;
@@ -1134,7 +1287,10 @@ public static partial class FramePacing
         _spawnFirstFrame = _spawnBurst;
         if (_spawnBurst || (obj & 0xFF000000u) != 0x80000000u) return;
         _spawnCredit.TryGetValue(obj, out double credit);
-        credit += _exactTicks;
+        // A gated run is one whole original step (ArmSpawnBurst only sees the
+        // runs). Present dt left WarpC Warp_Out_Used, which spawns a sparkle
+        // every trans, at 1 per 40 steps at 1200 FPS.
+        credit += _solidObj ? RefTicks : _exactTicks;
         if (credit >= RefTicks)
             _spawnBurst = true;
         EvictDictDown(_spawnCredit, obj, 96);
