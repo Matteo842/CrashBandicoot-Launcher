@@ -1578,7 +1578,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         ]);
         page.Controls.Add(_frameRate);
         y += rowGap;
-        AddHint("Gameplay and bonus; menus and crate tally stay 30. 60–240: same speed as 30, unique frames. PAL speed: 25 FPS, 17% slower, like a PAL TV. Keys 1–5 switch modes.");
+        AddHint("Gameplay, bonus and level end; title and map menus stay 30. 60–240: same speed as 30, unique frames. PAL speed: 25 FPS, 17% slower, like a PAL TV. Keys 1–5 switch modes.");
 
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [

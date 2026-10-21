@@ -758,6 +758,7 @@ public static partial class FramePacing
             uint obj = c.A0;
             uint crash = m.ReadU32(CrashPtrAddr);
             if (obj != crash || (obj & 0xFF000000u) != 0x80000000u) return true;
+            if (IsGamoMain(m, obj)) return true;
             uint next = c.A1;
             uint cur = m.ReadU32(obj + ObjStateOff);
             if (cur != next) return true;

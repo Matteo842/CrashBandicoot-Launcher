@@ -31,6 +31,25 @@ public static partial class FramePacing
     static void NoteBoxDropUpdate(uint obj) => _boxDropUpdateObj = obj;
 
     /// <summary>
+    /// Level Completion Screen: the main object (entity id 1, so it is <c>crash</c>
+    /// and its Update runs PadUpdate) is GamOC Level_End_Willy, not WillC. It is
+    /// paced as a gated GOOL (one original step per 34 wall ticks, PadUpdate
+    /// included, like the PS1): WillC state indices (its Win_Card is 22, a
+    /// "death" index) and Crash physics must not touch it.
+    /// </summary>
+    static bool IsGamoMain(IMemory m, uint obj)
+    {
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypeGamO;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// After Willy's own update, so the counter text (Willy's child, updated after it)
     /// never sees the loop's per-box <c>var0 = i + 1</c>.
     /// </summary>

@@ -310,7 +310,7 @@ sealed partial class LauncherWindow
                     WithMargin(widescreen, new Thickness(0, 0, 0, 14)),
                     Hint("Native 16:9 gameplay with a wider view. Crates and other objects stay visible in the extra view. Menus, map, and cutscenes stay 4:3."),
                     Row(Label("Frame rate", 202), frameRate, 14),
-                    Hint("Gameplay and bonus; menus and crate tally stay 30. 60–240: same speed as 30, unique frames. PAL speed: 25 FPS, 17% slower, like a PAL TV. Keys 1–5 switch modes."),
+                    Hint("Gameplay, bonus and level end; title and map menus stay 30. 60–240: same speed as 30, unique frames. PAL speed: 25 FPS, 17% slower, like a PAL TV. Keys 1–5 switch modes."),
                     Row(Label("Internal resolution", 202), internalRes, 14),
                     Hint("Applies on next game start. Use 8x on 4K monitors.", 8),
                 },

@@ -147,8 +147,10 @@ namespace RecompOne.Runtime.Host;
 /// World UV anim (draw_count @ 0x80057960) and water ripple use a dedicated
 /// wall clock. Worlds run before object AdvanceWallClock, so they must not
 /// reuse leftover ticks (that is +1 per display frame).
-/// Bonus rounds use the same wall dt as gameplay, the CardC save UI too.
-/// Only the crate-tally complete lid stays on the original 30 Hz pad.
+/// Bonus rounds use the same wall dt as gameplay, the CardC save UI and the
+/// level completion screen too (its main object is GamOC Level_End_Willy,
+/// gated like any GOOL, see <c>IsGamoMain</c>). CardUpdate is gated to one
+/// step per 30 Hz frame (<c>GateCardIo</c>).
 /// CardC is gated like any GOOL; BonoC/CardC spawn() skip the 30 Hz burst
 /// cap (it would eat the menu). Its buttonpress reads the per-present tap
 /// through a per-object latch (<c>ApplyCardTaps</c>). Warp_Out is land-locked

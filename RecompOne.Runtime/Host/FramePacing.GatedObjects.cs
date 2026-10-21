@@ -247,8 +247,10 @@ public static partial class FramePacing
     static bool _cardPadApplied;
     static uint _cardSaveTapped, _cardSaveHeldPrev, _cardSaveTappedPrev;
     static int _cardPadLog;
+    /// <summary>This GoolObjectUpdate ran PadUpdate (crash's run or land-lock skip).</summary>
+    static bool _padRan;
 
-    /// <summary>After Crash's PadUpdate: one ring entry per pad sample.</summary>
+    /// <summary>After crash's PadUpdate: one ring entry per pad sample.</summary>
     static void NoteCardPadTaps(IMemory m)
     {
         try
@@ -413,6 +415,9 @@ public static partial class FramePacing
             || !(IsBoxObj(m, obj) || IsPoObConveyor(m, obj) || IsPoObSpring(m, obj)
                 || IsTurtleShell(m, obj))
             || !TryReadCrash(m, out uint crash)) return;
+        // Completion screen boxes are the GamOC Willy's children: the PS1 ran
+        // them after him, same stamp. Nothing to lag.
+        if (IsGamoMain(m, crash)) return;
         try
         {
             uint fe = m.ReadU32(FramesElapsedAddr);

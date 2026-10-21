@@ -106,6 +106,7 @@ public static partial class FramePacing
         _platFirst = false;
         _platChild = false;
         _platCarry = false;
+        _padRan = false;
         RestorePadSpin(m);
         RestoreCrashStamp(m);
         _inCrashUpdate = false;
@@ -152,6 +153,7 @@ public static partial class FramePacing
             else if (!CrashLandShouldUpdate(m, c))
             {
                 RunSkippedCrashPad(c, m);
+                _padRan = true;
                 return false;
             }
             else
@@ -240,6 +242,9 @@ public static partial class FramePacing
         if (_solidObj)
             FillTurtleShellTouch(m, c.A0);
         ApplyCardTaps(m, c.A0);
+        // GoolObjectUpdate(crash) starts with PadUpdate. On the completion
+        // screen crash is the gated GamOC Willy: only its runs sample the pad.
+        _padRan = TryReadCrash(m, out uint padOwner) && c.A0 == padOwner;
         return true;
     }
 
@@ -288,8 +293,9 @@ public static partial class FramePacing
                 RestoreCardTaps(m);
                 // Crash's Update began with PadUpdate; a land-locked skip ran
                 // it in RunSkippedCrashPad. Either way this is its one sample.
-                if (_crashObj)
+                if (_padRan)
                     NoteCardPadTaps(m);
+                _padRan = false;
                 _inCrashUpdate = false;
                 break;
             default:

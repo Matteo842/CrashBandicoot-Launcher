@@ -71,13 +71,14 @@ public sealed class LevelsCatalog
         TryGet(id, out var info) ? info.Kind == LevelKind.Gameplay : !IsUiOrCinema(id);
 
     /// <summary>
-    /// Gameplay and bonus rounds, including the bonus CardC save screen.
-    /// Complete (crate tally)/title/cinema stay excluded via kind.
+    /// Gameplay, bonus rounds (with the CardC save screen) and the level
+    /// completion screen (crate tally, gem, gem save). Title/cinema stay
+    /// excluded via kind.
     /// </summary>
     public bool AllowsUnlockedFps(uint id)
     {
         if (TryGet(id, out var info))
-            return info.Kind is LevelKind.Gameplay or LevelKind.Bonus;
+            return info.Kind is LevelKind.Gameplay or LevelKind.Bonus or LevelKind.Complete;
         return !IsUiOrCinema(id);
     }
 

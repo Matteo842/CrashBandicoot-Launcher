@@ -340,7 +340,7 @@ sealed partial class DevMenuOverlay : FrameLayout
                 FramePacing.OnFrameRateChanged();
                 ShowSection("display");
             });
-        Hint("Gameplay and bonus. Refresh cap — 60 and 120 play at the same speed. Menus and crate tally stay 30.");
+        Hint("Gameplay, bonus and level end. Refresh cap — 60 and 120 play at the same speed. Title and map menus stay 30.");
         Toggle("Dedither", view.Dedither, value =>
         {
             view.Dedither = value;
@@ -425,7 +425,7 @@ sealed partial class DevMenuOverlay : FrameLayout
                 FramePacing.OnFrameRateChanged();
                 ShowSection("rendering");
             });
-        Hint("Gameplay and bonus. Refresh cap — delta time keeps 60 and 120 at the same play speed. Menus and crate tally stay 30.");
+        Hint("Gameplay, bonus and level end. Refresh cap — delta time keeps 60 and 120 at the same play speed. Title and map menus stay 30.");
         Divider();
         Choice("Internal resolution", ViewConfig.InternalResolutionOptions
                 .Select(scale => scale == 1 ? "Native (1x)" : scale == 8 ? "8x (4K)" : $"{scale}x")

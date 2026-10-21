@@ -1137,7 +1137,7 @@ public static partial class FramePacing
             uint type = m.ReadU32(obj);
             if (type is 0 or 2) return;
             _obj = obj;
-            _crashObj = obj == m.ReadU32(CrashPtrAddr);
+            _crashObj = obj == m.ReadU32(CrashPtrAddr) && !IsGamoMain(m, obj);
             _ox = (int)m.ReadU32(obj + ObjTransOff);
             _oy = (int)m.ReadU32(obj + ObjTransOff + 4);
             _oz = (int)m.ReadU32(obj + ObjTransOff + 8);
