@@ -1314,11 +1314,14 @@ public static partial class FramePacing
     /// physics, after trans, and the box is at Q, not P. RWaOC seesaw slabs
     /// too (#181): a descending slab's Q box shifted by visual − P sat one
     /// step under Crash, so he fell off it on every gate (60 FPS phase).
+    /// RWaOC wall mill plats too (#181, Sunset Vista drums): a rising drum's
+    /// Q box sat one step above the drawn drum, Crash's feet were inside it,
+    /// StopAtWalls found walls all round and he walked in place.
     /// </summary>
     static bool GemBoundAfterTrans(IMemory m, uint obj)
     {
         if (!TryReadGoolClass(m, obj, out uint type, out _)
-            || (type != GoolTypeGems && !IsSeesawSlab(m, obj, type)))
+            || (type != GoolTypeGems && !IsSeesawSlab(m, obj, type) && !IsWallMillPlat(m, obj, type)))
             return false;
         if (!TryReadCrash(m, out uint crash)) return false;
         return m.ReadU32(obj + ObjAnimStampOff) != m.ReadU32(crash + ObjAnimStampOff);

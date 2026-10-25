@@ -167,6 +167,26 @@ public static partial class FramePacing
     }
 
     /// <summary>
+    /// RWaOC wall mill platform (#181): <c>Wall_Platform</c>,
+    /// <c>Wall_Platform_Move</c>, <c>Torch_Platform</c>. Same trans
+    /// (<c>vectransf2</c> from the array rot + CarryCollider).
+    /// </summary>
+    static bool IsWallMillPlat(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypeRWaO) return false;
+        try { return m.ReadU32(obj + ObjStateOff) is >= StateRwaWallPlat and <= StateRwaTorchPlat; }
+        catch { return false; }
+    }
+
+    /// <summary><see cref="IsWallMillPlat"/> for the ride object (class read here).</summary>
+    static bool IsRiddenWallMillPlat(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try { return TryReadGoolClass(m, obj, out uint type, out _) && IsWallMillPlat(m, obj, type); }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// Lost City / Sunset Vista share RWaOC (<c>#iflev wz</c>). Pushers
     /// (16–18) and Sunset Vista's column mill (0–2) are <c>time()</c> +
     /// <c>TimePathProg</c> ping-pong + <c>vectransf2</c>. Same 30 Hz gate

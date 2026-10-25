@@ -519,6 +519,8 @@ public static partial class FramePacing
     const uint LidLostCity = 32u, LidSunsetVista = 35u;
     /// <summary>RWaOC <c>Wall_Platform_Move</c>. Inclusive end of the column mill.</summary>
     const uint StateRwaWallMove = 2u;
+    /// <summary>RWaOC <c>Wall_Platform</c> / <c>Torch_Platform</c>: mill platform states 1–3.</summary>
+    const uint StateRwaWallPlat = 1u, StateRwaTorchPlat = 3u;
     const uint StateRwaPusherSpawn = 16u, StateRwaPusherLast = 18u;
     /// <summary>PoPlC path platforms. Euler + Pace; Auto <c>time()</c> still gates.</summary>
     const uint GoolTypePoPl = 11u;

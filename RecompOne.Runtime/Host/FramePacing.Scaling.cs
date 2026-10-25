@@ -578,13 +578,16 @@ public static partial class FramePacing
             if (!hogJumpY)
             {
                 if (_rideObj == 0) TryAttachRiverRide(m, o);
-                bool onRiverFloor = _rideObj != 0 && IsRiverRideSurface(m, _rideObj)
+                bool onRiverFloor = _rideObj != 0
+                    && (IsRiverRideSurface(m, _rideObj) || IsRiddenWallMillPlat(m, _rideObj))
                     && (m.ReadU32(o + ObjStatusAOff) & FlagGroundLand) != 0
                     && (int)m.ReadU32(o + ObjVelYOff) <= 0;
                 if (onRiverFloor)
                 {
                     // Floor resolution is a contact constraint, not velocity.
                     // Scaling it by dt/34 leaves the feet behind the leaf.
+                    // Rising mill drum (#181): feet stayed inside its box,
+                    // StopAtWalls walled every cell and Crash walked in place.
                     _crashFracTY = 0;
                     m.WriteU32(o + ObjTransOff + 4, (uint)yTo);
                 }
