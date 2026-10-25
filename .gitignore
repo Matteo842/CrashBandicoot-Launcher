@@ -192,6 +192,7 @@ keystore.properties
 
 # --- Local debug captures (never commit) ------------------------------------
 /_tools/
+/tools/BizHawk/
 /_device_*
 /_intro-*
 /_log_*
