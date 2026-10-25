@@ -744,10 +744,8 @@ public static partial class FramePacing
                 // Test support at the platform pose Crash actually rode last,
                 // then move both together. Testing the new pose loses contact
                 // on a downward wobble or a change of direction.
-                return !CrashOnPlatPos(m, obj, crash,
-                    LerpPos(pose.Px, pose.Qx, _ridePhase),
-                    LerpPos(pose.Py, pose.Qy, _ridePhase),
-                    LerpPos(pose.Pz, pose.Qz, _ridePhase), slop);
+                GatePosAt(pose, _ridePhase, out int rx, out int ry, out int rz);
+                return !CrashOnPlatPos(m, obj, crash, rx, ry, rz, slop);
             }
             return !CrashStandingOnPlat(m, obj, crash, slop);
         }
@@ -832,15 +830,56 @@ public static partial class FramePacing
             return;
         try
         {
+            _rideWasStanding = !CrashLeftRide(m, obj, crash);
+            if (_rideWasStanding && _rideObj == obj)
+                LeadBackForInterpret(m, obj, crash);
             _rideSnapX = (int)m.ReadU32(crash + ObjTransOff);
             _rideSnapY = (int)m.ReadU32(crash + ObjTransOff + 4);
             _rideSnapZ = (int)m.ReadU32(crash + ObjTransOff + 8);
-            _rideWasStanding = !CrashLeftRide(m, obj, crash);
             _rideDidSnap = true;
         }
         catch
         {
             _rideDidSnap = false;
+        }
+    }
+
+    /// <summary>
+    /// Seesaw slab lead (#181): the flushed ride left Crash at the lead end E,
+    /// one step past the slab's logic Q. The slab trans tests
+    /// <c>player->y &gt; y - 0.2m</c> and CarryCollider from Q, as on the PS1
+    /// where Crash stands at Q. Put him there for the interpret only; the
+    /// same offset goes back right after it (<see cref="LeadForward"/>),
+    /// so nothing is drawn or collided at Q.
+    /// </summary>
+    static void LeadBackForInterpret(IMemory m, uint obj, uint crash)
+    {
+        if (!_gateRot.TryGetValue(obj, out GatePose g) || !g.Lead) return;
+        int bx = g.Qx - g.Ex, by = g.Qy - g.Ey, bz = g.Qz - g.Ez;
+        m.WriteU32(crash + ObjTransOff, (uint)((int)m.ReadU32(crash + ObjTransOff) + bx));
+        m.WriteU32(crash + ObjTransOff + 4, (uint)((int)m.ReadU32(crash + ObjTransOff + 4) + by));
+        m.WriteU32(crash + ObjTransOff + 8, (uint)((int)m.ReadU32(crash + ObjTransOff + 8) + bz));
+        _leadBackX = bx;
+        _leadBackY = by;
+        _leadBackZ = bz;
+        _leadBack = true;
+    }
+
+    /// <summary>Undo <see cref="LeadBackForInterpret"/> (after the snapshot restore).</summary>
+    static void LeadForward(IMemory m)
+    {
+        if (!_leadBack) return;
+        _leadBack = false;
+        if (!TryReadCrash(m, out uint crash)) return;
+        try
+        {
+            m.WriteU32(crash + ObjTransOff, (uint)((int)m.ReadU32(crash + ObjTransOff) - _leadBackX));
+            m.WriteU32(crash + ObjTransOff + 4, (uint)((int)m.ReadU32(crash + ObjTransOff + 4) - _leadBackY));
+            m.WriteU32(crash + ObjTransOff + 8, (uint)((int)m.ReadU32(crash + ObjTransOff + 8) - _leadBackZ));
+        }
+        catch
+        {
+            // object freed
         }
     }
 
@@ -870,6 +909,18 @@ public static partial class FramePacing
     /// FPS dt is 34 so this is a no-op and CarryCollider stays original.
     /// </summary>
     static void PaceGatedCarry(IMemory m, uint obj)
+    {
+        try
+        {
+            PaceGatedCarryCore(m, obj);
+        }
+        finally
+        {
+            LeadForward(m);
+        }
+    }
+
+    static void PaceGatedCarryCore(IMemory m, uint obj)
     {
         if (!_rideDidSnap)
             return;
@@ -917,6 +968,15 @@ public static partial class FramePacing
                 dx = (long)riverPose.Qx - riverPose.Px;
                 dy = (long)riverPose.Qy - riverPose.Py;
                 dz = (long)riverPose.Qz - riverPose.Pz;
+            }
+            else if (_rideWasStanding && _gateRot.TryGetValue(obj, out GatePose lead) && lead.Lead
+                && (dx != 0 || dy != 0 || dz != 0))
+            {
+                // Seesaw slab: Crash stands where the last lead ended (S),
+                // CarryCollider moved him by Q − P. Ride the lead S→E.
+                dx = (long)lead.Ex - lead.Sx;
+                dy = (long)lead.Ey - lead.Sy;
+                dz = (long)lead.Ez - lead.Sz;
             }
             if (dx > VelTeleport || dx < -VelTeleport
                 || dy > VelTeleport || dy < -VelTeleport
@@ -969,7 +1029,9 @@ public static partial class FramePacing
         dy = 0;
         dz = 0;
         if (!_gateRot.TryGetValue(obj, out GatePose g)) return false;
+        // Crash is at the logic start P here (see LeadBackForInterpret).
         bool onPlat = CrashOnPlatPos(m, obj, crash, g.Px, g.Py, g.Pz);
+        GatePosAt(g, 0, out int sx, out int sy, out int sz);
         if (!onPlat)
         {
             try
@@ -982,9 +1044,10 @@ public static partial class FramePacing
             }
         }
         if (!onPlat) return false;
-        dx = (long)g.Qx - g.Px;
-        dy = (long)g.Qy - g.Py;
-        dz = (long)g.Qz - g.Pz;
+        GatePosAt(g, 1, out int ex, out int ey, out int ez);
+        dx = (long)ex - sx;
+        dy = (long)ey - sy;
+        dz = (long)ez - sz;
         if (dx == 0 && dy == 0 && dz == 0) return false;
         if (dx > VelTeleport || dx < -VelTeleport
             || dy > VelTeleport || dy < -VelTeleport
@@ -1002,6 +1065,7 @@ public static partial class FramePacing
     /// </summary>
     static void RideAfterCrash(IMemory m)
     {
+        LeadForward(m);
         if (!IsActive(m) || GamePaused(m)) return;
         if (!TryReadCrash(m, out uint crash)) return;
         if (_rideObj == 0)
@@ -1197,9 +1261,7 @@ public static partial class FramePacing
         double t = acc / RefTicks;
         if (t < 0) t = 0;
         if (t > 1) t = 1;
-        vx = LerpPos(g.Px, g.Qx, t);
-        vy = LerpPos(g.Py, g.Qy, t);
-        vz = LerpPos(g.Pz, g.Qz, t);
+        GatePosAt(g, t, out vx, out vy, out vz);
         return true;
     }
 
@@ -1249,11 +1311,14 @@ public static partial class FramePacing
     /// GemsC (#146): GoolObjectUpdate runs Bound before trans only when the
     /// stamp it just wrote equals Crash's (Crash updates after entities, so
     /// his stamp is still the one it compared). Otherwise Bound ran in
-    /// physics, after trans, and the box is at Q, not P.
+    /// physics, after trans, and the box is at Q, not P. RWaOC seesaw slabs
+    /// too (#181): a descending slab's Q box shifted by visual − P sat one
+    /// step under Crash, so he fell off it on every gate (60 FPS phase).
     /// </summary>
     static bool GemBoundAfterTrans(IMemory m, uint obj)
     {
-        if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeGems)
+        if (!TryReadGoolClass(m, obj, out uint type, out _)
+            || (type != GoolTypeGems && !IsSeesawSlab(m, obj, type)))
             return false;
         if (!TryReadCrash(m, out uint crash)) return false;
         return m.ReadU32(obj + ObjAnimStampOff) != m.ReadU32(crash + ObjAnimStampOff);

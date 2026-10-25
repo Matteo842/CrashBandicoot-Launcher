@@ -58,7 +58,7 @@ namespace RecompOne.Runtime.Host;
 /// the process as soon as the camera saw them (30 FPS is fine).
 /// RWaOC wall mill (Slippery Climb, Stormy Ascent, …) is the same
 /// <c>time()</c> + child <c>vectransf2</c>; SOLID_TOP used to Euler the
-/// slabs at refresh. Seesaw <c>PlatOrbitRot</c> stays Euler.
+/// slabs at refresh. Seesaws (array + slabs) gate the same way (#181).
 /// Sprites in the same executable (torch flame) stay on wall ticks — <c>scalex += 0.1S</c>
 /// plus <c>200&lt;&lt;shrink</c> must not see ticks=34 every present.
 /// Children that <c>vectransf2</c> from a paced parent are not scaled
@@ -508,13 +508,13 @@ public static partial class FramePacing
     /// <summary>WalOC <c>Spike_Log_Down_Active</c>. Inclusive end of the spike-log gate.</summary>
     const uint StateWalSpikeLogDownActive = 8;
     /// <summary>
-    /// RWaOC. Wall mill + slide/pusher gate; seesaw / sensitive / iguana Euler.
+    /// RWaOC. Wall mill + slide/pusher + seesaw gate; sensitive bob Euler.
     /// Lost City / Sunset Vista TimePathProg mill/pushers gate like Slippery Climb.
     /// </summary>
     const uint GoolTypeRWaO = 46u;
-    /// <summary>RWaOC seesaw array. Inclusive start of the Euler state range.</summary>
-    const uint StateRwaOrbitArray = 4;
-    /// <summary>RWaOC sensitive bob. Inclusive end of the Euler state range.</summary>
+    /// <summary>RWaOC <c>Orbit_Platform</c>: seesaw slab, child of state 4.</summary>
+    const uint StateRwaOrbitPlat = 5;
+    /// <summary>RWaOC sensitive bob. Stays Euler.</summary>
     const uint StateRwaSensitiveBob = 6;
     const uint LidLostCity = 32u, LidSunsetVista = 35u;
     /// <summary>RWaOC <c>Wall_Platform_Move</c>. Inclusive end of the column mill.</summary>
@@ -608,6 +608,14 @@ public static partial class FramePacing
         public int Px, Py, Pz, Qx, Qy, Qz;
         public int FromAnim, ToAnim;
         public uint FromSequence, ToSequence;
+        /// <summary>
+        /// Seesaw slabs (#181): drawn / ridden pose leads one 30 Hz step.
+        /// S→E instead of P→Q: S = where the last lead ended, E = Q + (Q − P).
+        /// P/Q stay the logic poses (bound basis).
+        /// </summary>
+        public bool Lead;
+        public int Sx, Sy, Sz, Ex, Ey, Ez;
+        public int SFx, SFy, SFz, EFx, EFy, EFz;
     }
 
     struct PoseClock
@@ -710,6 +718,9 @@ public static partial class FramePacing
     static bool _haveTransY;
     static bool _rideWasStanding;
     static double _ridePhase;
+    /// <summary>Seesaw lead (#181): E − Q taken off Crash for the slab's interpret.</summary>
+    static int _leadBackX, _leadBackY, _leadBackZ;
+    static bool _leadBack;
     static readonly Dictionary<uint, BoundSnap> _lastBound = new();
     static readonly Dictionary<uint, double> _animAcc = new();
     static readonly Dictionary<uint, (uint Sequence, int Last, double Fraction)> _spriteSteps = new();

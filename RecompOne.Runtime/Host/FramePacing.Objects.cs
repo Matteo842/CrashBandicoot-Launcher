@@ -84,7 +84,7 @@ public static partial class FramePacing
     /// <summary>
     /// RuiOC always — meshes, spears, and 2D torch flames (<c>playanim</c>
     /// loops). RWaOC wall mill too (<c>time()</c> on the array, children
-    /// <c>vectransf2</c> + CarryCollider). Seesaws in that exe stay Euler.
+    /// <c>vectransf2</c> + CarryCollider) and seesaws (#181).
     /// Temple / Jaws every PoPlC (0.985). Other lids: Active and
     /// Auto (path after Wait, and <c>time()</c>). Drop plats too: CODE
     /// playframe 0↔1 picks <c>spd(y, 2m)</c> vs <c>-0.5m</c>, so Euler
@@ -132,8 +132,12 @@ public static partial class FramePacing
     /// CODE <c>playframes</c> the mesh in and out of the wall — Euler
     /// finishes that in one present. Lost City / Sunset Vista TimePathProg
     /// mill/pushers gate (see <see cref="IsRuinsTimePathPlat"/>).
-    /// Seesaw (4–5) and sensitive bob (6) stay Euler; iguana (7–9) stays
-    /// on the enemy wall-time gate.
+    /// Seesaw (4 array, 5 slabs, #181) gates too: the array trans integrates
+    /// <c>PlatSpeed += PlatAccel; PlatOrbitRot += PlatSpeed</c> per frame
+    /// (no spd()), and Euler + dt/34 grew the speed per game time with FPS —
+    /// the arm went past 90° and flipped. Slabs <c>vectransf2</c> from the
+    /// array rot and CarryCollider like the mill. Sensitive bob (6) stays
+    /// Euler; iguana (7–9) stays on the enemy wall-time gate.
     /// </summary>
     static bool IsGatedRwaocMover(IMemory m, uint obj, uint type)
     {
@@ -145,14 +149,21 @@ public static partial class FramePacing
             // Climb mill. Euler dt/34 of the SET is a high-FPS smear, and
             // the visible slabs are children — they were already gated.
             if (IsRuinsTimePathPlat(m, obj, type)) return true;
-            if (state is >= StateRwaOrbitArray and <= StateRwaSensitiveBob)
-                return false;
+            if (state == StateRwaSensitiveBob) return false;
             return true;
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>RWaOC <c>Orbit_Platform</c>: a seesaw slab (#181).</summary>
+    static bool IsSeesawSlab(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypeRWaO) return false;
+        try { return m.ReadU32(obj + ObjStateOff) == StateRwaOrbitPlat; }
+        catch { return false; }
     }
 
     /// <summary>
@@ -608,7 +619,8 @@ public static partial class FramePacing
             // The skip presents of a new object's first gate hold its CODE
             // pose instead of finishing a lerp from the spawn trans (#94).
             bool born = _newObj && obj == _obj;
-            _gateRot[obj] = new GatePose
+            bool hadPose = _gateRot.TryGetValue(obj, out GatePose prev);
+            var pose = new GatePose
             {
                 Fx = born ? tx : _orx,
                 Fy = born ? ty : _ory,
@@ -627,11 +639,60 @@ public static partial class FramePacing
                 FromSequence = _oanimSequence,
                 ToSequence = m.ReadU32(obj + ObjAnimSeqOff)
             };
+            if (!born && hadPose && obj == _obj && TryReadGoolClass(m, obj, out uint type, out _)
+                && IsSeesawSlab(m, obj, type))
+                LeadSeesawPose(ref pose, prev);
+            _gateRot[obj] = pose;
         }
         catch
         {
             // object freed
         }
+    }
+
+    /// <summary>
+    /// Seesaw slab (#181). The gated lerp P→Q draws, collides and carries
+    /// Crash one 30 Hz step behind the logic: on the PS1 the slab and its
+    /// CarryCollider are at Q on that frame. Standing still on a slab, Crash
+    /// slid off it a step late and the arm swung up to 14° off the PS1.
+    /// Lead one step instead: from where the last lead ended (no pop) to
+    /// Q + (Q − P), the next step at the same speed. The arm's speed changes
+    /// slowly (one PlatAccel per step), so the miss at the next gate is small;
+    /// a landing kick shows up as a velocity change, not a jump back.
+    /// </summary>
+    static void LeadSeesawPose(ref GatePose g, in GatePose prev)
+    {
+        long dx = (long)g.Qx - g.Px, dy = (long)g.Qy - g.Py, dz = (long)g.Qz - g.Pz;
+        if (Math.Abs(dx) > Teleport || Math.Abs(dy) > Teleport || Math.Abs(dz) > Teleport)
+            return;
+        g.Lead = true;
+        g.Sx = prev.Lead ? prev.Ex : prev.Qx;
+        g.Sy = prev.Lead ? prev.Ey : prev.Qy;
+        g.Sz = prev.Lead ? prev.Ez : prev.Qz;
+        g.Ex = (int)(g.Qx + dx);
+        g.Ey = (int)(g.Qy + dy);
+        g.Ez = (int)(g.Qz + dz);
+        g.SFx = prev.Lead ? prev.EFx : prev.Tx;
+        g.SFy = prev.Lead ? prev.EFy : prev.Ty;
+        g.SFz = prev.Lead ? prev.EFz : prev.Tz;
+        g.EFx = (g.Tx + AngDelta(g.Fx, g.Tx)) & 0xFFF;
+        g.EFy = (g.Ty + AngDelta(g.Fy, g.Ty)) & 0xFFF;
+        g.EFz = (g.Tz + AngDelta(g.Fz, g.Tz)) & 0xFFF;
+    }
+
+    /// <summary>Drawn / ridden pose of a gated solid at step fraction t.</summary>
+    static void GatePosAt(in GatePose g, double t, out int x, out int y, out int z)
+    {
+        if (g.Lead)
+        {
+            x = LerpPos(g.Sx, g.Ex, t);
+            y = LerpPos(g.Sy, g.Ey, t);
+            z = LerpPos(g.Sz, g.Ez, t);
+            return;
+        }
+        x = LerpPos(g.Px, g.Qx, t);
+        y = LerpPos(g.Py, g.Qy, t);
+        z = LerpPos(g.Pz, g.Qz, t);
     }
 
     /// <summary>
@@ -663,10 +724,20 @@ public static partial class FramePacing
         if (_gatedSolid)
         {
             if (!_gateRot.TryGetValue(obj, out GatePose g)) return;
-            fx = g.Fx; fy = g.Fy; fz = g.Fz;
-            tx = g.Tx; ty = g.Ty; tz = g.Tz;
-            px = g.Px; py = g.Py; pz = g.Pz;
-            qx = g.Qx; qy = g.Qy; qz = g.Qz;
+            if (g.Lead)
+            {
+                fx = g.SFx; fy = g.SFy; fz = g.SFz;
+                tx = g.EFx; ty = g.EFy; tz = g.EFz;
+                px = g.Sx; py = g.Sy; pz = g.Sz;
+                qx = g.Ex; qy = g.Ey; qz = g.Ez;
+            }
+            else
+            {
+                fx = g.Fx; fy = g.Fy; fz = g.Fz;
+                tx = g.Tx; ty = g.Ty; tz = g.Tz;
+                px = g.Px; py = g.Py; pz = g.Pz;
+                qx = g.Qx; qy = g.Qy; qz = g.Qz;
+            }
         }
         else
         {
