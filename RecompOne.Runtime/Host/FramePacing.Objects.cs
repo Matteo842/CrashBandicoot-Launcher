@@ -776,6 +776,26 @@ public static partial class FramePacing
             {
                 return;
             }
+            // Seesaw slab (#181): the gate present draws the same lead S→E
+            // as the skip presents. P→Q at t≈0 drew the slab one step back
+            // every other present at 60 FPS (a 15 Hz judder).
+            if (_gateRot.TryGetValue(obj, out GatePose prev)
+                && TryReadGoolClass(m, obj, out uint type, out _) && IsSeesawSlab(m, obj, type))
+            {
+                var lead = new GatePose
+                {
+                    Fx = fx, Fy = fy, Fz = fz, Tx = tx, Ty = ty, Tz = tz,
+                    Px = px, Py = py, Pz = pz, Qx = qx, Qy = qy, Qz = qz
+                };
+                LeadSeesawPose(ref lead, prev);
+                if (lead.Lead)
+                {
+                    fx = lead.SFx; fy = lead.SFy; fz = lead.SFz;
+                    tx = lead.EFx; ty = lead.EFy; tz = lead.EFz;
+                    px = lead.Sx; py = lead.Sy; pz = lead.Sz;
+                    qx = lead.Ex; qy = lead.Ey; qz = lead.Ez;
+                }
+            }
         }
         if (t < 0) t = 0;
         if (t > 1) t = 1;
