@@ -97,6 +97,7 @@ public static partial class FramePacing
         _gatedSolid = false;
         _objScaled = false;
         _crashAir = false;
+        _turnPaced = false;
         _haveTransY = false;
         _spawnBurst = false;
         _didSpawn = false;
@@ -366,6 +367,8 @@ public static partial class FramePacing
         if (_crashObj)
             SyncRiddenBound(m);
         WriteCrashOrObjectTicks(m);
+        if (_crashObj)
+            PrepareCrashTurn(m);
         if (_crashObj && _crashAir)
             DropStalePathPlatCollider(m, _obj);
         // Keep the full XZ wall query, but give Y collision the same dt-scaled
@@ -387,6 +390,7 @@ public static partial class FramePacing
     public static void PostObjectPhysics(CpuContext c, IMemory m)
     {
         AnalogMovement.PostPhysics(m);
+        RestoreCrashTurnSpeed(m);
         if (_crashObj && IsActive(m))
             FinishPacedScale(m);
     }

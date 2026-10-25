@@ -133,6 +133,7 @@ public static partial class FramePacing
         _crashFracRZ = 0;
         _crashFracSp = 0;
         ClearAirFractions();
+        ClearTurnFractions();
     }
 
     static void ClearAirFractions()
@@ -326,8 +327,12 @@ public static partial class FramePacing
             else
                 _crashFracSp = 0;
             m.WriteU32(o + ObjRotOff, (uint)KeepCrashAng(_orx, (int)m.ReadU32(o + ObjRotOff), ref _crashFracRX));
-            m.WriteU32(o + ObjRotOff + 4, (uint)KeepCrashAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4), ref _crashFracRY));
+            if (_turnPaced)
+                _crashFracRY = 0;
+            else
+                m.WriteU32(o + ObjRotOff + 4, (uint)KeepCrashAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4), ref _crashFracRY));
             m.WriteU32(o + ObjRotOff + 8, (uint)KeepCrashAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8), ref _crashFracRZ));
+            FinishCrashAirTarget(m, speedTo);
         }
         else
             ClearCrashScaleFrac();
@@ -594,8 +599,12 @@ public static partial class FramePacing
             else
                 m.WriteU32(o + ObjSpeedOff, (uint)KeepCrashDelta(_ospeed, speedTo, Teleport, ref _crashFracSp));
             m.WriteU32(o + ObjRotOff, (uint)KeepCrashAng(_orx, (int)m.ReadU32(o + ObjRotOff), ref _crashFracRX));
-            m.WriteU32(o + ObjRotOff + 4, (uint)KeepCrashAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4), ref _crashFracRY));
+            if (_turnPaced)
+                _crashFracRY = 0;
+            else
+                m.WriteU32(o + ObjRotOff + 4, (uint)KeepCrashAng(_ory, (int)m.ReadU32(o + ObjRotOff + 4), ref _crashFracRY));
             m.WriteU32(o + ObjRotOff + 8, (uint)KeepCrashAng(_orz, (int)m.ReadU32(o + ObjRotOff + 8), ref _crashFracRZ));
+            FinishCrashAirTarget(m, speedTo);
             if (_crashHog)
                 FinishWarthogScale(m);
             if (hogJumpY)
