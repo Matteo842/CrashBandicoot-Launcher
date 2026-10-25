@@ -125,7 +125,7 @@ public static class LibCd
         if (c == null || m == null) return;
 
         var snap = c.Snapshot();
-        while (_cbData != 0)
+        while (_cbData != 0 && _readActive)
         {
             _lastIntr = DataReady;
             if (_cbReady != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbReady); }
