@@ -327,8 +327,12 @@ public static partial class FramePacing
     const uint CamFollowSnapRa = 0x8002B210u;
     /// <summary>RA of CamAdjustProgress's <c>LevelUpdate</c> (same path and path-change steps).</summary>
     const uint CamAdjustRa = 0x8002A0B4u;
+    /// <summary>RA of CamUpdate's auto-cam (cam_mode 1/3) next-path LevelUpdate.</summary>
+    const uint AutoCamSwitchRa = 0x8002B4BCu;
     /// <summary>zone_path <c>length</c> (u16, path points).</summary>
     const uint ZonePathLengthOff = 0x1Eu;
+    /// <summary>zone_header flags (zone entry item 0).</summary>
+    const uint ZoneHeaderFlagsOff = 0x2FCu;
     const uint CamOffsetZAddr = 0x800564A4u;
     const uint CamZoomAddr = 0x800564A8u;
     const uint CamOffsetYAddr = 0x800564B4u;
@@ -744,6 +748,9 @@ public static partial class FramePacing
     static readonly Dictionary<uint, double> _cameraSeekFrac = new();
     static double _cameraProgressFrac;
     static uint _cameraProgressZone, _cameraProgressPath;
+    /// <summary>Auto-cam path switch waiting out its 30 Hz frame: time spent, target path.</summary>
+    static double _autoCamDwell;
+    static uint _autoCamDwellPath;
     static int _gateStuckLog;
     static bool _wasPaused;
     /// <summary>Host guest ticks at the Start press; resume rewinds to it.</summary>

@@ -330,6 +330,7 @@ public static partial class FramePacing
         if (!IsActive(m) || _exactTicks >= RefTicks - 0.01 || c.RA == CamFollowSnapRa || _hogCamFullStep)
         {
             _cameraProgressFrac = 0;
+            _autoCamDwell = 0;
             DropNativeWidePickupsOnZoneChange(c, m);
             return true;
         }
@@ -337,6 +338,8 @@ public static partial class FramePacing
         {
             if (c.A0 != m.ReadU32(CamZoneAddr) || c.A1 != m.ReadU32(CamPathAddr))
             {
+                if (AutoCamDwell(c, m))
+                    return false;
                 if (PaceIslandCamLeaveStart(c, m))
                     return true;
                 if (c.RA != CamAdjustRa || !PaceCamPathChange(c, m))
@@ -357,6 +360,49 @@ public static partial class FramePacing
         catch
         {
             // zone swap
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Auto-cam (cam_mode 1/3) moves +0x100 per CamUpdate; the call that finds
+    /// the end of the path only switches to the next one, so on the PS1 the
+    /// switch costs a whole frame. Unlocked, the +0x100 steps keep dt/34 but
+    /// the switch took one present: every switch came 1/2 tick early at 60
+    /// FPS. N. Sanity Beach intro: 3 switches + the follow path's first frame
+    /// (game_state = PLAYING) let Crash steer 2 ticks (67 ms) early. Hold the
+    /// switch until the present nearest the end of that frame. Not while the
+    /// pad skips the flyover (S0: CamUpdate loops until a non-auto path), and
+    /// not when the skipped call's LevelSaveState would leave a checkpoint the
+    /// real switch does not overwrite (it saves unless zone flag 0x1000).
+    /// </summary>
+    static bool AutoCamDwell(CpuContext c, IMemory m)
+    {
+        if (c.RA != AutoCamSwitchRa || c.S0 != 0)
+        {
+            _autoCamDwell = 0;
+            return false;
+        }
+        uint oldZone = m.ReadU32(CamZoneAddr);
+        bool oldSaves = (m.ReadU32(m.ReadU32(oldZone + 0x10u) + ZoneHeaderFlagsOff) & 0x1000u) == 0;
+        bool newSaves = (m.ReadU32(m.ReadU32(c.A0 + 0x10u) + ZoneHeaderFlagsOff) & 0x1000u) == 0;
+        if (oldSaves && !newSaves)
+        {
+            _autoCamDwell = 0;
+            return false;
+        }
+        if (_autoCamDwellPath != c.A1)
+        {
+            _autoCamDwellPath = c.A1;
+            _autoCamDwell = 0;
+        }
+        double step = _exactTicks / RefTicks;
+        _autoCamDwell += step;
+        if (_autoCamDwell + step / 2 >= 1)
+        {
+            _autoCamDwell = 0;
+            _autoCamDwellPath = 0;
+            return false;
         }
         return true;
     }

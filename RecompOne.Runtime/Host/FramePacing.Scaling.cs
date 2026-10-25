@@ -524,6 +524,9 @@ public static partial class FramePacing
         {
             _objScaled = true;
             _crashDidScale = true;
+            _guestX = (int)m.ReadU32(_obj + ObjTransOff);
+            _guestY = (int)m.ReadU32(_obj + ObjTransOff + 4);
+            _guestZ = (int)m.ReadU32(_obj + ObjTransOff + 8);
             if (IsLandLockedState(m, _obj))
             {
                 ClearCrashScaleFrac();
@@ -710,6 +713,16 @@ public static partial class FramePacing
         return false;
     }
 
+    /// <summary>Crash's trans after the guest's 34-tick physics, before dt/34 scaling.</summary>
+    static int _guestX, _guestY, _guestZ;
+
+    /// <summary>
+    /// The dt/34 point lies on the line from the start to the guest's 34-tick
+    /// result. With both ends clear of the crate, an overlap there is only
+    /// the line cutting a crate corner: the PS1 stands on that corner too
+    /// (N. Sanity Beach first crate, step down after the spin, tick 207).
+    /// Restoring XZ there froze Crash every present until the pad turned.
+    /// </summary>
     static void RejectCrateEmbed(IMemory m)
     {
         if (CrashSpinning(m, _obj)) return;
@@ -719,6 +732,8 @@ public static partial class FramePacing
         if (!CrashInCrateWall(m, x, y, z)) return;
         if (!CrashInCrateWall(m, _ox, _oy, _oz))
         {
+            if (!CrashInCrateWall(m, _guestX, _guestY, _guestZ))
+                return;
             m.WriteU32(_obj + ObjTransOff, (uint)_ox);
             m.WriteU32(_obj + ObjTransOff + 8, (uint)_oz);
             return;
