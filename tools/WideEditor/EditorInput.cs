@@ -6,7 +6,7 @@ using ImGuiNET;
 namespace WideEditor;
 
 enum Tool { Select, Vertex, Quad, Triangle, Eyedropper }
-enum DragMode { None, ClickPending, Box, Axis, Plane, Vertex }
+enum DragMode { None, ClickPending, Box, Axis, Plane, PlaneAxis, Rotate, Scale, Vertex }
 
 sealed partial class Editor
 {
@@ -22,7 +22,8 @@ sealed partial class Editor
     bool _snapVerts = true, _weld = true, _newBehind;
     float _grid;
     bool _pickRetail = true, _pickAuto = true, _pickUser = true;
-    bool _looking, _panning;
+    bool _looking, _panning, _rightDown, _rightMoved;
+    Vector2 _rightStart;
     float _panScale = 1;
     Brush? _brush;
     (int Tri, int K)? _hoverVertex;
@@ -140,14 +141,38 @@ sealed partial class Editor
             }
         }
 
+        if (!io.WantCaptureKeyboard && !io.KeyCtrl && !_looking && _drag == DragMode.None)
+        {
+            if (ImGui.IsKeyPressed(ImGuiKey.W)) _gizmo = GizmoMode.Move;
+            if (ImGui.IsKeyPressed(ImGuiKey.E)) _gizmo = GizmoMode.Rotate;
+            if (ImGui.IsKeyPressed(ImGuiKey.R)) _gizmo = GizmoMode.Scale;
+        }
+
         // Camera: right drag looks, middle drag pans, wheel flies toward the mouse.
-        if (over && ImGui.IsMouseClicked(ImGuiMouseButton.Right)) _looking = true;
-        if (!ImGui.IsMouseDown(ImGuiMouseButton.Right)) _looking = false;
+        // A right click without dragging opens the menu instead.
+        if (over && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            _rightDown = true;
+            _rightMoved = false;
+            _rightStart = mouse;
+        }
+        if (_rightDown && !ImGui.IsMouseDown(ImGuiMouseButton.Right))
+        {
+            _rightDown = false;
+            if (!_rightMoved && _drag == DragMode.None) OpenContext();
+        }
+        _looking = _rightDown;
         if (_looking)
         {
-            _cam.Yaw -= io.MouseDelta.X * 0.004f;
-            _cam.Pitch -= io.MouseDelta.Y * 0.004f;
-            _cam.ClampPitch();
+            bool keys = ImGui.IsKeyDown(ImGuiKey.W) || ImGui.IsKeyDown(ImGuiKey.A) || ImGui.IsKeyDown(ImGuiKey.S)
+                || ImGui.IsKeyDown(ImGuiKey.D) || ImGui.IsKeyDown(ImGuiKey.Q) || ImGui.IsKeyDown(ImGuiKey.E);
+            if (Vector2.Distance(mouse, _rightStart) > 4 || keys) _rightMoved = true;
+            if (_rightMoved)
+            {
+                _cam.Yaw -= io.MouseDelta.X * 0.004f;
+                _cam.Pitch -= io.MouseDelta.Y * 0.004f;
+                _cam.ClampPitch();
+            }
             float step = 3000 * _speed * dt * (io.KeyShift ? 4 : 1);
             if (ImGui.IsKeyDown(ImGuiKey.W)) _cam.Pos += _cam.Forward * step;
             if (ImGui.IsKeyDown(ImGuiKey.S)) _cam.Pos -= _cam.Forward * step;
@@ -186,7 +211,7 @@ sealed partial class Editor
         _hoverVertex = null;
         if (_drag == DragMode.None) _snapHit = null;
         if (!over || _drag != DragMode.None) return;
-        if (_tool == Tool.Select && SelUser.Any()) _hoverAxis = GizmoHit(mouse);
+        if (_tool == Tool.Select && _sel.Count > 0) _hoverAxis = GizmoHit(mouse);
         if (_tool == Tool.Vertex)
         {
             float best = 10;
@@ -242,6 +267,9 @@ sealed partial class Editor
                 break;
             case DragMode.Axis:
             case DragMode.Plane:
+            case DragMode.PlaneAxis:
+            case DragMode.Rotate:
+            case DragMode.Scale:
                 UpdateGizmo(mouse);
                 break;
             case DragMode.Vertex:
@@ -314,106 +342,6 @@ sealed partial class Editor
         var center = (min + max) / 2;
         float size = Vector3.Distance(min, max);
         _cam.Pos = center - _cam.Forward * Math.Max(size * 1.2f, 500);
-    }
-
-    // ---- Gizmo ----
-
-    static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
-
-    float GizmoLength(Vector3 pivot) => 90 * _cam.PixelSize(pivot, _view);
-
-    int GizmoHit(Vector2 mouse)
-    {
-        var pivot = SelPivot();
-        if (!_cam.Project(pivot, _view, out var ps)) return -1;
-        if (Math.Abs(mouse.X - ps.X) < 10 && Math.Abs(mouse.Y - ps.Y) < 10) return 3;
-        float len = GizmoLength(pivot), best = 8;
-        int hit = -1;
-        for (int i = 0; i < 3; i++)
-        {
-            if (!_cam.Project(pivot + Axes[i] * len, _view, out var pe)) continue;
-            float d = SegmentDistance(mouse, ps, pe);
-            if (d < best) { best = d; hit = i; }
-        }
-        return hit;
-    }
-
-    static float SegmentDistance(Vector2 p, Vector2 a, Vector2 b)
-    {
-        var ab = b - a;
-        float t = ab.LengthSquared() < 1e-6f ? 0 : Math.Clamp(Vector2.Dot(p - a, ab) / ab.LengthSquared(), 0, 1);
-        return Vector2.Distance(p, a + ab * t);
-    }
-
-    float AxisParam(Vector2 mouse, Vector3 axis)
-    {
-        var d = _cam.Ray(mouse, _view);
-        var w = _pivot0 - _cam.Pos;
-        float b = Vector3.Dot(axis, d), dd = Vector3.Dot(axis, w), e = Vector3.Dot(d, w);
-        float denom = 1 - b * b;
-        return denom < 1e-5f ? 0 : (b * e - dd) / denom;
-    }
-
-    Vector3 PlaneHit(Vector2 mouse, Vector3 through)
-    {
-        var d = _cam.Ray(mouse, _view);
-        var n = _cam.Forward;
-        float t = Vector3.Dot(through - _cam.Pos, n) / Math.Max(Vector3.Dot(d, n), 1e-4f);
-        return _cam.Pos + d * t;
-    }
-
-    void StartGizmo(int axis, Vector2 mouse)
-    {
-        BeginChange();
-        _moving.Clear();
-        var exclude = new HashSet<(int, int)>();
-        foreach (int i in SelUser)
-            for (int k = 0; k < 3; k++)
-            {
-                _moving.Add((i, k, _doc.Tris[i].V[k].Pos));
-                exclude.Add((i, k));
-            }
-        _pivot0 = SelPivot();
-        _axis = axis;
-        if (axis < 3) { _s0 = AxisParam(mouse, Axes[axis]); _drag = DragMode.Axis; }
-        else { _hit0 = PlaneHit(mouse, _pivot0); _drag = DragMode.Plane; }
-        BuildSnapTargets(exclude);
-    }
-
-    void UpdateGizmo(Vector2 mouse)
-    {
-        Vector3 delta;
-        if (_drag == DragMode.Axis)
-        {
-            float d = AxisParam(mouse, Axes[_axis]) - _s0;
-            if (_grid > 0) d = MathF.Round(d / _grid) * _grid;
-            delta = Axes[_axis] * d;
-        }
-        else
-        {
-            delta = PlaneHit(mouse, _pivot0) - _hit0;
-            if (_grid > 0) delta = new(MathF.Round(delta.X / _grid) * _grid, MathF.Round(delta.Y / _grid) * _grid,
-                MathF.Round(delta.Z / _grid) * _grid);
-        }
-        _snapHit = null;
-        if (_snapVerts)
-        {
-            float best = 12;
-            Vector3 bestFrom = default, bestTo = default;
-            var seen = new HashSet<Vector3>();
-            foreach (var (_, _, orig) in _moving)
-            {
-                if (!seen.Add(orig) || seen.Count > 600) continue;
-                if (!_cam.Project(orig + delta, _view, out var s)) continue;
-                if (FindSnap(s, best, out var target, out float dist)) { best = dist; bestFrom = orig; bestTo = target; _snapHit = target; }
-            }
-            if (_snapHit != null)
-                delta = _drag == DragMode.Axis
-                    ? delta + Axes[_axis] * Vector3.Dot(bestTo - (bestFrom + delta), Axes[_axis])
-                    : bestTo - bestFrom;
-        }
-        foreach (var (tri, k, orig) in _moving) _doc.Tris[tri].V[k].Pos = orig + delta;
-        Changed();
     }
 
     void StartVertexDrag(int tri, int k)
@@ -641,7 +569,7 @@ sealed partial class Editor
     void CopyAsMine(bool replace)
     {
         if (_sel.Count == 0) return;
-        PushUndo();
+        BeginChange();
         int group = _doc.NextGroup++;
         var made = new List<long>();
         foreach (var key in _sel.OrderBy(k => k))

@@ -113,7 +113,9 @@ sealed partial class Editor
         LeftPanel(io);
         RightPanel(io);
         StatusBar(io);
+        GizmoBar();
         LeavePopup();
+        ContextMenu();
     }
 
     void LeftPanel(ImGuiIOPtr io)
@@ -139,7 +141,7 @@ sealed partial class Editor
         ImGui.EndDisabled();
 
         ImGui.SeparatorText("Strumento");
-        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: seleziona. Trascina nel vuoto: selezione a rettangolo.\nShift aggiunge, Ctrl toglie, Alt: un solo triangolo del gruppo.\nCon triangoli tuoi selezionati: trascina le frecce (X rossa, Y verde, Z blu) o il quadrato centrale.");
+        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: seleziona. Trascina nel vuoto: selezione a rettangolo.\nShift aggiunge, Ctrl toglie, Alt: un solo triangolo del gruppo.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
         ToolButton(Tool.Vertex, "Muovi vertici", "Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
         ToolButton(Tool.Quad, "Nuovo quad (4 clic)", "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.");
         ToolButton(Tool.Triangle, "Nuovo triangolo (3 clic)", "3 clic: crea un triangolo con la texture del pennello, mappata come il triangolo d'origine.");
@@ -185,7 +187,7 @@ sealed partial class Editor
         ImGui.Checkbox("Miei", ref _pickUser);
 
         ImGui.SeparatorText("Comandi");
-        ImGui.TextWrapped("Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, Esc annulla.");
+        ImGui.TextWrapped("Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nW / E / R: sposta / ruota / scala.\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, Esc annulla.");
         ImGui.End();
     }
 
@@ -696,7 +698,7 @@ sealed partial class Editor
             dl.AddTriangle(s[0], s[1], s[2], Col(1, 0.9f, 0.2f, 0.9f), 1.5f);
         }
 
-        if (_tool == Tool.Select && SelUser.Any()) DrawGizmo(dl);
+        if (_tool == Tool.Select && _sel.Count > 0) DrawGizmo(dl);
         if (_tool == Tool.Vertex)
         {
             foreach (var t in _doc.Tris)
@@ -732,23 +734,5 @@ sealed partial class Editor
         if (_tool == Tool.Eyedropper)
             dl.AddText(ImGui.GetIO().MousePos + new Vector2(14, 10), Col(1, 0.9f, 0.3f), "contagocce");
         dl.PopClipRect();
-    }
-
-    void DrawGizmo(ImDrawListPtr dl)
-    {
-        var pivot = SelPivot();
-        if (!_cam.Project(pivot, _view, out var ps)) return;
-        float len = GizmoLength(pivot);
-        uint[] colours = [Col(1, 0.25f, 0.25f), Col(0.3f, 1, 0.3f), Col(0.35f, 0.5f, 1)];
-        for (int i = 0; i < 3; i++)
-        {
-            if (!_cam.Project(pivot + Axes[i] * len, _view, out var pe)) continue;
-            bool hot = _hoverAxis == i || (_drag == DragMode.Axis && _axis == i);
-            dl.AddLine(ps, pe, hot ? Col(1, 1, 0.3f) : colours[i], hot ? 5 : 3.5f);
-            dl.AddCircleFilled(pe, hot ? 7 : 5.5f, hot ? Col(1, 1, 0.3f) : colours[i]);
-            dl.AddText(pe + new Vector2(6, -8), colours[i], i == 0 ? "X" : i == 1 ? "Y" : "Z");
-        }
-        bool centre = _hoverAxis == 3 || _drag == DragMode.Plane;
-        dl.AddRectFilled(ps - new Vector2(8), ps + new Vector2(8), centre ? Col(1, 1, 0.3f, 0.9f) : Col(1, 1, 1, 0.6f));
     }
 }
