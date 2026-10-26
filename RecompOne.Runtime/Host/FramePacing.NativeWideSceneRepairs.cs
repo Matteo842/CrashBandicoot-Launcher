@@ -14,10 +14,11 @@ public static partial class FramePacing
     // otherwise draw its additions behind all real scenery. Culled repairs
     // are back-face culled like the scenery (others show both sides). Ranked
     // fills behind the scenery are layered by rank (lower in front), so
-    // coplanar fills of different meshes never fight.
+    // coplanar fills of different meshes never fight. Behind repairs go behind
+    // the scenery in every level (Wide Editor triangles).
     readonly record struct NativeWideRepair(int Polygon, NativeWideClipVertex A,
         NativeWideClipVertex B, NativeWideClipVertex C, bool Boundary = false, bool Culled = false,
-        float Rank = 0);
+        float Rank = 0, bool Behind = false);
     readonly record struct NativeWideEdge(Vector3 A, Vector3 B);
     readonly record struct NativeWideEdgeOwner(int Polygon, int Edge, int Count);
     readonly record struct NativeWideSceneryKey(uint Level, uint X, uint Y, uint Z, int Polygons, int Vertices);

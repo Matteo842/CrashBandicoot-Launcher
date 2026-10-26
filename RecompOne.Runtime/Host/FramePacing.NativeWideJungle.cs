@@ -192,7 +192,7 @@ public static partial class FramePacing
         [
             10, 35, 36, 39, 51, 81, 161, 163, 170, 172, 173, 177, 233, 234, 291, 396, 397, 398, 401, 403, 424,
             425, 427, 428, 475, 502, 507, 513, 515, 516, 528, 530, 666, 676, 683, 700, 701, 712, 713, 714, 717,
-            725, 726, 727, 744, 917, 927, 930, 1183, 1184, 1197, 1262, 1270, 1318, 1319, 1339, 1451, 1453,
+            725, 726, 727, 744, 917, 927, 930, 1183, 1197, 1262, 1270, 1318, 1319, 1339, 1451, 1453, 1454,
             1456, 1458, 1484, 1491, 1492, 1493, 1503
         ],
         // 0i_fW
@@ -783,10 +783,93 @@ public static partial class FramePacing
         ],
     };
 
+    // Upstream's fallen trunk beside the second waterfall (0h_fW) ends in a
+    // face at Z 61196 whose far corners (X 12797) are shaded black. The 4:3
+    // view never reaches them; in 16:9 that face and its skirts showed as a
+    // black wedge between the trunk and the bark below, widening as the
+    // camera backs away. The far corners take the shading of the corners
+    // across the face, in the mesh itself, so the 4:3 view, the side bands
+    // and the skirts built from it all agree.
+    static readonly (int Vertex, int From)[] NativeWideUpstreamTrunkEndLight = [(879, 871), (880, 871), (886, 871)];
+
+    static bool NativeWideUpstreamTrunkMesh(IMemory m, NativeWideWorld world) =>
+        world.PolyCount == 1780 && world.VertexCount == 2033
+        && (int)m.ReadU32(world.Header) == 8197 && (int)m.ReadU32(world.Header + 8) == 64476;
+
+    // The trunk's upper half face (713, 714) cut both the trunk's underside
+    // (cells 708/709, a 32-texel tile repeated) and the bark strip below it
+    // (cells 1450-1459, a 64-texel tile repeated) square, which read as a
+    // notch in the bark. In the side bands that half face is not drawn, and
+    // both rows go on: their last cell copied three more times, each top
+    // corner moved on by the last top edge and each bottom corner by the last
+    // bottom edge, drawn behind the scenery.
+    static readonly int[] NativeWideUpstreamTrunkHidden = [713, 714, 724, 725];
+    // Polygons of a row's last cell, its top edge (start, end) and bottom edge (start, end).
+    static readonly (int[] Cell, int Top, int TopEnd, int Bottom, int BottomEnd)[] NativeWideUpstreamTrunkRows =
+    [
+        ([708, 709], 870, 871, 872, 873),
+        ([1458, 1459], 1732, 1734, 1733, 1735),
+    ];
+
+    static int[]? NativeWideHiddenSides(IMemory m, NativeWideWorld world) =>
+        m.ReadU32(Catalogs.Catalog.LevelIdAddr) == 15 && NativeWideUpstreamTrunkMesh(m, world)
+            ? NativeWideUpstreamTrunkHidden : null;
+
+    static void NativeWideUpstreamTrunkRowRepairs(IMemory m, NativeWideWorld world, List<NativeWideRepair> output)
+    {
+        foreach (var row in NativeWideUpstreamTrunkRows)
+        {
+            Vector3 topStep = Position(ReadNativeWideLocal(m, world, row.TopEnd)) - Position(ReadNativeWideLocal(m, world, row.Top));
+            Vector3 bottomStep = Position(ReadNativeWideLocal(m, world, row.BottomEnd))
+                - Position(ReadNativeWideLocal(m, world, row.Bottom));
+            foreach (int pi in row.Cell)
+            {
+                uint poly = world.Polygons + (uint)pi * 8;
+                NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+                if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                    out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+                NativeWideClipVertex Corner(int index, short u, short v, int k)
+                {
+                    var p = ReadNativeWideLocal(m, world, index);
+                    var step = index == row.Top || index == row.TopEnd ? topStep : bottomStep;
+                    return p with { X = p.X + step.X * k, Y = p.Y + step.Y * k, Z = p.Z + step.Z * k, U = u, V = v };
+                }
+                for (int k = 1; k <= 3; k++)
+                    output.Add(new(pi, Corner(a, u0, v0, k), Corner(b, u1, v1, k), Corner(c, u2, v2, k)));
+            }
+        }
+        // Where the two rows' copies meet, single pixels were left open: the
+        // hidden half face backs them, ranked behind every other fill.
+        foreach (int pi in NativeWideUpstreamTrunkHidden)
+        {
+            uint poly = world.Polygons + (uint)pi * 8;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4), out int a, out int b, out int c);
+            if (!TryNativeWideMaterial(m, world, pi, 0, out _, out _,
+                out short u0, out short v0, out short u1, out short v1, out short u2, out short v2)) continue;
+            output.Add(new(pi, ReadNativeWideLocal(m, world, a) with { U = u0, V = v0 },
+                ReadNativeWideLocal(m, world, b) with { U = u1, V = v1 },
+                ReadNativeWideLocal(m, world, c) with { U = u2, V = v2 }, Rank: NativeWideRankMax));
+        }
+    }
+
+    static void NativeWideUpstreamTrunkEnd(IMemory m, NativeWideWorld world)
+    {
+        if (!NativeWideUpstreamTrunkMesh(m, world))
+            return;
+        foreach (var (vertex, from) in NativeWideUpstreamTrunkEndLight)
+        {
+            uint address = world.Vertices + (uint)vertex * 8;
+            uint word = m.ReadU32(address);
+            uint rgb = m.ReadU32(world.Vertices + (uint)from * 8) & 0xFFFFFFu;
+            if ((word & 0xFFFFFFu) != rgb) m.WriteU32(address, (word & 0xFF000000u) | rgb);
+        }
+    }
+
     static IReadOnlyList<NativeWideRepair> NativeWideSceneRepairs(IMemory m, NativeWideWorld world)
     {
         var repairs = NativeWideAssetRepairs(m, world);
         uint level = m.ReadU32(Catalogs.Catalog.LevelIdAddr);
+        if (level == 15) NativeWideUpstreamTrunkEnd(m, world);
         var skirts = level switch
         {
             9 => NativeWideBeachSkirts, 12 => NativeWideJungleSkirts, 15 => NativeWideUpstreamSkirts,
@@ -810,6 +893,7 @@ public static partial class FramePacing
         if (skirts != null && skirts.TryGetValue(((int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8)),
                 out var skirted))
             NativeWideSkirtRepairs(m, world, [.. skirted], all, river: level == 15, planar: level == 33);
+        if (level == 15 && NativeWideUpstreamTrunkMesh(m, world)) NativeWideUpstreamTrunkRowRepairs(m, world, all);
         if (level == 33) NativeWideKoalaWalls(m, world, all);
         if (level == 18) NativeWideGateRepairs(m, world, all);
         PaceLog($"native-wide level={level} skirt repairs={all.Count - authored}");

@@ -1,0 +1,573 @@
+// Editor state: level loading, the three vertex buffers (retail scenery, automatic
+// repairs, the user's own triangles), rendering like the game's 16:9 view, undo.
+using System.Numerics;
+using System.Text.Json;
+using ImGuiNET;
+using RecompOne.Runtime.Cdrom;
+using Silk.NET.Input;
+using Silk.NET.OpenGL;
+using Silk.NET.OpenGL.Extensions.ImGui;
+using Silk.NET.Windowing;
+
+namespace WideEditor;
+
+enum Kind { Retail = 0, Auto = 1, User = 2 }
+
+sealed record Brush(string Mesh, int Poly, Vector2[] Uv, Vector3[] Rgb)
+{
+    public Vector2 Min => Vector2.Min(Uv[0], Vector2.Min(Uv[1], Uv[2]));
+    public Vector2 Max => Vector2.Max(Uv[0], Vector2.Max(Uv[1], Uv[2]));
+    public Vector3 MeanRgb => (Rgb[0] + Rgb[1] + Rgb[2]) / 3;
+}
+
+sealed partial class Editor : IDisposable
+{
+    readonly IWindow _window;
+    readonly GL _gl;
+    readonly ImGuiController _imgui;
+    readonly Gfx _gfx;
+    enum Screen { Pick, Loading, Edit }
+    Screen _screen = Screen.Pick;
+
+    // Disc and level list.
+    string? _discPath;
+    CueFs? _disc;
+    string? _discError;
+    readonly List<(int Id, string Name, string Kind)> _levels = [];
+    List<SaveSlot> _slots = [];
+    Task<(LevelData Level, AutoRepairs.Result Auto)>? _loading;
+    string _loadingName = "";
+    SaveSlot? _pendingSlot;
+
+    // Loaded level.
+    LevelData? L;
+    AutoRepairs.Result? _auto;
+    EditDoc _doc = new();
+    readonly List<EditDoc> _undo = [], _redo = [];
+    bool _dirty, _changeOpen;
+    string _status = "";
+    double _statusTime;
+    VertexBuffer? _retailBuf, _autoBuf, _userBuf;
+    int[] _meshBase = [];
+    int _retailCount;
+    readonly Dictionary<Mesh, (int Start, int Count)> _retailRange = [], _autoRange = [], _userRange = [];
+    bool _retailDirty, _autoDirty, _userDirty;
+
+    // View.
+    readonly Camera _cam = new();
+    readonly float _ui;
+    float _text = 1;
+    Zone? _zone;
+    bool _lockZone;
+    bool _gameView = true, _void = true, _showAuto = true, _showUser = true, _tintAuto, _tintUser = true;
+    bool _wire, _allMeshes;
+    float _speed = 1;
+    Rect _view;
+    float _fbScale = 1;
+    List<Mesh> _drawMeshes = [];
+    uint _hoverId;
+    Vector4 _hoverPos;
+    double _time;
+
+    public Editor(IWindow window)
+    {
+        _window = window;
+        _gl = GL.GetApi(window);
+        var input = window.CreateInput();
+        // Interface size from the screen: 1080p = 1, 1440p = 1.33, 4K = 2.
+        int screenHeight = window.Monitor?.VideoMode.Resolution?.Y ?? window.FramebufferSize.Y;
+        _ui = Math.Clamp(screenHeight / 1080f, 1, 2.5f);
+        string font = @"C:\Windows\Fonts\segoeui.ttf";
+        float ui = _ui;
+        _imgui = new ImGuiController(_gl, window, new ImGuiInputContext(input),
+            File.Exists(font) ? new ImGuiFontConfig(font, (int)MathF.Round(20 * ui)) : null, () => ConfigureImGui(ui));
+        _gfx = new Gfx(_gl);
+        LoadLevelList();
+        _discPath = Env.DiscPath();
+        OpenDisc();
+        _slots = SaveSlot.All();
+    }
+
+    static void ConfigureImGui(float ui)
+    {
+        var io = ImGui.GetIO();
+        unsafe { io.NativePtr->IniFilename = null; }
+        var style = ImGui.GetStyle();
+        style.FrameRounding = 4;
+        style.WindowRounding = 0;
+        style.FramePadding = new Vector2(8, 5);
+        style.ItemSpacing = new Vector2(8, 6);
+        style.ScaleAllSizes(ui);
+    }
+
+    void LoadLevelList()
+    {
+        using var stream = typeof(CueFs).Assembly.GetManifestResourceStream("RecompOne.Runtime.Catalog.data.levels.scus94900.json");
+        if (stream == null) return;
+        using var doc = JsonDocument.Parse(stream);
+        foreach (var e in doc.RootElement.GetProperty("levels").EnumerateArray())
+        {
+            string kind = e.GetProperty("kind").GetString() ?? "";
+            if (kind is not ("gameplay" or "bonus")) continue;
+            _levels.Add((e.GetProperty("id").GetInt32(), e.GetProperty("name").GetString() ?? "", kind));
+        }
+    }
+
+    void OpenDisc()
+    {
+        _disc?.Dispose();
+        _disc = null;
+        _discError = null;
+        if (_discPath == null) { _discError = "Nessun disco trovato: sceglilo."; return; }
+        try
+        {
+            string path = _discPath;
+            if (Path.GetExtension(path).Equals(".bin", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(Path.ChangeExtension(path, ".cue")))
+                path = Path.ChangeExtension(path, ".cue");
+            _disc = CueFs.Open(path);
+            _disc.ReadFileWithoutOverlay("SCUS_949.00");
+        }
+        catch (Exception e)
+        {
+            _discError = $"Disco non leggibile: {e.Message}";
+            _disc?.Dispose();
+            _disc = null;
+        }
+    }
+
+    void StartLoad(int id, string name, SaveSlot? slot = null)
+    {
+        if (_disc == null) return;
+        var disc = _disc;
+        _loadingName = name;
+        _pendingSlot = slot;
+        _screen = Screen.Loading;
+        _loading = Task.Run(() =>
+        {
+            var level = LevelData.Load(disc, id, name);
+            return (level, AutoRepairs.Compute(level));
+        });
+    }
+
+    void FinishLoad()
+    {
+        if (_loading == null || !_loading.IsCompleted) return;
+        var task = _loading;
+        _loading = null;
+        if (task.IsFaulted)
+        {
+            _screen = Screen.Pick;
+            _discError = $"Errore nel caricare il livello: {task.Exception?.GetBaseException().Message}";
+            return;
+        }
+        (L, _auto) = task.Result;
+        _gfx.UploadPages(L);
+        _retailBuf ??= new VertexBuffer(_gl);
+        _autoBuf ??= new VertexBuffer(_gl);
+        _userBuf ??= new VertexBuffer(_gl);
+        _doc = LoadDoc(L);
+        _undo.Clear();
+        _redo.Clear();
+        _dirty = false;
+        _sel.Clear();
+        _brush = null;
+        _points.Clear();
+        _retailDirty = _autoDirty = _userDirty = true;
+        _zone = null;
+        _lockZone = false;
+        var first = L.Zones.Values.FirstOrDefault(z => z.Paths.Any(p => p.Points.Count > 0));
+        if (first != null)
+        {
+            _zone = first;
+            _pathZone = first.Name;
+            _pathIndex = 0;
+            _pathPoint = 0;
+            var pt = first.Paths.First(p => p.Points.Count > 0).Points[0];
+            _cam.SetPathPoint(pt.Pos, pt.Pitch, pt.Yaw);
+            _pathIndex = first.Paths.FindIndex(p => p.Points.Count > 0);
+        }
+        if (_pendingSlot is { } slot) ApplySlot(slot);
+        _pendingSlot = null;
+        _screen = Screen.Edit;
+        if (_auto.Error != null) Say($"Riparazioni automatiche non calcolate: {_auto.Error}");
+        else Say($"{L.Name}: {L.Meshes.Count} mesh, {_auto.Tris.Count} triangoli automatici, {_doc.Tris.Count} tuoi.");
+    }
+
+    static EditDoc LoadDoc(LevelData level)
+    {
+        string? file = File.Exists(Env.EditsFile(level.Id)) ? Env.EditsFile(level.Id)
+            : Env.LiveFiles(level.Id).FirstOrDefault(File.Exists);
+        if (file == null) return new EditDoc();
+        try { return EditDoc.FromJson(File.ReadAllText(file), level); }
+        catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return new EditDoc();
+        }
+    }
+
+    void Save()
+    {
+        if (L == null) return;
+        string json = _doc.ToJson(L);
+        var written = new List<string>();
+        foreach (var file in Env.LiveFiles(L.Id).Prepend(Env.EditsFile(L.Id)))
+        {
+            if (_doc.Empty && !File.Exists(file)) continue;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllText(file, json);
+                written.Add(file);
+            }
+            catch (IOException e) { Say($"Non salvato in {file}: {e.Message}"); return; }
+        }
+        _dirty = false;
+        Say(written.Count > 0 ? $"Salvato ({_doc.Tris.Count} triangoli). Il gioco aperto lo ricarica da solo."
+            : "Niente da salvare.");
+    }
+
+    void Say(string text)
+    {
+        _status = text;
+        _statusTime = _time;
+    }
+
+    // ---- Undo ----
+
+    void PushUndo()
+    {
+        _undo.Add(_doc.Clone());
+        if (_undo.Count > 300) _undo.RemoveAt(0);
+        _redo.Clear();
+        _dirty = true;
+    }
+
+    /// <summary>First change of a drag or of a held widget: one undo step for all of it.</summary>
+    void BeginChange()
+    {
+        if (_changeOpen) return;
+        PushUndo();
+        _changeOpen = true;
+    }
+
+    void Undo()
+    {
+        if (_undo.Count == 0) return;
+        _redo.Add(_doc);
+        _doc = _undo[^1];
+        _undo.RemoveAt(_undo.Count - 1);
+        AfterDocSwap();
+        Say("Annullato.");
+    }
+
+    void Redo()
+    {
+        if (_redo.Count == 0) return;
+        _undo.Add(_doc);
+        _doc = _redo[^1];
+        _redo.RemoveAt(_redo.Count - 1);
+        AfterDocSwap();
+        Say("Ripristinato.");
+    }
+
+    void AfterDocSwap()
+    {
+        _dirty = true;
+        _sel.RemoveWhere(k => KindOf(k) == Kind.User && IndexOf(k) >= _doc.Tris.Count);
+        _retailDirty = _autoDirty = _userDirty = true;
+    }
+
+    // ---- Buffers ----
+
+    static uint PickId(Kind kind, int index) => ((uint)kind + 1) << 24 | (uint)index;
+
+    bool RuntimeHidden(Mesh m, int poly) => _auto != null && _auto.HiddenSides.TryGetValue(m, out var h) && h.Contains(poly);
+
+    void RebuildBuffers()
+    {
+        if (L == null || _auto == null) return;
+        if (_retailDirty)
+        {
+            _retailDirty = false;
+            var list = new List<GpuVertex>(L.Meshes.Sum(m => m.PolyCount) * 3);
+            _retailRange.Clear();
+            _meshBase = new int[L.Meshes.Count];
+            int global = 0;
+            foreach (var m in L.Meshes)
+            {
+                _meshBase[m.Index] = global;
+                int start = list.Count;
+                for (int p = 0; p < m.PolyCount; p++)
+                {
+                    var mat = L.MaterialOf(m, p);
+                    var uv = L.UvsOf(m, p);
+                    bool hidden = _doc.Hidden.Contains((m.Name, p)) || RuntimeHidden(m, p);
+                    var (info, clut) = Bits.Of(mat, (int)Kind.Retail, hidden, false, 0, m.Backdrop);
+                    uint id = PickId(Kind.Retail, global + p);
+                    for (int k = 0; k < 3; k++)
+                    {
+                        int vi = m.Tri[p * 3 + k];
+                        list.Add(new GpuVertex
+                        {
+                            Pos = m.Backdrop ? m.Pos[vi] - m.Trans : m.Pos[vi], Uv = uv[k], Rgb = m.Rgb[vi],
+                            Info = info, Clut = clut, Id = id,
+                        });
+                    }
+                }
+                global += m.PolyCount;
+                _retailRange[m] = (start, list.Count - start);
+            }
+            _retailCount = global;
+            _retailBuf!.Upload(list);
+        }
+        if (_autoDirty)
+        {
+            _autoDirty = false;
+            var list = new List<GpuVertex>(_auto.Tris.Count * 3);
+            _autoRange.Clear();
+            foreach (var m in L.Meshes)
+            {
+                int start = list.Count;
+                if (_auto.Ranges.TryGetValue(m, out var range))
+                    for (int i = range.Start; i < range.Start + range.Count; i++)
+                    {
+                        var t = _auto.Tris[i];
+                        var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
+                        var (info, clut) = Bits.Of(mat, (int)Kind.Auto, _doc.IsRepairHidden(t), t.Behind, t.Rank, m.Backdrop);
+                        uint id = PickId(Kind.Auto, i);
+                        foreach (var v in new[] { t.A, t.B, t.C })
+                            list.Add(new GpuVertex
+                            {
+                                Pos = m.Backdrop ? v.Pos - m.Trans : v.Pos, Uv = v.Uv, Rgb = v.Rgb,
+                                Info = info, Clut = clut, Id = id,
+                            });
+                    }
+                _autoRange[m] = (start, list.Count - start);
+            }
+            _autoBuf!.Upload(list);
+        }
+        if (_userDirty)
+        {
+            _userDirty = false;
+            var list = new List<GpuVertex>(_doc.Tris.Count * 3);
+            _userRange.Clear();
+            foreach (var group in Enumerable.Range(0, _doc.Tris.Count).GroupBy(i => _doc.Tris[i].Mesh))
+            {
+                if (!L.MeshByName.TryGetValue(group.Key, out var m)) continue;
+                int start = list.Count;
+                foreach (int i in group)
+                {
+                    var t = _doc.Tris[i];
+                    var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
+                    var (info, clut) = Bits.Of(mat, (int)Kind.User, false, t.Behind, t.Rank, m.Backdrop);
+                    uint id = PickId(Kind.User, i);
+                    foreach (var v in t.V)
+                        list.Add(new GpuVertex
+                        {
+                            Pos = m.Backdrop ? v.Pos - m.Trans : v.Pos, Uv = v.Uv, Rgb = v.Rgb,
+                            Info = info, Clut = clut, Id = id,
+                        });
+                }
+                _userRange[m] = (start, list.Count - start);
+            }
+            _userBuf!.Upload(list);
+        }
+    }
+
+    void UpdateDrawMeshes()
+    {
+        if (L == null) return;
+        if (!_lockZone && L.ZoneAt(_cam.Pos) is { } z) _zone = z;
+        if (_allMeshes || _zone == null)
+        {
+            var own = _zone != null ? L.ZoneMeshes(_zone).Where(m => m.Backdrop).ToList() : [];
+            _drawMeshes = [.. L.Meshes.Where(m => !m.Backdrop), .. own];
+        }
+        else _drawMeshes = L.ZoneMeshes(_zone);
+    }
+
+    bool OwnMesh(Mesh m) => _zone == null || _allMeshes || _zone.Worlds.Contains(m.Name);
+
+    // ---- Rendering ----
+
+    void DrawRetail(bool backdrops)
+    {
+        foreach (var m in _drawMeshes)
+            if (m.Backdrop == backdrops && _retailRange.TryGetValue(m, out var r)) _retailBuf!.Draw(r.Start, r.Count);
+    }
+
+    void DrawExtras()
+    {
+        foreach (var m in _drawMeshes)
+        {
+            if (_showAuto && (!_gameView || OwnMesh(m) || _auto!.NeighbourRepairs) && _autoRange.TryGetValue(m, out var a))
+                _autoBuf!.Draw(a.Start, a.Count);
+            if (_showUser && _userRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
+        }
+    }
+
+    void Passes(Action draw, bool depth = true)
+    {
+        _gfx.Pass(0);
+        draw();
+        _gfx.Depth(depth, false);
+        for (int abr = 0; abr < 4; abr++)
+        {
+            _gfx.Pass(1, abr);
+            draw();
+        }
+        _gfx.Pass(0);
+        _gfx.Depth(depth, depth);
+    }
+
+    void RenderScene()
+    {
+        if (L == null) return;
+        int w = (int)(_view.W * _fbScale), h = (int)(_view.H * _fbScale);
+        _gfx.EnsureTarget(w, h);
+        w = _gfx.Width;
+        h = _gfx.Height;
+        _gfx.Begin(_cam.View, Camera.Proj, _cam.Pos, Vector3.Zero);
+        int tint = (_tintAuto ? 1 : 0) | (_tintUser ? 2 : 0) | (_gameView ? 0 : 4);
+
+        _gfx.State(tint, false, -1);
+        _gfx.Depth(false, false);
+        Passes(() => DrawRetail(true), depth: false);
+        _gfx.Depth(true, true);
+
+        if (_gameView)
+        {
+            int coreW = (int)MathF.Round(w * Camera.CoreFraction), coreX = (w - coreW) / 2;
+            _gfx.Scissor(coreX, 0, coreW, h);
+            _gfx.State(tint, false, -1);
+            Passes(() => DrawRetail(false));
+            foreach (var (x, bw) in new[] { (0, coreX), (coreX + coreW, w - coreX - coreW) })
+            {
+                _gfx.Scissor(x, 0, bw, h);
+                _gfx.State(tint, true, 1);
+                Passes(DrawExtras);
+                _gfx.ClearDepth();
+                _gfx.State(tint, true, 0);
+                Passes(() => { DrawRetail(false); DrawExtras(); });
+            }
+            _gfx.NoScissor();
+        }
+        else
+        {
+            // Everything everywhere, still layered like the side bands: fills
+            // behind the scenery first, then the scenery over them.
+            _gfx.State(tint, false, 1);
+            Passes(DrawExtras);
+            _gfx.ClearDepth();
+            _gfx.State(tint, false, 0);
+            Passes(() => { DrawRetail(false); DrawExtras(); });
+        }
+        if (_wire)
+        {
+            _gfx.NoScissor();
+            _gfx.State(0, false, -1);
+            _gfx.Depth(true, false);
+            _gfx.Wire(true);
+            _gfx.Pass(0);
+            DrawRetail(false);
+            DrawExtras();
+            _gfx.Wire(false);
+            _gfx.Depth(true, true);
+        }
+        if (_void) _gfx.VoidPass(new Vector3(1, 0, 1));
+        _gfx.End();
+        var size = _window.FramebufferSize;
+        _gfx.Blit((int)(_view.X * _fbScale), size.Y - (int)(_view.Y * _fbScale) - h, w, h);
+
+        var mouse = ImGui.GetIO().MousePos;
+        if (_view.Contains(mouse))
+        {
+            var (fx, fy) = ToTarget(mouse);
+            _hoverId = _gfx.ReadId(fx, fy);
+            _hoverPos = _gfx.ReadPos(fx, fy);
+        }
+        else
+        {
+            _hoverId = 0;
+            _hoverPos = default;
+        }
+    }
+
+    (int X, int Y) ToTarget(Vector2 p) =>
+        ((int)((p.X - _view.X) * _fbScale), _gfx.Height - 1 - (int)((p.Y - _view.Y) * _fbScale));
+
+    // ---- Frame ----
+
+    public void Frame(double dt)
+    {
+        _time += dt;
+        _imgui.Update((float)dt);
+        ImGui.GetIO().FontGlobalScale = _text;
+        var size = _window.FramebufferSize;
+        var io = ImGui.GetIO();
+        _fbScale = io.DisplaySize.X > 0 ? size.X / io.DisplaySize.X : 1;
+        _gl.Viewport(0, 0, (uint)size.X, (uint)size.Y);
+        _gl.ClearColor(0.11f, 0.11f, 0.13f, 1);
+        _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+        try
+        {
+            switch (_screen)
+            {
+                case Screen.Pick: PickScreen(); break;
+                case Screen.Loading:
+                    LoadingScreen();
+                    FinishLoad();
+                    break;
+                case Screen.Edit:
+                    Layout();
+                    UpdateDrawMeshes();
+                    ViewInput((float)dt);
+                    RebuildBuffers();
+                    RenderScene();
+                    Panels();
+                    Overlay();
+                    if (!ImGui.IsAnyItemActive() && _drag == DragMode.None) _changeOpen = false;
+                    break;
+            }
+        }
+        catch (Exception e)
+        {
+            Say($"Errore: {e.Message}");
+            try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "wideeditor.log"), $"{DateTime.Now}: {e}\n"); }
+            catch (IOException) { }
+        }
+        // The 3D pass leaves its own viewport and framebuffer bound: ImGui draws
+        // over the whole window.
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        _gl.Viewport(0, 0, (uint)size.X, (uint)size.Y);
+        _gl.Disable(EnableCap.ScissorTest);
+        _imgui.Render();
+    }
+
+    void Layout()
+    {
+        var io = ImGui.GetIO();
+        float left = LeftWidth, right = RightWidth, bottom = StatusHeight;
+        float aw = Math.Max(io.DisplaySize.X - left - right, 64), ah = Math.Max(io.DisplaySize.Y - bottom, 36);
+        float w = aw, h = w * 9 / 16;
+        if (h > ah) { h = ah; w = h * 16 / 9; }
+        _view = new Rect(MathF.Floor(left + (aw - w) / 2), MathF.Floor((ah - h) / 2), MathF.Floor(w), MathF.Floor(h));
+    }
+
+    public void Close()
+    {
+        if (_dirty) Save();
+    }
+
+    public void Dispose()
+    {
+        _retailBuf?.Dispose();
+        _autoBuf?.Dispose();
+        _userBuf?.Dispose();
+        _gfx.Dispose();
+        _imgui.Dispose();
+        _disc?.Dispose();
+    }
+}

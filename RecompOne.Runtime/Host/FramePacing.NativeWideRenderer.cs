@@ -462,12 +462,14 @@ public static partial class FramePacing
         _nativeWideCoreTransparent.Clear();
         bool beachSky = NativeWideBeachSky(m, worlds, drawWorldCount);
         bool underBackdrop = NativeWideFillsUnderBackdrop(m) || beachSky;
+        NativeWideUserEditsRefresh(m.ReadU32(Catalog.LevelIdAddr));
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
         int clippedPolygons = 0;
         int candidates = 0;
         for (int wi = 0; wi < drawWorldCount; wi++)
         {
             var world = worlds[wi];
+            if (m.ReadU32(Catalog.LevelIdAddr) == 15) NativeWideUpstreamTrunkEnd(m, world);
             bool behind = NativeWideRepairsBehind(m, world);
             // Equal-rank fills of two meshes: the same mesh wins in every zone.
             int tie = 0;
@@ -476,8 +478,8 @@ public static partial class FramePacing
                     if (NativeWideMeshOrder(m, worlds[oi]) < NativeWideMeshOrder(m, world)) tie++;
             // Repairs were tuned with each mesh's own zone; neighbours draw only authored polygons,
             // except in levels whose repairs suit every camera drawing the mesh.
-            var repairs = world.Neighbor && !NativeWideNeighborRepairs(m)
-                ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world);
+            var repairs = NativeWideWithUserEdits(m, world, world.Neighbor && !NativeWideNeighborRepairs(m)
+                ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world));
             foreach (var chunk in NativeWideRepairChunksOf(repairs))
             {
                 if (!NativeWideBoxTouchesSides(chunk.Min, chunk.Max, world, matrix, near, projection, screenX, screenY,
@@ -511,7 +513,7 @@ public static partial class FramePacing
                         NativeWideMoveRange(_nativeWideOpaque, opaqueStart, _nativeWideHaze);
                         NativeWideMoveRange(_nativeWideTransparent, transparentStart, _nativeWideHaze);
                     }
-                    if (behind && !repair.Boundary)
+                    if ((behind || repair.Behind) && !repair.Boundary)
                     {
                         float back = NativeWideRankBack(repair, tie);
                         NativeWideBehindScenery(_nativeWideOpaque, opaqueStart, back);
@@ -533,6 +535,7 @@ public static partial class FramePacing
             if (!worldSides && !fillCore)
                 continue;
             int gemColumn = gemTempleHidden && NativeWideGemColumnMesh(m, world) ? NativeWideGemColumnFirst : -1;
+            int[]? hiddenSides = NativeWideWithUserHidden(m, world, NativeWideHiddenSides(m, world));
             for (int pi = 0; pi < world.PolyCount; pi++)
             {
                 if (gemColumn >= 0 && (uint)(pi - gemColumn) < NativeWideGemColumnCount) continue;
@@ -541,7 +544,8 @@ public static partial class FramePacing
                 uint p0 = FastU32(m, poly);
                 uint p1 = FastU32(m, poly + 4u);
                 NativeWidePolygonVertices(p0, p1, out int indexA, out int indexB, out int indexC);
-                bool sides = worldSides && NativeWideTouchesSides(world, indexA, indexB, indexC, near,
+                bool sides = worldSides && (hiddenSides == null || Array.IndexOf(hiddenSides, pi) < 0)
+                    && NativeWideTouchesSides(world, indexA, indexB, indexC, near,
                         projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
                         viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
                 bool core = fillCore && NativeWideTouchesCore(world, indexA, indexB, indexC, near,
