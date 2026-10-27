@@ -60,7 +60,8 @@ sealed partial class Editor : IDisposable
     string? _prefsJson;
     double _prefsCheck;
     float _text = 1;
-    bool _follow, _markHidden = true, _ghostCore = true, _showOff;
+    bool _follow, _markHidden = true, _ghostCore = true, _showOff, _flatLight;
+    float _viewBright = 1;
     Zone? _zone;
     bool _lockZone;
     bool _gameView = true, _void = true, _showAuto = true, _showUser = true, _tintAuto, _tintUser = true;
@@ -460,6 +461,7 @@ sealed partial class Editor : IDisposable
         w = _gfx.Width;
         h = _gfx.Height;
         _gfx.Begin(_cam.View, Camera.Proj, _cam.Pos, Vector3.Zero);
+        _gfx.Light(_flatLight, _viewBright);
         int tint = (_tintAuto ? 1 : 0) | (_tintUser ? 2 : 0) | (!_gameView && _markHidden ? 4 : 0);
 
         _gfx.State(tint, false, -1);
@@ -676,6 +678,8 @@ sealed partial class Editor : IDisposable
         _newBehind = p.NewBehind; _pickRetail = p.PickRetail; _pickAuto = p.PickAuto; _pickUser = p.PickUser;
         _gizmo = Enum.TryParse<GizmoMode>(p.GizmoMode, out var g) ? g : GizmoMode.All;
         _showOff = p.ShowOff;
+        _flatLight = p.FlatLight;
+        _viewBright = Math.Clamp(p.ViewBright, 0.5f, 4f);
         _markHidden = p.MarkHidden;
         _ghostCore = p.GhostCore;
     }
@@ -692,6 +696,8 @@ sealed partial class Editor : IDisposable
         p.NewBehind = _newBehind; p.PickRetail = _pickRetail; p.PickAuto = _pickAuto; p.PickUser = _pickUser;
         p.GizmoMode = _gizmo.ToString();
         p.ShowOff = _showOff;
+        p.FlatLight = _flatLight;
+        p.ViewBright = _viewBright;
         p.MarkHidden = _markHidden;
         p.GhostCore = _ghostCore;
         if (L != null && _screen == Screen.Edit)

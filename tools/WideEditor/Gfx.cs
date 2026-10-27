@@ -135,6 +135,10 @@ sealed class Gfx : IDisposable
         uniform int uBehind;
         uniform int uWire;
         uniform int uGhost;
+        // Editor-only lighting: uFlat ignores the vertex shading (texture as it is),
+        // uBright multiplies the result.
+        uniform int uFlat;
+        uniform float uBright;
         layout(location = 0) out vec4 oColor;
         layout(location = 1) out uint oId;
         layout(location = 2) out vec4 oPos;
@@ -176,9 +180,9 @@ sealed class Gfx : IDisposable
                 if (t == 0u) discard;
                 stp = (t & 32768u) != 0u;
                 vec3 tc = vec3(float(t & 31u), float((t >> 5) & 31u), float((t >> 10) & 31u)) * 8.0 / 255.0;
-                c = min(tc * vRgb / 128.0, vec3(1.0));
+                c = min(tc * (uFlat != 0 ? vec3(1.0) : vRgb / 128.0) * uBright, vec3(1.0));
             }
-            else c = min(vRgb / 255.0, vec3(1.0));
+            else c = min((uFlat != 0 ? vec3(0.55) : vRgb / 255.0) * uBright, vec3(1.0));
             bool semiPx = semi && (!textured || stp);
             if (uPass == 0 && semiPx) discard;
             if (uPass == 1 && (!semiPx || abr != uAbr)) discard;
@@ -367,11 +371,19 @@ sealed class Gfx : IDisposable
         _gl.Uniform1(U("uPages"), 0);
         _gl.Uniform1(U("uWire"), 0);
         _gl.Uniform1(U("uGhost"), 0);
+        _gl.Uniform1(U("uFlat"), 0);
+        _gl.Uniform1(U("uBright"), 1f);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
     }
 
     public void Ghost(bool on) => _gl.Uniform1(U("uGhost"), on ? 1 : 0);
+
+    public void Light(bool flat, float bright)
+    {
+        _gl.Uniform1(U("uFlat"), flat ? 1 : 0);
+        _gl.Uniform1(U("uBright"), bright);
+    }
 
     public void State(int tint, bool dropHidden, int behind)
     {

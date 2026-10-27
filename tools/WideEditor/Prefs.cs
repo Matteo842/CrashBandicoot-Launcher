@@ -39,6 +39,8 @@ sealed class Prefs
     public bool PickUser { get; set; } = true;
     public string GizmoMode { get; set; } = nameof(WideEditor.GizmoMode.All);
     public bool ShowOff { get; set; }
+    public bool FlatLight { get; set; }
+    public float ViewBright { get; set; } = 1;
     public bool MarkHidden { get; set; } = true;
     public bool GhostCore { get; set; } = true;
     public Dictionary<string, CameraPref> Cameras { get; set; } = [];

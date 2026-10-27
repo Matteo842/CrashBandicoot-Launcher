@@ -257,6 +257,12 @@ sealed partial class Editor
         if (ImGui.Checkbox("Colora automatiche (azzurro)", ref _tintAuto)) { }
         ImGui.Checkbox("Colora mie (verde)", ref _tintUser);
         ImGui.Checkbox("Tutto il livello (non solo zona + vicine)", ref _allMeshes);
+        ImGui.Checkbox("Senza ombre (luce piena)", ref _flatLight);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Solo nell'editor: ignora le ombre dei vertici e mostra le texture come sono. Il gioco non cambia.");
+        ImGui.SetNextItemWidth(160 * S);
+        ImGui.SliderFloat("Luminosità vista", ref _viewBright, 0.5f, 4, "%.1f");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Solo nell'editor. Doppio clic per scrivere il valore (1 = normale).");
         ImGui.SetNextItemWidth(160 * S);
         ImGui.SliderFloat("Velocità camera", ref _speed, 0.1f, 5, "%.1f");
     }
