@@ -494,6 +494,9 @@ sealed partial class Editor
             }
             if (ImGui.BeginMenu("Texture"))
             {
+                if (ImGui.MenuItem("Gira angoli texture") && EnsureEditable()) CornerUvs(false);
+                if (ImGui.MenuItem("Scambia angoli texture") && EnsureEditable()) CornerUvs(true);
+                ImGui.Separator();
                 if (ImGui.MenuItem("Ruota a sinistra") && EnsureEditable()) UvSel(st => new(st.Y, 1 - st.X));
                 if (ImGui.MenuItem("Ruota a destra") && EnsureEditable()) UvSel(st => new(1 - st.Y, st.X));
                 if (ImGui.MenuItem("Specchia orizzontale") && EnsureEditable()) UvSel(st => new(1 - st.X, st.Y));
@@ -517,6 +520,20 @@ sealed partial class Editor
         if (ImGui.MenuItem("Prendi questa texture (pennello)", "", false, _ctxHover != 0)) TakeBrush(_ctxHover);
         if (ImGui.MenuItem("Annulla", "Ctrl+Z", false, _undo.Count > 0)) Undo();
         ImGui.EndPopup();
+    }
+
+    /// <summary>Per triangle: the texture corners move one vertex on, or two of them swap
+    /// (the six orders of a triangle's mapping), the shape stays where it is.</summary>
+    void CornerUvs(bool swap)
+    {
+        BeginChange();
+        foreach (int i in SelUser)
+        {
+            var v = _doc.Tris[i].V;
+            if (swap) (v[1].Uv, v[2].Uv) = (v[2].Uv, v[1].Uv);
+            else (v[0].Uv, v[1].Uv, v[2].Uv) = (v[1].Uv, v[2].Uv, v[0].Uv);
+        }
+        Changed();
     }
 
     void MirrorSel(int axis)

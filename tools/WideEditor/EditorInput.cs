@@ -27,7 +27,7 @@ sealed partial class Editor
     float _panScale = 1;
     Brush? _brush;
     (int Tri, int K)? _hoverVertex;
-    Vector3? _snapHit;
+    Vector3? _snapHit, _pointPreview;
 
     // Screen positions of every vertex a point can snap to, bucketed by 16 px cells.
     readonly List<Vector2> _snapS = [];
@@ -240,10 +240,14 @@ sealed partial class Editor
                     }
             }
         }
-        if (_tool is Tool.Quad or Tool.Triangle && _snapVerts)
+        if (_tool is Tool.Quad or Tool.Triangle)
         {
-            EnsureSnapTargets([]);
-            if (FindSnap(mouse, 12, out var p)) _snapHit = p;
+            if (_snapVerts)
+            {
+                EnsureSnapTargets([]);
+                if (FindSnap(mouse, 12, out var p)) _snapHit = p;
+            }
+            _pointPreview = PointFor(mouse);
         }
     }
 
@@ -413,7 +417,7 @@ sealed partial class Editor
         var p = _cam.AtDepth(mouse, _view, _vertexDepth);
         if (_grid > 0) p = new(MathF.Round(p.X / _grid) * _grid, MathF.Round(p.Y / _grid) * _grid, MathF.Round(p.Z / _grid) * _grid);
         _snapHit = null;
-        if (_snapVerts && FindSnap(mouse, 12, out var target))
+        if (_snapVerts && FindSnap(mouse, 12, out var target, out _, p, 16 * _ui * _cam.PixelSize(p, _view)))
         {
             p = target;
             _snapHit = target;
@@ -505,16 +509,44 @@ sealed partial class Editor
             Say("Prima scegli una texture: strumento Contagocce, poi clic su un triangolo.");
             return;
         }
-        Vector3 p;
-        if (_snapVerts && _snapHit is { } snap) p = snap;
-        else if (_hoverPos.W > 0.5f) p = new(_hoverPos.X, _hoverPos.Y, _hoverPos.Z);
-        else p = _cam.AtDepth(mouse, _view, _points.Count > 0 ? _cam.Depth(_points[^1]) : 2000);
-        _points.Add(p);
+        _points.Add(PointFor(mouse));
         if (_points.Count == (_tool == Tool.Quad ? 4 : 3))
         {
             CreateFromPoints();
             _points.Clear();
         }
+    }
+
+    /// <summary>Where a click of the quad/triangle tools puts its point. The first one goes
+    /// on a vertex or on the surface clicked. Later ones go on a nearby vertex or surface,
+    /// otherwise on the plane of the points so far (facing the camera until there are
+    /// three), so a click past the shape no longer lands at the far end of the map.
+    /// Shift: always on that plane.</summary>
+    Vector3 PointFor(Vector2 mouse)
+    {
+        Vector3? surface = _hoverPos.W > 0.5f ? new Vector3(_hoverPos.X, _hoverPos.Y, _hoverPos.Z) : null;
+        if (_points.Count == 0)
+        {
+            if (_snapVerts && _snapHit is { } first) return first;
+            return surface ?? _cam.AtDepth(mouse, _view, 2000);
+        }
+        var last = _points[^1];
+        float span = _points.Max(p => Vector3.Distance(p, _points[0]));
+        float reach = Math.Max(span * 3, 800);
+        if (!Shift && _snapVerts && _snapHit is { } snap && Vector3.Distance(snap, last) < reach) return snap;
+        if (!Shift && surface is { } q && Vector3.Distance(q, last) < reach) return q;
+        var through = last;
+        var normal = _cam.Forward;
+        if (_points.Count >= 3)
+        {
+            var n = Vector3.Cross(_points[1] - _points[0], _points[2] - _points[0]);
+            if (n.LengthSquared() > 1e-3f)
+            {
+                normal = Vector3.Normalize(n);
+                through = _points[0];
+            }
+        }
+        return PlaneHit(mouse, through, normal);
     }
 
     void CreateFromPoints()

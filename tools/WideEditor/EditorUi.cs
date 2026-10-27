@@ -143,7 +143,7 @@ sealed partial class Editor
         ImGui.SeparatorText("Strumento");
         ToolButton(Tool.Select, "Seleziona / sposta", "Clic: un triangolo. Doppio clic: tutto il pezzo. Trascina nel vuoto: selezione a rettangolo.\nCtrl+clic: aggiunge o toglie un pezzo. Shift+clic: aggiunge. Alt+clic: tutto il pezzo.\nRettangolo con Shift o Ctrl: aggiunge, con Alt: toglie.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
         ToolButton(Tool.Vertex, "Muovi vertici", "Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
-        ToolButton(Tool.Quad, "Nuovo quad (4 clic)", "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.");
+        ToolButton(Tool.Quad, "Nuovo quad (4 clic)", "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.\nIl pallino arancione mostra dove va il punto. Nel vuoto il punto resta sul piano dei punti già messi; Shift+clic: sempre sul piano.");
         ToolButton(Tool.Triangle, "Nuovo triangolo (3 clic)", "3 clic: crea un triangolo con la texture del pennello, mappata come il triangolo d'origine.");
         if (ImGui.Button("Contagocce texture", new Vector2(-1, 0)))
         {
@@ -512,6 +512,11 @@ sealed partial class Editor
         if (ImGui.Button("Specchia orizz.")) { PushUndo(); UvSel(st => new(1 - st.X, st.Y)); }
         ImGui.SameLine();
         if (ImGui.Button("vert.")) { PushUndo(); UvSel(st => new(st.X, 1 - st.Y)); }
+        if (ImGui.Button("Gira angoli")) { PushUndo(); CornerUvs(false); }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Per ogni triangolo: gli angoli della texture passano al vertice accanto.\nPremi più volte (e prova Scambia) finché le righe vanno nel verso giusto.");
+        ImGui.SameLine();
+        if (ImGui.Button("Scambia angoli")) { PushUndo(); CornerUvs(true); }
         ImGui.EndGroup();
         var shift = _uvShift;
         ImGui.SetNextItemWidth(-1);
@@ -779,8 +784,10 @@ sealed partial class Editor
                     if (prev is { } pv) dl.AddLine(pv, sp, Col(0.3f, 1, 0.4f), 2);
                     prev = sp;
                 }
-            var target = _snapHit is { } sh && _cam.Project(sh, _view, out var ss) ? ss : mouse;
+            var target = _pointPreview is { } pp && _cam.Project(pp, _view, out var ss) ? ss : mouse;
             if (prev is { } last && _view.Contains(mouse)) dl.AddLine(last, target, Col(0.3f, 1, 0.4f, 0.6f), 1.5f);
+            // Where the next click puts its point.
+            if (_view.Contains(mouse)) dl.AddCircleFilled(target, 5 * _ui, Col(1, 0.6f, 0.1f, 0.95f));
         }
         if (_snapHit is { } snap && _cam.Project(snap, _view, out var sn))
             dl.AddCircle(sn, 9, Col(0.2f, 1, 1), 0, 2.5f);
