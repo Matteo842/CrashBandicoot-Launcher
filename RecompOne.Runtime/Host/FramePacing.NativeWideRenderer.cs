@@ -463,6 +463,7 @@ public static partial class FramePacing
         bool beachSky = NativeWideBeachSky(m, worlds, drawWorldCount);
         bool underBackdrop = NativeWideFillsUnderBackdrop(m) || beachSky;
         NativeWideUserEditsRefresh(m.ReadU32(Catalog.LevelIdAddr));
+        NativeWideEditorCameraSync(m);
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
         int clippedPolygons = 0;
         int candidates = 0;

@@ -167,6 +167,7 @@ sealed partial class Editor
             bool keys = ImGui.IsKeyDown(ImGuiKey.W) || ImGui.IsKeyDown(ImGuiKey.A) || ImGui.IsKeyDown(ImGuiKey.S)
                 || ImGui.IsKeyDown(ImGuiKey.D) || ImGui.IsKeyDown(ImGuiKey.Q) || ImGui.IsKeyDown(ImGuiKey.E);
             if (Vector2.Distance(mouse, _rightStart) > 4 || keys) _rightMoved = true;
+            if (_rightMoved) StopFollow();
             if (_rightMoved)
             {
                 _cam.Yaw -= io.MouseDelta.X * 0.004f;
@@ -188,10 +189,12 @@ sealed partial class Editor
             _panScale = _cam.PixelSize(focus, _view);
         }
         if (!ImGui.IsMouseDown(ImGuiMouseButton.Middle)) _panning = false;
+        if (_panning) StopFollow();
         if (_panning) _cam.Pos += (-_cam.Right * io.MouseDelta.X + _cam.Up * io.MouseDelta.Y) * _panScale;
         if (over && io.MouseWheel != 0)
         {
             float dist = _hoverPos.W > 0.5f ? Vector3.Distance(_cam.Pos, new(_hoverPos.X, _hoverPos.Y, _hoverPos.Z)) : 2000;
+            StopFollow();
             _cam.Pos += _cam.Ray(mouse, _view) * io.MouseWheel * Math.Max(dist * 0.15f, 40) * _speed;
         }
 
@@ -203,6 +206,13 @@ sealed partial class Editor
             if (ImGui.IsMouseDown(ImGuiMouseButton.Left)) LeftDrag(mouse);
             else LeftRelease();
         }
+    }
+
+    void StopFollow()
+    {
+        if (!_follow) return;
+        _follow = false;
+        Say("Camera libera: non segue più il gioco.");
     }
 
     void UpdateHover(Vector2 mouse, bool over)
@@ -300,6 +310,11 @@ sealed partial class Editor
             return;
         }
         var keys = new List<long> { Key(kind, index) };
+        // An automatic repair is many triangles made from one polygon (a skirt, a
+        // copy): a click takes all of them, Alt only the one under the mouse.
+        if (kind == Kind.Auto && !io.KeyAlt)
+            foreach (int i in AutoPiece(index))
+                if (i != index) keys.Add(Key(Kind.Auto, i));
         if (kind == Kind.User && !io.KeyAlt && index < _doc.Tris.Count && _doc.Tris[index].Group != 0)
         {
             int g = _doc.Tris[index].Group;
@@ -310,6 +325,24 @@ sealed partial class Editor
         bool remove = toggle && _sel.Contains(keys[0]);
         foreach (var k in keys)
             if (remove) _sel.Remove(k); else _sel.Add(k);
+    }
+
+    Dictionary<(Mesh, int), List<int>>? _autoPieces;
+
+    List<int> AutoPiece(int index)
+    {
+        if (_autoPieces == null)
+        {
+            _autoPieces = [];
+            for (int i = 0; i < _auto!.Tris.Count; i++)
+            {
+                var key = (_auto.Tris[i].Mesh, _auto.Tris[i].Poly);
+                if (!_autoPieces.TryGetValue(key, out var list)) _autoPieces[key] = list = [];
+                list.Add(i);
+            }
+        }
+        var t = _auto!.Tris[index];
+        return _autoPieces.TryGetValue((t.Mesh, t.Poly), out var piece) ? piece : [index];
     }
 
     void BoxSelect(Vector2 a, Vector2 b)

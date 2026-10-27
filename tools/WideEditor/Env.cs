@@ -18,8 +18,6 @@ static class Env
         return null;
     }
 
-    static string SettingsFile => Path.Combine(AppContext.BaseDirectory, "wideeditor.settings.json");
-
     /// <summary>The game's build folders (Release first): live edits are copied there.</summary>
     public static IEnumerable<string> GameDirs()
     {
@@ -40,17 +38,9 @@ static class Env
     public static IEnumerable<string> LiveFiles(int level) =>
         GameDirs().Select(d => Path.Combine(d, "WideEdits", $"level_{level:D2}.json"));
 
-    public static string? DiscPath()
+    public static string? DiscPath(string? saved)
     {
-        try
-        {
-            if (File.Exists(SettingsFile))
-            {
-                using var d = JsonDocument.Parse(File.ReadAllText(SettingsFile));
-                if (d.RootElement.TryGetProperty("disc", out var disc) && File.Exists(disc.GetString())) return disc.GetString();
-            }
-        }
-        catch (Exception e) when (e is IOException or JsonException) { }
+        if (saved != null && File.Exists(saved)) return saved;
         foreach (var dir in GameDirs())
         {
             try
@@ -66,12 +56,6 @@ static class Env
             foreach (var f in Directory.EnumerateFiles(Repo, "*.chd").Concat(Directory.EnumerateFiles(Repo, "*.cue")))
                 return f;
         return null;
-    }
-
-    public static void SaveDiscPath(string path)
-    {
-        try { File.WriteAllText(SettingsFile, JsonSerializer.Serialize(new Dictionary<string, string> { ["disc"] = path })); }
-        catch (IOException) { }
     }
 }
 

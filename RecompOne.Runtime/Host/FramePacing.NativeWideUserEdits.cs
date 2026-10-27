@@ -111,6 +111,44 @@ public static partial class FramePacing
         }
     }
 
+    // While the Wide Editor is open (it leaves WideEdits/editor_open next to the
+    // game) the game writes its camera ten times a second, so the editor can show
+    // exactly the view on screen.
+    static long _nativeWideEditorCheck, _nativeWideEditorWrite;
+    static bool _nativeWideEditorOpen;
+
+    static void NativeWideEditorCameraSync(IMemory m)
+    {
+        long now = Environment.TickCount64;
+        string dir = Path.Combine(AppContext.BaseDirectory, "WideEdits");
+        if (now >= _nativeWideEditorCheck)
+        {
+            _nativeWideEditorCheck = now + 1000;
+            try { _nativeWideEditorOpen = File.Exists(Path.Combine(dir, "editor_open")); }
+            catch (IOException) { _nativeWideEditorOpen = false; }
+        }
+        if (!_nativeWideEditorOpen || now < _nativeWideEditorWrite) return;
+        _nativeWideEditorWrite = now + 100;
+        uint zoneEntry = m.ReadU32(CamZoneAddr);
+        uint zone = NativeWideGuestPointer(zoneEntry) ? m.ReadU32(zoneEntry + 4) : 0;
+        var text = new System.Text.StringBuilder();
+        text.Append(System.Globalization.CultureInfo.InvariantCulture,
+            $"{{\"level\":{m.ReadU32(Catalogs.Catalog.LevelIdAddr)},\"zone\":{zone},");
+        text.Append(System.Globalization.CultureInfo.InvariantCulture,
+            $"\"cam\":[{(int)m.ReadU32(NativeWideCamTransAddr) >> 8},{(int)m.ReadU32(NativeWideCamTransAddr + 4) >> 8},"
+            + $"{(int)m.ReadU32(NativeWideCamTransAddr + 8) >> 8}],\"matrix\":[");
+        for (int i = 0; i < 9; i++)
+            text.Append(i > 0 ? "," : "").Append((short)m.ReadU16(NativeWideMatrixAddr + (uint)i * 2));
+        text.Append("]}");
+        try
+        {
+            string temp = Path.Combine(dir, "camera.tmp");
+            File.WriteAllText(temp, text.ToString());
+            File.Move(temp, Path.Combine(dir, "camera.json"), overwrite: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     static NativeWideSceneryKey NativeWideUserKey(IMemory m, NativeWideWorld world) =>
         new(m.ReadU32(Catalogs.Catalog.LevelIdAddr), m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
             m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);

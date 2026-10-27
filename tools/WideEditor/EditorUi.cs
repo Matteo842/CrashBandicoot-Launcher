@@ -49,7 +49,7 @@ sealed partial class Editor
             if (result.IsOk)
             {
                 _discPath = result.Path;
-                Env.SaveDiscPath(_discPath);
+                _prefs.Disc = _discPath;
                 OpenDisc();
             }
         }
@@ -235,6 +235,18 @@ sealed partial class Editor
         ImGui.Checkbox("Buchi in magenta", ref _void);
         ImGui.SameLine();
         ImGui.Checkbox("Fil di ferro", ref _wire);
+        if (_gameView)
+        {
+            ImGui.Checkbox("Mie anche al centro (a griglia)", ref _ghostCore);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Al centro 4:3 il gioco NON disegna riparazioni né modifiche: solo la scena originale.\nQui le tue si vedono a griglia per non perderle; nel gioco contano solo nelle bande laterali.");
+        }
+        if (!_gameView)
+        {
+            ImGui.Checkbox("Segna in rosso i nascosti nelle bande", ref _markHidden);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Rosso = il gioco NON lo disegna nelle bande 16:9.\nAl centro 4:3 lo disegna comunque (lì non si può togliere).");
+        }
         ImGui.Checkbox("Riparazioni automatiche", ref _showAuto);
         ImGui.SameLine();
         ImGui.Checkbox("Mie", ref _showUser);
@@ -248,6 +260,15 @@ sealed partial class Editor
     void CameraSection()
     {
         if (L == null) return;
+        if (_follow) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.55f, 0.3f, 1));
+        if (ImGui.Button(_follow ? "Segue la camera del gioco (clic per fermare)" : "Segui la camera del gioco", new Vector2(-1, 0)))
+        {
+            _follow = !_follow;
+            _followNote = "";
+        }
+        if (_follow) ImGui.PopStyleColor();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Apri il gioco nello stesso livello e mettilo in pausa dove vedi il problema:\nl'editor mostra la stessa inquadratura. Muovere la camera qui la stacca.");
+        if (_follow && _followNote.Length > 0) ImGui.TextWrapped(_followNote);
         bool auto = !_lockZone;
         if (ImGui.Checkbox("Zona automatica (dove sta la camera)", ref auto)) _lockZone = !auto;
         ImGui.SetNextItemWidth(200 * S);
@@ -365,8 +386,11 @@ sealed partial class Editor
         int i = IndexOf(key);
         return KindOf(key) switch
         {
-            Kind.Retail when Valid(key) => $"Originale: mesh {RetailOf(i).Mesh.Name} poligono {RetailOf(i).Poly}",
-            Kind.Auto when Valid(key) => $"Automatico: mesh {_auto!.Tris[i].Mesh.Name} poligono {_auto.Tris[i].Poly} (n. {i})",
+            Kind.Retail when Valid(key) => $"Originale: mesh {RetailOf(i).Mesh.Name} poligono {RetailOf(i).Poly}"
+                + (_doc.Hidden.Contains((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [nascosto nelle bande da te]"
+                    : RuntimeHidden(RetailOf(i).Mesh, RetailOf(i).Poly) ? "  [nascosto nelle bande dal codice del gioco]" : ""),
+            Kind.Auto when Valid(key) => $"Automatico: mesh {_auto!.Tris[i].Mesh.Name} poligono {_auto.Tris[i].Poly} (n. {i})"
+                + (_doc.IsRepairHidden(_auto.Tris[i]) ? "  [disattivato]" : ""),
             Kind.User when Valid(key) => $"Mio: mesh {_doc.Tris[i].Mesh} poligono {_doc.Tris[i].Poly} gruppo {_doc.Tris[i].Group}",
             _ => "",
         };
@@ -619,6 +643,7 @@ sealed partial class Editor
 
     void LeaveLevel()
     {
+        SavePrefs();
         _dirty = false;
         _sel.Clear();
         _screen = Screen.Pick;
@@ -686,16 +711,30 @@ sealed partial class Editor
         Span<Vector3> c = stackalloc Vector3[3];
         Span<Vector2> s = stackalloc Vector2[3];
         int drawn = 0;
+        Span<Vector3> clipped = stackalloc Vector3[4];
+        var screen = new Vector2[4];
         foreach (var key in _sel)
         {
-            if (++drawn > 4000) break;
+            if (++drawn > 6000) break;
             if (!Corners(key, c)) continue;
+            // Cut at the near plane: long skirts run past the camera.
+            int n = 0;
+            float near = Camera.Near + 1;
+            for (int k = 0; k < 3; k++)
+            {
+                var a = c[k];
+                var b = c[(k + 1) % 3];
+                float da = _cam.Depth(a) - near, db = _cam.Depth(b) - near;
+                if (da >= 0) clipped[n++] = a;
+                if ((da >= 0) != (db >= 0)) clipped[n++] = a + (b - a) * (da / (da - db));
+            }
+            if (n < 3) continue;
             bool ok = true;
-            for (int k = 0; k < 3 && ok; k++) ok = _cam.Project(c[k], _view, out s[k]);
+            for (int k = 0; k < n && ok; k++) ok = _cam.Project(clipped[k], _view, out screen[k]);
             if (!ok) continue;
-            uint fill = KindOf(key) == Kind.User ? Col(0.3f, 1, 0.3f, 0.18f) : Col(1, 0.9f, 0.2f, 0.18f);
-            dl.AddTriangleFilled(s[0], s[1], s[2], fill);
-            dl.AddTriangle(s[0], s[1], s[2], Col(1, 0.9f, 0.2f, 0.9f), 1.5f);
+            uint fill = KindOf(key) == Kind.User ? Col(0.3f, 1, 0.3f, 0.22f) : Col(1, 0.9f, 0.2f, 0.25f);
+            dl.AddConvexPolyFilled(ref screen[0], n, fill);
+            dl.AddPolyline(ref screen[0], n, Col(1, 0.9f, 0.2f, 0.95f), ImDrawFlags.Closed, 2f * _ui);
         }
 
         if (_tool == Tool.Select && _sel.Count > 0) DrawGizmo(dl);

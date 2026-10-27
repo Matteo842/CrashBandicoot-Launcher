@@ -56,7 +56,11 @@ sealed partial class Editor : IDisposable
     // View.
     readonly Camera _cam = new();
     readonly float _ui;
+    readonly Prefs _prefs;
+    string? _prefsJson;
+    double _prefsCheck;
     float _text = 1;
+    bool _follow, _markHidden = true, _ghostCore = true;
     Zone? _zone;
     bool _lockZone;
     bool _gameView = true, _void = true, _showAuto = true, _showUser = true, _tintAuto, _tintUser = true;
@@ -83,7 +87,10 @@ sealed partial class Editor : IDisposable
             File.Exists(font) ? new ImGuiFontConfig(font, (int)MathF.Round(20 * ui)) : null, () => ConfigureImGui(ui));
         _gfx = new Gfx(_gl);
         LoadLevelList();
-        _discPath = Env.DiscPath();
+        SetEditorMarker(true);
+        _prefs = Prefs.Load();
+        ApplyPrefs();
+        _discPath = Env.DiscPath(_prefs.Disc);
         OpenDisc();
         _slots = SaveSlot.All();
     }
@@ -174,6 +181,7 @@ sealed partial class Editor : IDisposable
         _brush = null;
         _points.Clear();
         _retailDirty = _autoDirty = _userDirty = true;
+        _autoPieces = null;
         _zone = null;
         _lockZone = false;
         var first = L.Zones.Values.FirstOrDefault(z => z.Paths.Any(p => p.Points.Count > 0));
@@ -186,6 +194,18 @@ sealed partial class Editor : IDisposable
             var pt = first.Paths.First(p => p.Points.Count > 0).Points[0];
             _cam.SetPathPoint(pt.Pos, pt.Pitch, pt.Yaw);
             _pathIndex = first.Paths.FindIndex(p => p.Points.Count > 0);
+        }
+        if (_prefs.Cameras.TryGetValue(L.Id.ToString(), out var saved) && saved.Pos.Length == 3)
+        {
+            _cam.Pos = new(saved.Pos[0], saved.Pos[1], saved.Pos[2]);
+            _cam.Pitch = saved.Pitch;
+            _cam.Yaw = saved.Yaw;
+            if (saved.Zone != null && L.Zones.TryGetValue(saved.Zone, out var zone))
+            {
+                _zone = zone;
+                _pathZone = zone.Name;
+                _lockZone = saved.LockZone;
+            }
         }
         if (_pendingSlot is { } slot) ApplySlot(slot);
         _pendingSlot = null;
@@ -397,6 +417,12 @@ sealed partial class Editor : IDisposable
             if (m.Backdrop == backdrops && _retailRange.TryGetValue(m, out var r)) _retailBuf!.Draw(r.Start, r.Count);
     }
 
+    void DrawUserOnly()
+    {
+        foreach (var m in _drawMeshes)
+            if (_userRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
+    }
+
     void DrawExtras()
     {
         foreach (var m in _drawMeshes)
@@ -429,7 +455,7 @@ sealed partial class Editor : IDisposable
         w = _gfx.Width;
         h = _gfx.Height;
         _gfx.Begin(_cam.View, Camera.Proj, _cam.Pos, Vector3.Zero);
-        int tint = (_tintAuto ? 1 : 0) | (_tintUser ? 2 : 0) | (_gameView ? 0 : 4);
+        int tint = (_tintAuto ? 1 : 0) | (_tintUser ? 2 : 0) | (!_gameView && _markHidden ? 4 : 0);
 
         _gfx.State(tint, false, -1);
         _gfx.Depth(false, false);
@@ -442,6 +468,12 @@ sealed partial class Editor : IDisposable
             _gfx.Scissor(coreX, 0, coreW, h);
             _gfx.State(tint, false, -1);
             Passes(() => DrawRetail(false));
+            if (_ghostCore && _showUser)
+            {
+                _gfx.Ghost(true);
+                Passes(DrawUserOnly);
+                _gfx.Ghost(false);
+            }
             foreach (var (x, bw) in new[] { (0, coreX), (coreX + coreW, w - coreX - coreW) })
             {
                 _gfx.Scissor(x, 0, bw, h);
@@ -502,6 +534,11 @@ sealed partial class Editor : IDisposable
     public void Frame(double dt)
     {
         _time += dt;
+        if (_time - _prefsCheck > 2)
+        {
+            _prefsCheck = _time;
+            SavePrefs();
+        }
         _imgui.Update((float)dt);
         ImGui.GetIO().FontGlobalScale = _text;
         var size = _window.FramebufferSize;
@@ -522,6 +559,7 @@ sealed partial class Editor : IDisposable
                     break;
                 case Screen.Edit:
                     Layout();
+                    FollowGame();
                     UpdateDrawMeshes();
                     ViewInput((float)dt);
                     RebuildBuffers();
@@ -559,6 +597,104 @@ sealed partial class Editor : IDisposable
     public void Close()
     {
         if (_dirty) Save();
+        SavePrefs();
+        SetEditorMarker(false);
+    }
+
+    /// <summary>Tells a running game to write its camera (FramePacing.NativeWideEditorCameraSync).</summary>
+    static void SetEditorMarker(bool open)
+    {
+        foreach (var dir in Env.GameDirs())
+            try
+            {
+                string file = Path.Combine(dir, "WideEdits", "editor_open");
+                if (open)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                    File.WriteAllText(file, "");
+                }
+                else if (File.Exists(file)) File.Delete(file);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    double _followRead;
+    string _followNote = "";
+
+    /// <summary>Camera of the running game, written by it ten times a second.</summary>
+    void FollowGame()
+    {
+        if (!_follow || L == null || _time - _followRead < 0.05) return;
+        _followRead = _time;
+        string? file = Env.GameDirs().Select(d => Path.Combine(d, "WideEdits", "camera.json")).Where(File.Exists)
+            .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
+        if (file == null || (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalSeconds > 3)
+        {
+            _followNote = "Il gioco non manda la camera: aprilo in 16:9, dentro un livello.";
+            return;
+        }
+        try
+        {
+            using var d = JsonDocument.Parse(File.ReadAllText(file));
+            var r = d.RootElement;
+            int level = r.GetProperty("level").GetInt32();
+            if (level != L.Id)
+            {
+                _followNote = $"Il gioco è nel livello {level}, l'editor nel {L.Id}.";
+                return;
+            }
+            var cam = r.GetProperty("cam");
+            var matrix = r.GetProperty("matrix").EnumerateArray().Select(e => (short)e.GetInt32()).ToArray();
+            _cam.SetMatrix(new(cam[0].GetSingle(), cam[1].GetSingle(), cam[2].GetSingle()), matrix);
+            string zone = Eid.Str(r.GetProperty("zone").GetUInt32());
+            if (L.Zones.TryGetValue(zone, out var z))
+            {
+                _zone = z;
+                _lockZone = true;
+            }
+            _followNote = $"Segue il gioco (zona {zone}).";
+        }
+        catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or KeyNotFoundException
+            or FormatException) { }
+    }
+
+    void ApplyPrefs()
+    {
+        var p = _prefs;
+        _text = Math.Clamp(p.Text, 0.7f, 2f);
+        _gameView = p.GameView; _void = p.Void; _showAuto = p.ShowAuto; _showUser = p.ShowUser;
+        _tintAuto = p.TintAuto; _tintUser = p.TintUser; _wire = p.Wire; _allMeshes = p.AllMeshes;
+        _speed = Math.Clamp(p.Speed, 0.1f, 5f);
+        _snapVerts = p.SnapVerts; _weld = p.Weld; _grid = Math.Max(p.Grid, 0); _rotStep = Math.Max(p.RotStep, 0);
+        _newBehind = p.NewBehind; _pickRetail = p.PickRetail; _pickAuto = p.PickAuto; _pickUser = p.PickUser;
+        _gizmo = Enum.TryParse<GizmoMode>(p.Gizmo, out var g) ? g : GizmoMode.Move;
+        _markHidden = p.MarkHidden;
+        _ghostCore = p.GhostCore;
+    }
+
+    /// <summary>Writes the settings file when anything in it changed.</summary>
+    void SavePrefs()
+    {
+        var p = _prefs;
+        p.Disc = _discPath;
+        p.Text = _text;
+        p.GameView = _gameView; p.Void = _void; p.ShowAuto = _showAuto; p.ShowUser = _showUser;
+        p.TintAuto = _tintAuto; p.TintUser = _tintUser; p.Wire = _wire; p.AllMeshes = _allMeshes; p.Speed = _speed;
+        p.SnapVerts = _snapVerts; p.Weld = _weld; p.Grid = _grid; p.RotStep = _rotStep;
+        p.NewBehind = _newBehind; p.PickRetail = _pickRetail; p.PickAuto = _pickAuto; p.PickUser = _pickUser;
+        p.Gizmo = _gizmo.ToString();
+        p.MarkHidden = _markHidden;
+        p.GhostCore = _ghostCore;
+        if (L != null && _screen == Screen.Edit)
+            p.Cameras[L.Id.ToString()] = new CameraPref
+            {
+                Pos = [_cam.Pos.X, _cam.Pos.Y, _cam.Pos.Z], Pitch = _cam.Pitch, Yaw = _cam.Yaw,
+                Zone = _zone?.Name, LockZone = _lockZone,
+            };
+        string json = p.Json();
+        if (json == _prefsJson) return;
+        _prefsJson = json;
+        Prefs.Write(json);
     }
 
     public void Dispose()

@@ -134,6 +134,7 @@ sealed class Gfx : IDisposable
         uniform int uTint;
         uniform int uBehind;
         uniform int uWire;
+        uniform int uGhost;
         layout(location = 0) out vec4 oColor;
         layout(location = 1) out uint oId;
         layout(location = 2) out vec4 oPos;
@@ -186,6 +187,9 @@ sealed class Gfx : IDisposable
             if ((uTint & 2) != 0 && kind == 2u) c = mix(c, vec3(0.25, 1.0, 0.25), 0.3);
             if ((uTint & 4) != 0 && hidden) c = mix(c, vec3(1.0, 0.0, 0.0), 0.6);
             if (uWire != 0) c = vec3(0.0, 0.0, 0.0);
+            // Editor-only view of the user's triangles in the 4:3 core (the game
+            // never draws them there): every other pixel.
+            if (uGhost != 0 && ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 1) == 1) discard;
             oColor = vec4(c, 1.0);
             oId = vInfo.z;
             oPos = vec4(vWorld, 1.0);
@@ -362,9 +366,12 @@ sealed class Gfx : IDisposable
         _gl.BindTexture(TextureTarget.Texture2DArray, _pages);
         _gl.Uniform1(U("uPages"), 0);
         _gl.Uniform1(U("uWire"), 0);
+        _gl.Uniform1(U("uGhost"), 0);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
     }
+
+    public void Ghost(bool on) => _gl.Uniform1(U("uGhost"), on ? 1 : 0);
 
     public void State(int tint, bool dropHidden, int behind)
     {
