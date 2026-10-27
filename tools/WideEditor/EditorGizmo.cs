@@ -14,6 +14,11 @@ sealed partial class Editor
     static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
     GizmoMode _gizmo = GizmoMode.All;
     int _handle;
+    // Drags are measured on screen, like Unity/Unreal: the mouse movement along the
+    // handle as drawn, turned into world units at the pivot. A ray/axis crossing blew up
+    // when an axis pointed at the camera.
+    Vector2 _mouse0, _axisDir, _planeU, _planeV;
+    float _axisPixels;
     float _rotStep = 15, _angle0, _angleNow, _scale0;
     Vector2 _pivotScreen0;
     uint _ctxHover;
@@ -155,7 +160,7 @@ sealed partial class Editor
 
     void StartGizmo(int handle, Vector2 mouse)
     {
-        if (ImGui.GetIO().KeyAlt && SelUser.Any() && !_sel.Any(k => KindOf(k) != Kind.User)) CopyAsMine(false);
+        if (Alt && SelUser.Any() && !_sel.Any(k => KindOf(k) != Kind.User)) CopyAsMine(false);
         if (!EnsureEditable()) return;
         BeginChange();
         _moving.Clear();
@@ -169,11 +174,12 @@ sealed partial class Editor
         _pivot0 = SelPivot();
         _cam.Project(_pivot0, _view, out _pivotScreen0);
         _handle = handle;
+        _mouse0 = mouse;
         switch (handle)
         {
             case < 3:
                 _axis = handle;
-                _s0 = AxisParam(mouse, Axes[handle]);
+                (_axisDir, _axisPixels) = ScreenAxis(Axes[_axis]);
                 _drag = DragMode.Axis;
                 break;
             case 3:
@@ -181,10 +187,17 @@ sealed partial class Editor
                 _drag = DragMode.Plane;
                 break;
             case < 10:
+            {
                 _axis = handle - 4;
-                _hit0 = PlaneHit(mouse, _pivot0, Axes[_axis]);
+                var (u, v) = PlaneAxes(_axis);
+                var (du, pu) = ScreenAxis(u);
+                var (dv, pv) = ScreenAxis(v);
+                _planeU = du * pu;
+                _planeV = dv * pv;
+                _hit0 = PlaneHit(mouse, _pivot0, _cam.Forward);
                 _drag = DragMode.PlaneAxis;
                 break;
+            }
             case < 20:
                 _axis = handle - 10;
                 _angle0 = MathF.Atan2(mouse.Y - _pivotScreen0.Y, mouse.X - _pivotScreen0.X);
@@ -193,12 +206,29 @@ sealed partial class Editor
                 break;
             default:
                 _axis = handle - 20;
-                _scale0 = _axis < 3 ? AxisParam(mouse, Axes[_axis]) : Math.Max(Vector2.Distance(mouse, _pivotScreen0), 1);
-                if (MathF.Abs(_scale0) < 1e-3f) _scale0 = 1e-3f;
+                if (_axis < 3)
+                {
+                    (_axisDir, _axisPixels) = ScreenAxis(Axes[_axis]);
+                    _scale0 = _axisPixels * GizmoLength(_pivot0);
+                }
                 _drag = DragMode.Scale;
                 break;
         }
         BuildSnapTargets(exclude);
+    }
+
+    /// <summary>Screen direction of a world axis at the pivot and pixels per world unit
+    /// along it (an axis pointing at the camera moves with the mouse's up/down).</summary>
+    (Vector2 Dir, float Pixels) ScreenAxis(Vector3 axis)
+    {
+        float len = GizmoLength(_pivot0);
+        if (_cam.Project(_pivot0, _view, out var ps) && _cam.Project(_pivot0 + axis * len, _view, out var pe)
+            && Vector2.Distance(ps, pe) > 6 * _ui)
+        {
+            var d = pe - ps;
+            return (Vector2.Normalize(d), d.Length() / len);
+        }
+        return (new Vector2(0, -1), 1 / _cam.PixelSize(_pivot0, _view));
     }
 
     static Vector3 RoundTo(Vector3 v, float step) => step <= 0 ? v
@@ -222,8 +252,9 @@ sealed partial class Editor
         }
         if (_drag == DragMode.Scale)
         {
-            float f = _axis < 3 ? AxisParam(mouse, Axes[_axis]) / _scale0
-                : Vector2.Distance(mouse, _pivotScreen0) / _scale0;
+            var moved = mouse - _mouse0;
+            float f = _axis < 3 ? 1 + Vector2.Dot(moved, _axisDir) / Math.Max(_scale0, 1)
+                : MathF.Exp((moved.X - moved.Y) / (150 * _ui));
             f = Math.Max(f, 0.01f);
             var scale = _axis < 3 ? Vector3.One + Axes[_axis] * (f - 1) : new Vector3(f);
             _angleNow = f * 100;
@@ -234,12 +265,25 @@ sealed partial class Editor
         Vector3 delta;
         if (_drag == DragMode.Axis)
         {
-            float d = AxisParam(mouse, Axes[_axis]) - _s0;
+            float d = Vector2.Dot(mouse - _mouse0, _axisDir) / _axisPixels;
             if (_grid > 0) d = MathF.Round(d / _grid) * _grid;
             delta = Axes[_axis] * d;
         }
         else if (_drag == DragMode.PlaneAxis)
-            delta = RoundTo(PlaneHit(mouse, _pivot0, Axes[_axis]) - _hit0, _grid);
+        {
+            // Mouse movement split along the two plane axes as drawn on screen.
+            var m = mouse - _mouse0;
+            float det = _planeU.X * _planeV.Y - _planeU.Y * _planeV.X;
+            var (u, v) = PlaneAxes(_axis);
+            if (MathF.Abs(det) < 0.05f * _planeU.Length() * _planeV.Length())
+                delta = PlaneHit(mouse, _pivot0, _cam.Forward) - _hit0;
+            else
+            {
+                float a = (m.X * _planeV.Y - m.Y * _planeV.X) / det, b = (_planeU.X * m.Y - _planeU.Y * m.X) / det;
+                delta = u * a + v * b;
+            }
+            delta = RoundTo(delta, _grid);
+        }
         else
             delta = RoundTo(PlaneHit(mouse, _pivot0, _cam.Forward) - _hit0, _grid);
         _snapHit = null;
@@ -251,8 +295,18 @@ sealed partial class Editor
             foreach (var (_, _, orig) in _moving)
             {
                 if (!seen.Add(orig) || seen.Count > 600) continue;
-                if (!_cam.Project(orig + delta, _view, out var s)) continue;
-                if (FindSnap(s, best, out var target, out float dist)) { best = dist; bestFrom = orig; bestTo = target; _snapHit = target; }
+                var at = orig + delta;
+                if (!_cam.Project(at, _view, out var s)) continue;
+                // Only vertices really next to it in 3D: one far behind that only looks
+                // close on screen made the triangle jump there.
+                float near = 16 * _ui * _cam.PixelSize(at, _view);
+                if (FindSnap(s, best, out var target, out float dist, at, near))
+                {
+                    best = dist;
+                    bestFrom = orig;
+                    bestTo = target;
+                    _snapHit = target;
+                }
             }
             if (_snapHit != null)
             {

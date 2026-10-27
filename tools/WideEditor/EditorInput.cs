@@ -122,31 +122,32 @@ sealed partial class Editor
         var mouse = io.MousePos;
         bool over = _view.Contains(mouse) && !io.WantCaptureMouse;
 
-        if (!io.WantTextInput)
+        // Every key is polled each frame (edges need it), then acted on.
+        bool z = KeyHit(Silk.NET.Input.Key.Z), y = KeyHit(Silk.NET.Input.Key.Y), s = KeyHit(Silk.NET.Input.Key.S);
+        bool d = KeyHit(Silk.NET.Input.Key.D), del = KeyHit(Silk.NET.Input.Key.Delete), esc = KeyHit(Silk.NET.Input.Key.Escape);
+        bool f = KeyHit(Silk.NET.Input.Key.F), w = KeyHit(Silk.NET.Input.Key.W), e = KeyHit(Silk.NET.Input.Key.E);
+        bool r = KeyHit(Silk.NET.Input.Key.R), t = KeyHit(Silk.NET.Input.Key.T);
+        if (!io.WantTextInput && _drag == DragMode.None)
         {
-            if (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.Z)) Undo();
-            if (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.Y)) Redo();
-            if (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.S)) Save();
-            if (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.D)) CopyAsMine(false);
-            if (!io.WantCaptureKeyboard)
+            if (Ctrl && z) { if (Shift) Redo(); else Undo(); }
+            if (Ctrl && y) Redo();
+            if (Ctrl && s) Save();
+            if (Ctrl && d) CopyAsMine(false);
+            if (del) DeleteSelection();
+            if (esc)
             {
-                if (ImGui.IsKeyPressed(ImGuiKey.Delete)) DeleteSelection();
-                if (ImGui.IsKeyPressed(ImGuiKey.Escape))
-                {
-                    if (_points.Count > 0) _points.Clear();
-                    else if (_tool != Tool.Select) _tool = Tool.Select;
-                    else _sel.Clear();
-                }
-                if (ImGui.IsKeyPressed(ImGuiKey.F) && !_looking) FrameSelection();
+                if (_points.Count > 0) _points.Clear();
+                else if (_tool != Tool.Select) _tool = Tool.Select;
+                else _sel.Clear();
             }
-        }
-
-        if (!io.WantCaptureKeyboard && !io.KeyCtrl && !_looking && _drag == DragMode.None)
-        {
-            if (ImGui.IsKeyPressed(ImGuiKey.W)) _gizmo = GizmoMode.Move;
-            if (ImGui.IsKeyPressed(ImGuiKey.E)) _gizmo = GizmoMode.Rotate;
-            if (ImGui.IsKeyPressed(ImGuiKey.R)) _gizmo = GizmoMode.Scale;
-            if (ImGui.IsKeyPressed(ImGuiKey.T)) _gizmo = GizmoMode.All;
+            if (!Ctrl && !_looking)
+            {
+                if (f) FrameSelection();
+                if (w) _gizmo = GizmoMode.Move;
+                if (e) _gizmo = GizmoMode.Rotate;
+                if (r) _gizmo = GizmoMode.Scale;
+                if (t) _gizmo = GizmoMode.All;
+            }
         }
 
         // Camera: right drag looks, middle drag pans, wheel flies toward the mouse.
@@ -175,7 +176,7 @@ sealed partial class Editor
                 _cam.Pitch -= io.MouseDelta.Y * 0.004f;
                 _cam.ClampPitch();
             }
-            float step = 3000 * _speed * dt * (io.KeyShift ? 4 : 1);
+            float step = 3000 * _speed * dt * (Shift ? 4 : 1);
             if (ImGui.IsKeyDown(ImGuiKey.W)) _cam.Pos += _cam.Forward * step;
             if (ImGui.IsKeyDown(ImGuiKey.S)) _cam.Pos -= _cam.Forward * step;
             if (ImGui.IsKeyDown(ImGuiKey.D)) _cam.Pos += _cam.Right * step;
@@ -251,7 +252,8 @@ sealed partial class Editor
         switch (_tool)
         {
             case Tool.Select:
-                if (_hoverAxis >= 0) StartGizmo(_hoverAxis, mouse);
+                // With Ctrl or Shift a click always selects, even over the gizmo.
+                if (_hoverAxis >= 0 && !Ctrl && !Shift) StartGizmo(_hoverAxis, mouse);
                 else _drag = DragMode.ClickPending;
                 break;
             case Tool.Vertex:
@@ -304,7 +306,7 @@ sealed partial class Editor
     void ClickSelect(uint id)
     {
         var io = ImGui.GetIO();
-        bool add = io.KeyShift, toggle = io.KeyCtrl;
+        bool add = Shift, toggle = Ctrl;
         if (!Decode(id, out var kind, out int index) || !Allowed(kind))
         {
             if (!add && !toggle) _sel.Clear();
@@ -313,10 +315,10 @@ sealed partial class Editor
         var keys = new List<long> { Key(kind, index) };
         // An automatic repair is many triangles made from one polygon (a skirt, a
         // copy): a click takes all of them, Alt only the one under the mouse.
-        if (kind == Kind.Auto && !io.KeyAlt)
+        if (kind == Kind.Auto && !Alt)
             foreach (int i in AutoPiece(index))
                 if (i != index) keys.Add(Key(Kind.Auto, i));
-        if (kind == Kind.User && !io.KeyAlt && index < _doc.Tris.Count && _doc.Tris[index].Group != 0)
+        if (kind == Kind.User && !Alt && index < _doc.Tris.Count && _doc.Tris[index].Group != 0)
         {
             int g = _doc.Tris[index].Group;
             for (int i = 0; i < _doc.Tris.Count; i++)
@@ -355,11 +357,12 @@ sealed partial class Editor
         var (x0, y1) = ToTarget(min);
         var (x1, y0) = ToTarget(max);
         var ids = _gfx.ReadIds(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
-        if (!io.KeyShift && !io.KeyCtrl) _sel.Clear();
+        // Shift or Ctrl: add to the selection, Alt: take away from it.
+        if (!Shift && !Ctrl && !Alt) _sel.Clear();
         foreach (uint id in ids.Distinct())
             if (Decode(id, out var kind, out int index) && Allowed(kind))
             {
-                if (io.KeyCtrl) _sel.Remove(Key(kind, index));
+                if (Alt) _sel.Remove(Key(kind, index));
                 else _sel.Add(Key(kind, index));
             }
     }
@@ -456,7 +459,12 @@ sealed partial class Editor
 
     bool FindSnap(Vector2 s, float radius, out Vector3 p) => FindSnap(s, radius, out p, out _);
 
-    bool FindSnap(Vector2 s, float radius, out Vector3 p, out float dist)
+    bool FindSnap(Vector2 s, float radius, out Vector3 p, out float dist) =>
+        FindSnap(s, radius, out p, out dist, Vector3.Zero, float.PositiveInfinity);
+
+    /// <summary>Nearest snap vertex on screen, only among those within <paramref name="near"/>
+    /// of <paramref name="from"/> in the world.</summary>
+    bool FindSnap(Vector2 s, float radius, out Vector3 p, out float dist, Vector3 from, float near)
     {
         p = default;
         dist = radius;
@@ -467,6 +475,7 @@ sealed partial class Editor
                 if (_snapGrid.TryGetValue(((long)x << 32) | (uint)y, out var list))
                     foreach (int i in list)
                     {
+                        if (near < float.PositiveInfinity && Vector3.DistanceSquared(_snapP[i], from) > near * near) continue;
                         float d = Vector2.Distance(_snapS[i], s);
                         // Nearest on screen; among equals, the one nearest the camera.
                         if (d < dist || (found && MathF.Abs(d - dist) < 0.5f && _cam.Depth(_snapP[i]) < _cam.Depth(p)))

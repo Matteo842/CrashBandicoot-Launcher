@@ -27,7 +27,7 @@ mesh è disegnata (zona della camera + zone vicine), come nell'editor in "Come n
 
 - Tasto destro trascinato: guarda intorno (W A S D Q E per volare, Shift veloce).
 - Rotella: avanti/indietro verso il mouse. Tasto centrale: sposta la vista.
-- Clic sinistro: seleziona; trascinando nel vuoto: rettangolo. Shift aggiunge, Ctrl toglie.
+- Clic sinistro: seleziona; trascinando nel vuoto: rettangolo. Ctrl+clic aggiunge o toglie, Shift+clic aggiunge, Alt+rettangolo toglie.
 - Tasto destro senza trascinare: menu (duplica, elimina, ruota, specchia, texture, profondità...).
 - Gizmo su qualsiasi selezione: W sposta (frecce, quadratini = piani, quadrato centrale = schermo),
   E ruota (anelli, passo in gradi), R scala. Gli automatici trascinati diventano tuoi; gli originali

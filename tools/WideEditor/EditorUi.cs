@@ -133,15 +133,15 @@ sealed partial class Editor
         ImGui.SameLine();
         if (ImGui.Button(_dirty ? "Salva *" : "Salva")) Save();
         ImGui.BeginDisabled(_undo.Count == 0);
-        if (ImGui.Button("Annulla")) Undo();
+        if (ImGui.Button("Annulla (Ctrl+Z)")) Undo();
         ImGui.EndDisabled();
         ImGui.SameLine();
         ImGui.BeginDisabled(_redo.Count == 0);
-        if (ImGui.Button("Ripeti")) Redo();
+        if (ImGui.Button("Ripeti (Ctrl+Y)")) Redo();
         ImGui.EndDisabled();
 
         ImGui.SeparatorText("Strumento");
-        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: seleziona. Trascina nel vuoto: selezione a rettangolo.\nShift aggiunge, Ctrl toglie, Alt: un solo triangolo del gruppo.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
+        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: seleziona. Trascina nel vuoto: selezione a rettangolo.\nCtrl+clic: aggiunge o toglie un pezzo. Shift+clic: aggiunge. Alt+clic: un solo triangolo del pezzo.\nRettangolo con Shift o Ctrl: aggiunge, con Alt: toglie.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
         ToolButton(Tool.Vertex, "Muovi vertici", "Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
         ToolButton(Tool.Quad, "Nuovo quad (4 clic)", "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.");
         ToolButton(Tool.Triangle, "Nuovo triangolo (3 clic)", "3 clic: crea un triangolo con la texture del pennello, mappata come il triangolo d'origine.");

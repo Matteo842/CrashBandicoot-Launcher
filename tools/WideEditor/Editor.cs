@@ -80,6 +80,7 @@ sealed partial class Editor : IDisposable
         _window = window;
         _gl = GL.GetApi(window);
         var input = window.CreateInput();
+        _keyboard = input.Keyboards.Count > 0 ? input.Keyboards[0] : null;
         // Interface size from the screen: 1080p = 1, 1440p = 1.33, 4K = 2.
         int screenHeight = window.Monitor?.VideoMode.Resolution?.Y ?? window.FramebufferSize.Y;
         _ui = Math.Clamp(screenHeight / 1080f, 1, 2.5f);
@@ -572,6 +573,7 @@ sealed partial class Editor : IDisposable
                     Panels();
                     Overlay();
                     if (!ImGui.IsAnyItemActive() && _drag == DragMode.None) _changeOpen = false;
+                    EndKeys();
                     break;
             }
         }
