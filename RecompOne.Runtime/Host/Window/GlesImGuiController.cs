@@ -119,9 +119,11 @@ sealed class GlesImGuiController : IDisposable
     {
         var io = ImGui.GetIO();
         io.DisplaySize = new Vector2(_windowWidth, _windowHeight);
+        // Float division: at a fractional Wayland scale (175%) int division gave 1 and
+        // ImGui drew into the bottom-left corner of the framebuffer (#187).
         if (_windowWidth > 0 && _windowHeight > 0)
-            io.DisplayFramebufferScale = new Vector2(_view.FramebufferSize.X / _windowWidth,
-                _view.FramebufferSize.Y / _windowHeight);
+            io.DisplayFramebufferScale = new Vector2((float)_view.FramebufferSize.X / _windowWidth,
+                (float)_view.FramebufferSize.Y / _windowHeight);
         io.DeltaTime = deltaSeconds;
     }
 

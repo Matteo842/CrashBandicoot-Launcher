@@ -825,6 +825,20 @@ internal static class HostWindow
         _layoutPending = true;
     }
 
+    /// <summary>
+    /// Silk's ImGuiController computes the framebuffer scale with int division, so
+    /// at a fractional Wayland scale (175%: 2240/1280) it gets 1 and ImGui draws the
+    /// whole UI into the bottom-left corner of the window (#187). ImGui reads the
+    /// value in Render, so correcting it after Update applies to this frame.
+    /// </summary>
+    static void FixFramebufferScale()
+    {
+        var io = ImGui.GetIO();
+        var fb = _window!.FramebufferSize;
+        if (io.DisplaySize.X > 0 && io.DisplaySize.Y > 0)
+            io.DisplayFramebufferScale = new Vector2(fb.X / io.DisplaySize.X, fb.Y / io.DisplaySize.Y);
+    }
+
     static void ApplyUiScale()
     {
         if (_window == null) return;
@@ -839,7 +853,11 @@ internal static class HostWindow
         Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Events);
         var gl = _gl!;
         if (_imguiEs != null) _imguiEs.Update((float)dt);
-        else _imgui!.Update((float)dt);
+        else
+        {
+            _imgui!.Update((float)dt);
+            FixFramebufferScale();
+        }
         ApplyUiScale();
         Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Ui);
 
