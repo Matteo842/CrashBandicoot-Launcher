@@ -81,6 +81,8 @@ public static partial class FramePacing
         // Neighbour meshes are not in the zone's world list, so their texture
         // page words are resolved here instead of read from the zone.
         public bool Neighbor;
+        // Only these polygons are drawn (Sunset Vista's neighbours: the far forest strip).
+        public int[]? Only;
         public readonly uint[] NeighborTpages = new uint[8];
         public NativeWideClipVertex[]? CameraVertices;
         public bool[]? VertexShaded;
@@ -351,6 +353,7 @@ public static partial class FramePacing
         {
             var slot = worlds[wi];
             slot.Neighbor = false;
+            slot.Only = null;
             uint world = zone + 4u + (uint)wi * 0x40u;
             uint header = FastU32(m, world + 0x10u);
             uint polygons = FastU32(m, world + 0x14u);
@@ -476,10 +479,11 @@ public static partial class FramePacing
             int tie = 0;
             if (behind)
                 for (int oi = 0; oi < drawWorldCount; oi++)
-                    if (NativeWideMeshOrder(m, worlds[oi]) < NativeWideMeshOrder(m, world)) tie++;
+                    if (worlds[oi].Only == null && NativeWideMeshOrder(m, worlds[oi]) < NativeWideMeshOrder(m, world)) tie++;
             // Repairs were tuned with each mesh's own zone; neighbours draw only authored polygons,
             // except in levels whose repairs suit every camera drawing the mesh.
-            var repairs = NativeWideWithUserEdits(m, world, world.Neighbor && !NativeWideNeighborRepairs(m)
+            var repairs = world.Only != null ? Array.Empty<NativeWideRepair>()
+                : NativeWideWithUserEdits(m, world, world.Neighbor && !NativeWideNeighborRepairs(m)
                 ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world));
             // After the repairs: they are worked out from the authored polygons.
             NativeWideApplyRemoved(m, world);
@@ -532,15 +536,17 @@ public static partial class FramePacing
             if (world.PolyCount == 0) continue;
             // Neighbour meshes also fill the 4:3 core (#105); the zone's own
             // meshes are drawn there by the game itself.
-            bool fillCore = world.Neighbor;
+            bool fillCore = world.Neighbor && world.Only == null;
             bool worldSides = NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
                 viewCenterX, coreHalf);
             if (!worldSides && !fillCore)
                 continue;
             int gemColumn = gemTempleHidden && NativeWideGemColumnMesh(m, world) ? NativeWideGemColumnFirst : -1;
             int[]? hiddenSides = NativeWideWithUserHidden(m, world, NativeWideHiddenSides(m, world));
-            for (int pi = 0; pi < world.PolyCount; pi++)
+            var only = world.Only;
+            for (int oi = 0, polyCount = only?.Length ?? world.PolyCount; oi < polyCount; oi++)
             {
+                int pi = only != null ? only[oi] : oi;
                 if (gemColumn >= 0 && (uint)(pi - gemColumn) < NativeWideGemColumnCount) continue;
                 candidates++;
                 uint poly = world.Polygons + (uint)pi * 8u;
@@ -645,18 +651,20 @@ public static partial class FramePacing
     /// neighbouring zones when they and their texture pages are already
     /// resident; nothing is paged in from disc here. Backdrops stay with the
     /// current zone. Sunset Vista's temple repairs are drawn behind all real
-    /// scenery, so its zones and meshes keep the current-zone list only.
+    /// scenery, so its temple zones and meshes add only the far forest strip
+    /// of their neighbours: at a zone's end the band showed sky where the
+    /// next mesh's strip continues the forest behind the ruins.
     /// </summary>
     static int AddNativeWideNeighborWorlds(IMemory m, uint zone, int worldCount, ref int totalPolygons)
     {
         var worlds = _nativeWideWorldPool;
         int fogFar = 0xFFFF, fogShift = 0;
-        bool fogFound = false;
+        bool fogFound = false, sunsetTemple = false;
         for (int wi = 0; wi < worldCount; wi++)
         {
             var world = worlds[wi];
             if (world.PolyCount == 0) continue;
-            if (NativeWideSunsetTemple(m, world)) return worldCount;
+            if (NativeWideSunsetTemple(m, world)) sunsetTemple = true;
             if (!fogFound && FastU32(m, world.Header + 0x1Cu) == 0)
             {
                 fogFar = world.FogFar;
@@ -735,7 +743,13 @@ public static partial class FramePacing
                 slot.FogFar = fogFar;
                 slot.FogShift = fogShift;
                 slot.CameraVertices = null;
-                if (NativeWideSunsetTemple(m, slot)) continue;
+                slot.Only = null;
+                if (sunsetTemple || NativeWideSunsetTemple(m, slot))
+                {
+                    slot.Only = NativeWideSunsetForestStrip(m, slot);
+                    if (slot.Only.Length == 0) continue;
+                    polyCount = slot.Only.Length;
+                }
                 totalPolygons += polyCount;
                 count++;
             }

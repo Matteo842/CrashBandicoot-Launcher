@@ -138,6 +138,32 @@ public static partial class FramePacing
         return repairs;
     }
 
+    // Behind the rooftops a slanted strip of forest (absolute Z -15048..-14000,
+    // 2800-wide quads) runs along meshes i to m, each holding its own stretch;
+    // nothing else lies that far back. A temple zone draws only its own
+    // meshes, so at its ends the side band looked past the strip into the sky
+    // (l1_zZ: j's stretch was missing). The neighbours add this strip only.
+    const int NativeWideSunsetForestZ = -14000;
+    static readonly Dictionary<NativeWideSceneryKey, int[]> _nativeWideSunsetForest = new();
+
+    static int[] NativeWideSunsetForestStrip(IMemory m, NativeWideWorld world)
+    {
+        var key = new NativeWideSceneryKey(35, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
+            m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
+        if (_nativeWideSunsetForest.TryGetValue(key, out var strip)) return strip;
+        int z = (int)m.ReadU32(world.Header + 8);
+        bool Far(int vertex) => vertex < world.VertexCount
+            && z + ReadNativeWideLocal(m, world, vertex).Z <= NativeWideSunsetForestZ;
+        var polygons = new List<int>();
+        for (int pi = 0; pi < world.PolyCount; pi++)
+        {
+            uint poly = world.Polygons + (uint)pi * 8u;
+            NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4u), out int a, out int b, out int c);
+            if (Far(a) && Far(b) && Far(c)) polygons.Add(pi);
+        }
+        return _nativeWideSunsetForest[key] = [.. polygons];
+    }
+
     // The sunset skies (skyzW over the rooftops, sk2zW over the ending) are
     // camera-centred panoramas, rows of cells ending at about +/-47° (the
     // lowest row at +/-26°), so the 16:9 corners saw past them. Every cell
