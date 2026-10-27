@@ -664,6 +664,7 @@ sealed partial class Editor
 
     void LeaveLevel()
     {
+        CaptureCursor(false);
         SavePrefs();
         _dirty = false;
         _sel.Clear();

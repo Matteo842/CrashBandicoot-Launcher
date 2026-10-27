@@ -191,6 +191,7 @@ sealed partial class Editor
             _panScale = _cam.PixelSize(focus, _view);
         }
         if (!ImGui.IsMouseDown(ImGuiMouseButton.Middle)) _panning = false;
+        CaptureCursor((_looking && _rightMoved) || _panning);
         if (_panning) StopFollow();
         if (_panning) _cam.Pos += (-_cam.Right * io.MouseDelta.X + _cam.Up * io.MouseDelta.Y) * _panScale;
         if (over && io.MouseWheel != 0)

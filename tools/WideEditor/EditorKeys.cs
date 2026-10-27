@@ -8,6 +8,17 @@ namespace WideEditor;
 sealed partial class Editor
 {
     IKeyboard? _keyboard;
+    IMouse? _mouse;
+    bool _cursorCaptured;
+
+    /// <summary>While the camera turns or pans the pointer is hidden and held in the
+    /// window (it can't run to the screen edge and stop); it comes back where it was.</summary>
+    void CaptureCursor(bool capture)
+    {
+        if (capture == _cursorCaptured || _mouse == null) return;
+        _cursorCaptured = capture;
+        _mouse.Cursor.CursorMode = capture ? CursorMode.Disabled : CursorMode.Normal;
+    }
     readonly HashSet<Key> _keysBefore = [], _keysNow = [];
 
     bool KeyDown(Key k) => _keyboard?.IsKeyPressed(k) == true;
