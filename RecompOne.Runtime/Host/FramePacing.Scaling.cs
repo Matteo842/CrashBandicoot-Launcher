@@ -571,6 +571,7 @@ public static partial class FramePacing
             }
             m.WriteU32(o + ObjTransOff, (uint)KeepCrashDelta(_ox, (int)m.ReadU32(o + ObjTransOff), Teleport, ref _crashFracTX));
             m.WriteU32(o + ObjTransOff + 8, (uint)KeepCrashDelta(_oz, (int)m.ReadU32(o + ObjTransOff + 8), Teleport, ref _crashFracTZ));
+            int walkVx = (int)m.ReadU32(o + ObjVelXOff), walkVz = (int)m.ReadU32(o + ObjVelZOff);
 
             bool hogJumpY = _crashHog && _haveTransY;
             if (!hogJumpY) ClearAirFractions();
@@ -604,6 +605,7 @@ public static partial class FramePacing
                 m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
             else
                 m.WriteU32(o + ObjSpeedOff, (uint)KeepCrashDelta(_ospeed, speedTo, Teleport, ref _crashFracSp));
+            PaceCrashWalkAccel(m, o, walkVx, walkVz, speedTo);
             m.WriteU32(o + ObjRotOff, (uint)KeepCrashAng(_orx, (int)m.ReadU32(o + ObjRotOff), ref _crashFracRX));
             if (_turnPaced)
                 _crashFracRY = 0;
@@ -622,7 +624,7 @@ public static partial class FramePacing
                 if ((statusA & FlagGroundLand) != 0 && vyTo > 0 && yTo > _oy + 0x100)
                     m.WriteU32(o + ObjStatusAOff, statusA & ~FlagGroundLand);
             }
-            RejectCrateEmbed(m);
+            RejectCrateEmbed(m, ground: true);
             RideAfterCrash(m);
 
             if (++_paceLog >= 90)
@@ -683,7 +685,13 @@ public static partial class FramePacing
         return penY > penX || penY > penZ;
     }
 
-    static bool CrashInCrateWall(IMemory m, int x, int y, int z)
+    static bool IsCrateWall(IMemory m, uint obj, bool pushersOnly)
+    {
+        if (!IsBoxOrPusherWall(m, obj)) return false;
+        return !pushersOnly || !TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeBox;
+    }
+
+    static bool CrashInCrateWall(IMemory m, int x, int y, int z, bool pushersOnly = false)
     {
         int x1 = x + (int)m.ReadU32(_obj + ObjBoundOff);
         int y1 = y + (int)m.ReadU32(_obj + ObjBoundOff + 4);
@@ -694,7 +702,7 @@ public static partial class FramePacing
 
         foreach (var kv in _lastBound)
         {
-            if (kv.Key == _obj || !IsBoxOrPusherWall(m, kv.Key)) continue;
+            if (kv.Key == _obj || !IsCrateWall(m, kv.Key, pushersOnly)) continue;
             BoundSnap s = kv.Value;
             if (CrateWallHit(x1, y1, z1, x2, y2, z2, s.X1, s.Y1, s.Z1, s.X2, s.Y2, s.Z2))
                 return true;
@@ -707,7 +715,7 @@ public static partial class FramePacing
         {
             uint slot = ObjectBoundsAddr + (uint)i * 28u;
             uint other = m.ReadU32(slot + 24);
-            if (other == _obj || !IsBoxOrPusherWall(m, other)) continue;
+            if (other == _obj || !IsCrateWall(m, other, pushersOnly)) continue;
             if (CrateWallHit(x1, y1, z1, x2, y2, z2,
                     (int)m.ReadU32(slot), (int)m.ReadU32(slot + 4), (int)m.ReadU32(slot + 8),
                     (int)m.ReadU32(slot + 12), (int)m.ReadU32(slot + 16), (int)m.ReadU32(slot + 20)))
@@ -725,8 +733,12 @@ public static partial class FramePacing
     /// the line cutting a crate corner: the PS1 stands on that corner too
     /// (N. Sanity Beach first crate, step down after the spin, tick 207).
     /// Restoring XZ there froze Crash every present until the pad turned.
+    /// On the ground a guest result on a crate corner is the game's own
+    /// StopAtWalls answer (2048-unit cells): restoring the start there froze
+    /// Crash beside the second crate after the first walk (#127, 60 FPS).
+    /// Pushers still count.
     /// </summary>
-    static void RejectCrateEmbed(IMemory m)
+    static void RejectCrateEmbed(IMemory m, bool ground = false)
     {
         if (CrashSpinning(m, _obj)) return;
         int x = (int)m.ReadU32(_obj + ObjTransOff);
@@ -736,6 +748,8 @@ public static partial class FramePacing
         if (!CrashInCrateWall(m, _ox, _oy, _oz))
         {
             if (!CrashInCrateWall(m, _guestX, _guestY, _guestZ))
+                return;
+            if (ground && !CrashInCrateWall(m, _guestX, _guestY, _guestZ, pushersOnly: true))
                 return;
             m.WriteU32(_obj + ObjTransOff, (uint)_ox);
             m.WriteU32(_obj + ObjTransOff + 8, (uint)_oz);
