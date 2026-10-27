@@ -1120,11 +1120,15 @@ public static partial class FramePacing
     /// SETs x = 0 once, over the stale trans of a reused pool slot (CoreLoop
     /// creates it under a handle, so no parent trans): dt/34 of that left
     /// PAUSE off-centre for the whole pause (#89).
+    /// Paused, GoolUpdateObjects(0) skips the world: x/z did not move, so
+    /// the whole vel*ticks read as a negative extra and half of it was
+    /// written back every present at 60 FPS. Crash's idle-juggle wumpa
+    /// parts (FruiC, ±10 m velx/z) drifted for the whole pause (#184).
     /// </summary>
     static void PaceExtraTrans(IMemory m)
     {
         if (!_haveObj || _crashObj || _solidObj || _frameTicks >= RefTicks) return;
-        if (IsHud(m, _obj)) return;
+        if (IsHud(m, _obj) || GamePaused(m)) return;
         try
         {
             int x = (int)m.ReadU32(_obj + ObjTransOff);
