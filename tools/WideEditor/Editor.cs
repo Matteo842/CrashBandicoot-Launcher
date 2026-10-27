@@ -326,7 +326,9 @@ sealed partial class Editor : IDisposable
                 {
                     var mat = L.MaterialOf(m, p);
                     var uv = L.UvsOf(m, p);
-                    bool hidden = _doc.Hidden.Contains((m.Name, p)) || RuntimeHidden(m, p);
+                    bool removed = _doc.Removed.Contains((m.Name, p));
+                    if (removed && !_showOff) continue;
+                    bool hidden = removed || _doc.Hidden.Contains((m.Name, p)) || RuntimeHidden(m, p);
                     var (info, clut) = Bits.Of(mat, (int)Kind.Retail, hidden, false, 0, m.Backdrop);
                     uint id = PickId(Kind.Retail, global + p);
                     for (int k = 0; k < 3; k++)

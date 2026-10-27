@@ -254,7 +254,11 @@ sealed partial class Editor
             case Tool.Select:
                 // With Ctrl or Shift a click always selects, even over the gizmo.
                 if (_hoverAxis >= 0 && !Ctrl && !Shift) StartGizmo(_hoverAxis, mouse);
-                else _drag = DragMode.ClickPending;
+                else
+                {
+                    _drag = DragMode.ClickPending;
+                    _clickPiece = ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) || Alt;
+                }
                 break;
             case Tool.Vertex:
                 if (_hoverVertex is { } hv) StartVertexDrag(hv.Tri, hv.K);
@@ -294,7 +298,7 @@ sealed partial class Editor
     void LeftRelease()
     {
         var mouse = ImGui.GetIO().MousePos;
-        if (_drag == DragMode.ClickPending) ClickSelect(_hoverId);
+        if (_drag == DragMode.ClickPending) ClickSelect(_hoverId, _clickPiece);
         else if (_drag == DragMode.Box) BoxSelect(_dragStart, mouse);
         _drag = DragMode.None;
         _moving.Clear();
@@ -303,7 +307,12 @@ sealed partial class Editor
 
     // ---- Selection ----
 
-    void ClickSelect(uint id)
+    bool _clickPiece;
+
+    /// <summary>A click takes one triangle; <paramref name="piece"/> (double click, Alt)
+    /// takes the whole piece: every automatic triangle made from the same polygon, or
+    /// the user's triangles made together.</summary>
+    void ClickSelect(uint id, bool piece = false)
     {
         var io = ImGui.GetIO();
         bool add = Shift, toggle = Ctrl;
@@ -313,19 +322,17 @@ sealed partial class Editor
             return;
         }
         var keys = new List<long> { Key(kind, index) };
-        // An automatic repair is many triangles made from one polygon (a skirt, a
-        // copy): a click takes all of them, Alt only the one under the mouse.
-        if (kind == Kind.Auto && !Alt)
+        if (kind == Kind.Auto && piece)
             foreach (int i in AutoPiece(index))
                 if (i != index) keys.Add(Key(Kind.Auto, i));
-        if (kind == Kind.User && !Alt && index < _doc.Tris.Count && _doc.Tris[index].Group != 0)
+        if (kind == Kind.User && piece && index < _doc.Tris.Count && _doc.Tris[index].Group != 0)
         {
             int g = _doc.Tris[index].Group;
             for (int i = 0; i < _doc.Tris.Count; i++)
                 if (i != index && _doc.Tris[i].Group == g) keys.Add(Key(Kind.User, i));
         }
         if (!add && !toggle) _sel.Clear();
-        bool remove = toggle && _sel.Contains(keys[0]);
+        bool remove = toggle && !piece && _sel.Contains(keys[0]);
         foreach (var k in keys)
             if (remove) _sel.Remove(k); else _sel.Add(k);
     }
@@ -638,18 +645,15 @@ sealed partial class Editor
     void DeleteSelection()
     {
         var idx = SelUser.OrderByDescending(i => i).ToList();
-        int autos = _sel.Count(k => KindOf(k) == Kind.Auto);
-        if (idx.Count == 0 && autos == 0)
-        {
-            if (_sel.Count > 0) Say("Gli originali del gioco non si eliminano: tasto destro > Nascondi nelle bande 16:9.");
-            return;
-        }
+        int autos = _sel.Count(k => KindOf(k) == Kind.Auto), retail = _sel.Count(k => KindOf(k) == Kind.Retail);
+        if (_sel.Count == 0) return;
         BeginChange();
         if (autos > 0) SetRepairsOff(true);
+        if (retail > 0) SetRemoved(true);
         foreach (int i in idx) _doc.Tris.RemoveAt(i);
         _sel.RemoveWhere(k => KindOf(k) == Kind.User);
         Changed();
-        Say($"{idx.Count + autos} triangoli eliminati.");
+        Say($"{idx.Count + autos + retail} triangoli eliminati.");
     }
 
     void SetHidden(bool hide)
@@ -660,6 +664,21 @@ sealed partial class Editor
             var (m, p) = RetailOf(IndexOf(key));
             if (hide) _doc.Hidden.Add((m.Name, p)); else _doc.Hidden.Remove((m.Name, p));
         }
+        _retailDirty = true;
+        Changed();
+    }
+
+    /// <summary>Original polygons removed everywhere (4:3 core too) or given back.</summary>
+    void SetRemoved(bool remove)
+    {
+        BeginChange();
+        foreach (var key in _sel.Where(k => KindOf(k) == Kind.Retail).ToList())
+        {
+            var (m, p) = RetailOf(IndexOf(key));
+            if (m.Backdrop) continue;
+            if (remove) _doc.Removed.Add((m.Name, p)); else _doc.Removed.Remove((m.Name, p));
+        }
+        if (remove && !_showOff) _sel.RemoveWhere(k => KindOf(k) == Kind.Retail);
         _retailDirty = true;
         Changed();
     }

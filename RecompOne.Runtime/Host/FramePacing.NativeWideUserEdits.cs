@@ -16,6 +16,7 @@ public static partial class FramePacing
     {
         public readonly List<NativeWideRepair> Triangles = [];
         public readonly List<int> Hidden = [];
+        public readonly HashSet<int> Removed = [];
         public readonly List<(int Polygon, Vector3 Center)> HiddenRepairs = [];
     }
 
@@ -100,6 +101,8 @@ public static partial class FramePacing
                 }
             if (mesh.TryGetProperty("hidden", out var hidden))
                 foreach (var h in hidden.EnumerateArray()) user.Hidden.Add(h.GetInt32());
+            if (mesh.TryGetProperty("removed", out var removed))
+                foreach (var r in removed.EnumerateArray()) user.Removed.Add(r.GetInt32());
             if (mesh.TryGetProperty("hiddenRepairs", out var off))
                 foreach (var h in off.EnumerateArray())
                 {
@@ -205,6 +208,63 @@ public static partial class FramePacing
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool AllowSetForegroundWindow(int processId);
+
+    // Removed polygons are gone everywhere, 4:3 core included: while the mesh is
+    // resident each one is collapsed onto its first corner in the WGEO polygon words
+    // (drawing only; collision lives elsewhere), so neither the game nor the side
+    // pass draws it. The original words are kept to undo it when the edit goes away.
+    sealed class NativeWideRemovedState
+    {
+        public int Version = -1;
+        public readonly Dictionary<int, (uint P0, uint P1)> Applied = [];
+    }
+    static readonly Dictionary<NativeWideSceneryKey, NativeWideRemovedState> _nativeWideRemoved = [];
+
+    static (uint P0, uint P1) NativeWideCollapsed((uint P0, uint P1) p)
+    {
+        uint a = (p.P1 >> 20) & 0xFFFu;
+        return ((p.P0 & ~(0xFFFu << 20)) | (a << 20), (p.P1 & ~(0xFFFu << 8)) | (a << 8));
+    }
+
+    static void NativeWideApplyRemoved(IMemory m, NativeWideWorld world)
+    {
+        if (world.PolyCount == 0 || (_nativeWideUserEdits.Count == 0 && _nativeWideRemoved.Count == 0)) return;
+        var key = NativeWideUserKey(m, world);
+        var removed = _nativeWideUserEdits.TryGetValue(key, out var user) && user.Removed.Count > 0 ? user.Removed : null;
+        _nativeWideRemoved.TryGetValue(key, out var state);
+        if (removed == null && state == null) return;
+        state ??= _nativeWideRemoved[key] = new NativeWideRemovedState();
+        if (state.Version != _nativeWideUserVersion)
+        {
+            state.Version = _nativeWideUserVersion;
+            foreach (var (poly, original) in state.Applied.ToArray())
+            {
+                if (removed != null && removed.Contains(poly)) continue;
+                uint address = world.Polygons + (uint)poly * 8u;
+                var collapsed = NativeWideCollapsed(original);
+                if (m.ReadU32(address) == collapsed.P0 && m.ReadU32(address + 4u) == collapsed.P1)
+                {
+                    m.WriteU32(address, original.P0);
+                    m.WriteU32(address + 4u, original.P1);
+                }
+                state.Applied.Remove(poly);
+            }
+        }
+        if (removed != null)
+            foreach (int poly in removed)
+            {
+                if ((uint)poly >= (uint)world.PolyCount) continue;
+                uint address = world.Polygons + (uint)poly * 8u;
+                uint p0 = m.ReadU32(address), p1 = m.ReadU32(address + 4u);
+                if (state.Applied.TryGetValue(poly, out var original) && NativeWideCollapsed(original) == (p0, p1)) continue;
+                // First time, or the mesh was paged in again from disc.
+                state.Applied[poly] = (p0, p1);
+                var collapsed = NativeWideCollapsed((p0, p1));
+                m.WriteU32(address, collapsed.P0);
+                m.WriteU32(address + 4u, collapsed.P1);
+            }
+        if (state.Applied.Count == 0) _nativeWideRemoved.Remove(key);
+    }
 
     static NativeWideSceneryKey NativeWideUserKey(IMemory m, NativeWideWorld world) =>
         new(m.ReadU32(Catalogs.Catalog.LevelIdAddr), m.ReadU32(world.Header), m.ReadU32(world.Header + 4),

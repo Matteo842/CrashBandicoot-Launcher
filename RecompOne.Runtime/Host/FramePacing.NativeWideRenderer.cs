@@ -481,6 +481,8 @@ public static partial class FramePacing
             // except in levels whose repairs suit every camera drawing the mesh.
             var repairs = NativeWideWithUserEdits(m, world, world.Neighbor && !NativeWideNeighborRepairs(m)
                 ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world));
+            // After the repairs: they are worked out from the authored polygons.
+            NativeWideApplyRemoved(m, world);
             foreach (var chunk in NativeWideRepairChunksOf(repairs))
             {
                 if (!NativeWideBoxTouchesSides(chunk.Min, chunk.Max, world, matrix, near, projection, screenX, screenY,

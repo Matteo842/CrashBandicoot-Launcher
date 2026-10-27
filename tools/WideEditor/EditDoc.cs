@@ -30,6 +30,8 @@ sealed class EditDoc
 {
     public List<UserTri> Tris = [];
     public HashSet<(string Mesh, int Poly)> Hidden = [];
+    // Original polygons removed everywhere, 4:3 core included.
+    public HashSet<(string Mesh, int Poly)> Removed = [];
     public List<HiddenRepair> HiddenRepairs = [];
     public int NextGroup = 1;
 
@@ -37,6 +39,7 @@ sealed class EditDoc
     {
         Tris = [.. Tris.Select(t => t.Clone())],
         Hidden = [.. Hidden],
+        Removed = [.. Removed],
         HiddenRepairs = [.. HiddenRepairs],
         NextGroup = NextGroup,
     };
@@ -48,11 +51,12 @@ sealed class EditDoc
         return false;
     }
 
-    public bool Empty => Tris.Count == 0 && Hidden.Count == 0 && HiddenRepairs.Count == 0;
+    public bool Empty => Tris.Count == 0 && Hidden.Count == 0 && Removed.Count == 0 && HiddenRepairs.Count == 0;
 
     public string ToJson(LevelData level)
     {
-        var names = Tris.Select(t => t.Mesh).Concat(Hidden.Select(h => h.Mesh)).Concat(HiddenRepairs.Select(h => h.Mesh))
+        var names = Tris.Select(t => t.Mesh).Concat(Hidden.Select(h => h.Mesh)).Concat(Removed.Select(h => h.Mesh))
+            .Concat(HiddenRepairs.Select(h => h.Mesh))
             .Where(level.MeshByName.ContainsKey).Distinct().OrderBy(n => n, StringComparer.Ordinal);
         using var stream = new MemoryStream();
         using (var w = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -100,6 +104,9 @@ sealed class EditDoc
                 w.WriteEndArray();
                 w.WriteStartArray("hidden");
                 foreach (var h in Hidden.Where(h => h.Mesh == name).OrderBy(h => h.Poly)) w.WriteNumberValue(h.Poly);
+                w.WriteEndArray();
+                w.WriteStartArray("removed");
+                foreach (var h in Removed.Where(h => h.Mesh == name).OrderBy(h => h.Poly)) w.WriteNumberValue(h.Poly);
                 w.WriteEndArray();
                 w.WriteStartArray("hiddenRepairs");
                 foreach (var h in HiddenRepairs.Where(h => h.Mesh == name))
@@ -164,6 +171,8 @@ sealed class EditDoc
                 }
             if (mesh.TryGetProperty("hidden", out var hidden))
                 foreach (var h in hidden.EnumerateArray()) doc.Hidden.Add((name, h.GetInt32()));
+            if (mesh.TryGetProperty("removed", out var removed))
+                foreach (var h in removed.EnumerateArray()) doc.Removed.Add((name, h.GetInt32()));
             if (mesh.TryGetProperty("hiddenRepairs", out var off))
                 foreach (var h in off.EnumerateArray())
                 {

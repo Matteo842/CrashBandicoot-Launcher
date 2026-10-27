@@ -141,7 +141,7 @@ sealed partial class Editor
         ImGui.EndDisabled();
 
         ImGui.SeparatorText("Strumento");
-        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: seleziona. Trascina nel vuoto: selezione a rettangolo.\nCtrl+clic: aggiunge o toglie un pezzo. Shift+clic: aggiunge. Alt+clic: un solo triangolo del pezzo.\nRettangolo con Shift o Ctrl: aggiunge, con Alt: toglie.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
+        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: un triangolo. Doppio clic: tutto il pezzo. Trascina nel vuoto: selezione a rettangolo.\nCtrl+clic: aggiunge o toglie un pezzo. Shift+clic: aggiunge. Alt+clic: tutto il pezzo.\nRettangolo con Shift o Ctrl: aggiunge, con Alt: toglie.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
         ToolButton(Tool.Vertex, "Muovi vertici", "Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
         ToolButton(Tool.Quad, "Nuovo quad (4 clic)", "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.");
         ToolButton(Tool.Triangle, "Nuovo triangolo (3 clic)", "3 clic: crea un triangolo con la texture del pennello, mappata come il triangolo d'origine.");
@@ -249,9 +249,9 @@ sealed partial class Editor
         }
         ImGui.Checkbox("Riparazioni automatiche", ref _showAuto);
         ImGui.SameLine();
-        if (ImGui.Checkbox("eliminate (rosse)", ref _showOff)) _autoDirty = true;
+        if (ImGui.Checkbox("eliminati (rossi)", ref _showOff)) _autoDirty = _retailDirty = true;
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Mostra in rosso le riparazioni automatiche che hai eliminato,\nper ripristinarle (tasto destro > Ripristina).");
+            ImGui.SetTooltip("Mostra in rosso quello che hai eliminato (automatici e originali),\nper ripristinarle (tasto destro > Ripristina).");
         ImGui.SameLine();
         ImGui.Checkbox("Mie", ref _showUser);
         if (ImGui.Checkbox("Colora automatiche (azzurro)", ref _tintAuto)) { }
@@ -374,6 +374,8 @@ sealed partial class Editor
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Crea una copia tua, uguale, da spostare/girare. L'originale resta.");
             if (retail > 0)
             {
+                if (ImGui.Button("Elimina originali (anche al centro) (Canc)")) SetRemoved(true);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Spariscono ovunque nel gioco, anche nel centro 4:3. Solo grafica: i muri restano solidi.");
                 if (ImGui.Button("Nascondi nelle bande 16:9")) SetHidden(true);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Il gioco non disegna più questi poligoni nelle bande laterali (al centro restano).");
                 ImGui.SameLine();
@@ -397,7 +399,8 @@ sealed partial class Editor
         return KindOf(key) switch
         {
             Kind.Retail when Valid(key) => $"Originale: mesh {RetailOf(i).Mesh.Name} poligono {RetailOf(i).Poly}"
-                + (_doc.Hidden.Contains((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [nascosto nelle bande da te]"
+                + (_doc.Removed.Contains((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [eliminato]"
+                    : _doc.Hidden.Contains((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [nascosto nelle bande da te]"
                     : RuntimeHidden(RetailOf(i).Mesh, RetailOf(i).Poly) ? "  [nascosto nelle bande dal codice del gioco]" : ""),
             Kind.Auto when Valid(key) => $"Automatico: mesh {_auto!.Tris[i].Mesh.Name} poligono {_auto.Tris[i].Poly} (n. {i})"
                 + (_doc.IsRepairHidden(_auto.Tris[i]) ? "  [disattivato]" : ""),
@@ -579,6 +582,14 @@ sealed partial class Editor
     void HiddenSection()
     {
         if (L == null) return;
+        ImGui.Text($"Originali eliminati ovunque: {_doc.Removed.Count}");
+        if (_doc.Removed.Count > 0 && ImGui.SmallButton("Ripristina tutti gli originali eliminati"))
+        {
+            PushUndo();
+            _doc.Removed.Clear();
+            _retailDirty = true;
+            Changed();
+        }
         ImGui.Text($"Originali nascosti nelle bande: {_doc.Hidden.Count}");
         foreach (var h in _doc.Hidden.OrderBy(h => h.Mesh).ThenBy(h => h.Poly).Take(200).ToList())
         {

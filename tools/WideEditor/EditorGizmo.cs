@@ -464,8 +464,17 @@ sealed partial class Editor
             }
             if (retail > 0)
             {
-                if (ImGui.MenuItem("Nascondi nelle bande 16:9")) SetHidden(true);
+                if (ImGui.MenuItem("Elimina originali (anche al centro 4:3)", "Canc")) SetRemoved(true);
+                if (_showOff && ImGui.MenuItem("Ripristina originali eliminati")) SetRemoved(false);
+                if (ImGui.MenuItem("Nascondi solo nelle bande 16:9")) SetHidden(true);
                 if (ImGui.MenuItem("Mostra nelle bande 16:9")) SetHidden(false);
+            }
+            if (_sel.Count == 1 && KindOf(_sel.First()) != Kind.Retail
+                && ImGui.MenuItem("Seleziona tutto il pezzo", "doppio clic"))
+            {
+                uint id = PickId(KindOf(_sel.First()), IndexOf(_sel.First()));
+                _sel.Clear();
+                ClickSelect(id, piece: true);
             }
             ImGui.Separator();
             if (ImGui.BeginMenu("Ruota"))
