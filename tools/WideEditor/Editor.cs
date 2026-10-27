@@ -431,10 +431,15 @@ sealed partial class Editor : IDisposable
             if (_userRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
     }
 
-    void DrawExtras()
+    /// <summary>Repairs and user triangles; those of backdrops (sky extensions) only
+    /// with <paramref name="backdrops"/>, since the game draws them under everything.</summary>
+    void DrawExtras() => DrawExtras(false);
+
+    void DrawExtras(bool backdrops)
     {
         foreach (var m in _drawMeshes)
         {
+            if (m.Backdrop != backdrops) continue;
             if (_showAuto && (!_gameView || OwnMesh(m) || _auto!.NeighbourRepairs) && _autoRange.TryGetValue(m, out var a))
                 _autoBuf!.Draw(a.Start, a.Count);
             if (_showUser && _userRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
@@ -469,6 +474,19 @@ sealed partial class Editor : IDisposable
         _gfx.State(tint, false, -1);
         _gfx.Depth(false, false);
         Passes(() => DrawRetail(true), depth: false);
+        // Sky extensions: no depth, under all scenery, like the game's backdrop prims
+        // (in the game view only in the side bands).
+        if (_gameView)
+        {
+            int cw = (int)MathF.Round(w * Camera.CoreFraction), cx = (w - cw) / 2;
+            foreach (var (x, bw) in new[] { (0, cx), (cx + cw, w - cx - cw) })
+            {
+                _gfx.Scissor(x, 0, bw, h);
+                Passes(() => DrawExtras(true), depth: false);
+            }
+            _gfx.NoScissor();
+        }
+        else Passes(() => DrawExtras(true), depth: false);
         _gfx.Depth(true, true);
 
         if (_gameView)
