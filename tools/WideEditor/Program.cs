@@ -16,7 +16,7 @@ var options = WindowOptions.Default with
 };
 var window = Window.Create(options);
 Editor? editor = null;
-window.Load += () => editor = new Editor(window);
+window.Load += () => editor = new Editor(window, args);
 window.Render += dt => editor?.Frame(dt);
 window.Closing += () =>
 {

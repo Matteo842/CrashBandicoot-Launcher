@@ -383,6 +383,8 @@ internal static class HostWindow
         }
         if (InputManager.ConsumeSessionMarker())
             RecompOne.Runtime.Diagnostics.SessionLog.Marker();
+        if (InputManager.ConsumeEditorKey())
+            FramePacing.OpenWideEditor();
         if (InputManager.ConsumeCheatMenuToggle())
         {
             if (PanelManager.Get<DevMenuPopup>() is { } dev)

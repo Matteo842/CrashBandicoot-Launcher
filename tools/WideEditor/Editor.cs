@@ -60,7 +60,7 @@ sealed partial class Editor : IDisposable
     string? _prefsJson;
     double _prefsCheck;
     float _text = 1;
-    bool _follow, _markHidden = true, _ghostCore = true;
+    bool _follow, _markHidden = true, _ghostCore = true, _showOff;
     Zone? _zone;
     bool _lockZone;
     bool _gameView = true, _void = true, _showAuto = true, _showUser = true, _tintAuto, _tintUser = true;
@@ -73,8 +73,10 @@ sealed partial class Editor : IDisposable
     Vector4 _hoverPos;
     double _time;
 
-    public Editor(IWindow window)
+    public Editor(IWindow window, string[] args)
     {
+        int gotoArg = Array.IndexOf(args, "--goto");
+        if (gotoArg >= 0 && gotoArg + 1 < args.Length) _gotoFile = args[gotoArg + 1];
         _window = window;
         _gl = GL.GetApi(window);
         var input = window.CreateInput();
@@ -353,8 +355,10 @@ sealed partial class Editor : IDisposable
                     for (int i = range.Start; i < range.Start + range.Count; i++)
                     {
                         var t = _auto.Tris[i];
+                        bool off = _doc.IsRepairHidden(t);
+                        if (off && !_showOff) continue;
                         var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
-                        var (info, clut) = Bits.Of(mat, (int)Kind.Auto, _doc.IsRepairHidden(t), t.Behind, t.Rank, m.Backdrop);
+                        var (info, clut) = Bits.Of(mat, (int)Kind.Auto, off, t.Behind, t.Rank, m.Backdrop);
                         uint id = PickId(Kind.Auto, i);
                         foreach (var v in new[] { t.A, t.B, t.C })
                             list.Add(new GpuVertex
@@ -550,6 +554,7 @@ sealed partial class Editor : IDisposable
 
         try
         {
+            PollGoto();
             switch (_screen)
             {
                 case Screen.Pick: PickScreen(); break;
@@ -667,7 +672,8 @@ sealed partial class Editor : IDisposable
         _speed = Math.Clamp(p.Speed, 0.1f, 5f);
         _snapVerts = p.SnapVerts; _weld = p.Weld; _grid = Math.Max(p.Grid, 0); _rotStep = Math.Max(p.RotStep, 0);
         _newBehind = p.NewBehind; _pickRetail = p.PickRetail; _pickAuto = p.PickAuto; _pickUser = p.PickUser;
-        _gizmo = Enum.TryParse<GizmoMode>(p.Gizmo, out var g) ? g : GizmoMode.Move;
+        _gizmo = Enum.TryParse<GizmoMode>(p.GizmoMode, out var g) ? g : GizmoMode.All;
+        _showOff = p.ShowOff;
         _markHidden = p.MarkHidden;
         _ghostCore = p.GhostCore;
     }
@@ -682,7 +688,8 @@ sealed partial class Editor : IDisposable
         p.TintAuto = _tintAuto; p.TintUser = _tintUser; p.Wire = _wire; p.AllMeshes = _allMeshes; p.Speed = _speed;
         p.SnapVerts = _snapVerts; p.Weld = _weld; p.Grid = _grid; p.RotStep = _rotStep;
         p.NewBehind = _newBehind; p.PickRetail = _pickRetail; p.PickAuto = _pickAuto; p.PickUser = _pickUser;
-        p.Gizmo = _gizmo.ToString();
+        p.GizmoMode = _gizmo.ToString();
+        p.ShowOff = _showOff;
         p.MarkHidden = _markHidden;
         p.GhostCore = _ghostCore;
         if (L != null && _screen == Screen.Edit)

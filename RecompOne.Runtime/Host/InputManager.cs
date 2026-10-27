@@ -36,6 +36,7 @@ internal static unsafe class InputManager
     static bool _topBarToggle;
     static bool _fullscreenToggle;
     static bool _sessionMarker;
+    static bool _editorKey;
     static bool _cheatMenuToggle;
     static bool _pauseMenuToggle;
     static int _frameRateIndex = -1;
@@ -50,6 +51,8 @@ internal static unsafe class InputManager
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
     public static bool ConsumeFullscreenToggle(){ var v = _fullscreenToggle; _fullscreenToggle = false; return v; }
     public static bool ConsumeSessionMarker() { var v = _sessionMarker; _sessionMarker = false; return v; }
+    /// <summary>F12 held: open the Wide Editor (tools/WideEditor) at the current camera.</summary>
+    public static bool ConsumeEditorKey() { var v = _editorKey; _editorKey = false; return v; }
     public static bool ConsumeCheatMenuToggle() { var v = _cheatMenuToggle; _cheatMenuToggle = false; return v; }
     public static bool ConsumePauseMenuToggle() { var v = _pauseMenuToggle; _pauseMenuToggle = false; return v; }
     public static bool TryConsumeFrameRateIndex(out int index)
@@ -152,6 +155,7 @@ internal static unsafe class InputManager
         PollPauseMenuHotkey();
         PollFrameRateHotkeys();
         PollSaveStateHotkeys();
+        PollEditorHotkey();
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
@@ -164,6 +168,8 @@ internal static unsafe class InputManager
     // Edge-detect F1 / F11 / Alt+Enter / cheat menu / Esc / 1–5 via GetAsyncKeyState so toggles always work.
     static bool _asyncF1;
     static bool _asyncF11;
+    static long _editorKeySince = -1;
+    static bool _editorKeyFired;
     static bool _asyncAltEnter;
     static bool _asyncCheatMenu;
     static bool _asyncPauseMenu;
@@ -179,6 +185,28 @@ internal static unsafe class InputManager
     const int VkEscape = 0x1B;
     const int Vk1 = 0x31;
     const int VkNumpad1 = 0x61;
+
+    /// <summary>F12 held for 1.5 s opens the Wide Editor: a tap (macros, stray
+    /// presses) does nothing, and holding on fires once.</summary>
+    static void PollEditorHotkey()
+    {
+        bool down = OperatingSystem.IsWindows()
+            ? AsyncDown(VkF11 + 1) && HostWindow.IsInputActive
+            : _keysDown.Contains(Key.F12);
+        long now = Environment.TickCount64;
+        if (!down)
+        {
+            _editorKeySince = -1;
+            _editorKeyFired = false;
+            return;
+        }
+        if (_editorKeySince < 0) _editorKeySince = now;
+        if (!_editorKeyFired && now - _editorKeySince >= 1500)
+        {
+            _editorKey = true;
+            _editorKeyFired = true;
+        }
+    }
 
     static void PollFullscreenHotkeys()
     {

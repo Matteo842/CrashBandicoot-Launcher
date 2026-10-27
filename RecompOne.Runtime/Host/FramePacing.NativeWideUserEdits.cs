@@ -129,6 +129,11 @@ public static partial class FramePacing
         }
         if (!_nativeWideEditorOpen || now < _nativeWideEditorWrite) return;
         _nativeWideEditorWrite = now + 100;
+        NativeWideWriteCamera(m, Path.Combine(dir, "camera.json"));
+    }
+
+    static void NativeWideWriteCamera(IMemory m, string file)
+    {
         uint zoneEntry = m.ReadU32(CamZoneAddr);
         uint zone = NativeWideGuestPointer(zoneEntry) ? m.ReadU32(zoneEntry + 4) : 0;
         var text = new System.Text.StringBuilder();
@@ -142,12 +147,64 @@ public static partial class FramePacing
         text.Append("]}");
         try
         {
-            string temp = Path.Combine(dir, "camera.tmp");
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            string temp = file + ".tmp";
             File.WriteAllText(temp, text.ToString());
-            File.Move(temp, Path.Combine(dir, "camera.json"), overwrite: true);
+            File.Move(temp, file, overwrite: true);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
+
+    /// <summary>
+    /// F12 held for 1.5 s (development only): opens the Wide Editor at the camera on screen. The
+    /// camera goes to WideEdits/editor_goto.json; an open editor picks it up and comes
+    /// to the front, otherwise tools/WideEditor's build is started with it. Players
+    /// have no editor next to the game, so nothing happens for them.
+    /// </summary>
+    public static void OpenWideEditor()
+    {
+        if (Runtime.Mem is not { } m) return;
+        string dir = Path.Combine(AppContext.BaseDirectory, "WideEdits");
+        string request = Path.Combine(dir, "editor_goto.json");
+        bool open = File.Exists(Path.Combine(dir, "editor_open"));
+        string? exe = open ? null : NativeWideEditorExe();
+        if (!open && exe == null)
+        {
+            PaceLog("wide editor: tools/WideEditor build not found");
+            return;
+        }
+        NativeWideWriteCamera(m, request);
+        try
+        {
+            if (OperatingSystem.IsWindows()) AllowSetForegroundWindow(-1);
+            if (exe != null)
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe)
+                {
+                    ArgumentList = { "--goto", request },
+                    WorkingDirectory = Path.GetDirectoryName(exe)!,
+                    UseShellExecute = false,
+                });
+            PaceLog($"wide editor: {(exe != null ? "started" : "jump")} level={m.ReadU32(Catalogs.Catalog.LevelIdAddr)}");
+        }
+        catch (Exception e) when (e is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            PaceLog($"wide editor: {e.Message}");
+        }
+    }
+
+    static string? NativeWideEditorExe()
+    {
+        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+            foreach (var config in new[] { "Release", "Debug" })
+            {
+                string exe = Path.Combine(d.FullName, "tools", "WideEditor", "bin", config, "net10.0", "WideEditor.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        return null;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool AllowSetForegroundWindow(int processId);
 
     static NativeWideSceneryKey NativeWideUserKey(IMemory m, NativeWideWorld world) =>
         new(m.ReadU32(Catalogs.Catalog.LevelIdAddr), m.ReadU32(world.Header), m.ReadU32(world.Header + 4),

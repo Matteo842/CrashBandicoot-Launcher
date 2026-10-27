@@ -187,7 +187,7 @@ sealed partial class Editor
         ImGui.Checkbox("Miei", ref _pickUser);
 
         ImGui.SeparatorText("Comandi");
-        ImGui.TextWrapped("Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nW / E / R: sposta / ruota / scala.\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, Esc annulla.");
+        ImGui.TextWrapped("Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nW / E / R: sposta / ruota / scala.\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, T sposta+ruota, Esc annulla.");
         ImGui.End();
     }
 
@@ -248,6 +248,10 @@ sealed partial class Editor
                 ImGui.SetTooltip("Rosso = il gioco NON lo disegna nelle bande 16:9.\nAl centro 4:3 lo disegna comunque (lì non si può togliere).");
         }
         ImGui.Checkbox("Riparazioni automatiche", ref _showAuto);
+        ImGui.SameLine();
+        if (ImGui.Checkbox("eliminate (rosse)", ref _showOff)) _autoDirty = true;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Mostra in rosso le riparazioni automatiche che hai eliminato,\nper ripristinarle (tasto destro > Ripristina).");
         ImGui.SameLine();
         ImGui.Checkbox("Mie", ref _showUser);
         if (ImGui.Checkbox("Colora automatiche (azzurro)", ref _tintAuto)) { }
@@ -371,9 +375,9 @@ sealed partial class Editor
             }
             if (auto > 0)
             {
-                if (ImGui.Button("Disattiva automatici")) SetRepairsOff(true);
+                if (ImGui.Button("Elimina automatici (Canc)")) SetRepairsOff(true);
                 ImGui.SameLine();
-                if (ImGui.Button("Riattiva")) SetRepairsOff(false);
+                if (ImGui.Button("Ripristina")) SetRepairsOff(false);
                 if (ImGui.Button("Rendi modificabili (sostituisci)", new Vector2(-1, 0))) CopyAsMine(true);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Disattiva questi automatici e ne crea una copia tua uguale da sistemare.");
             }
@@ -589,8 +593,8 @@ sealed partial class Editor
                 Changed();
             }
         }
-        ImGui.Text($"Automatici disattivati: {_doc.HiddenRepairs.Count}");
-        if (_doc.HiddenRepairs.Count > 0 && ImGui.SmallButton("Riattiva tutti"))
+        ImGui.Text($"Automatici eliminati: {_doc.HiddenRepairs.Count}");
+        if (_doc.HiddenRepairs.Count > 0 && ImGui.SmallButton("Ripristina tutti"))
         {
             PushUndo();
             _doc.HiddenRepairs.Clear();

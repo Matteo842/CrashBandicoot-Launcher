@@ -7,12 +7,13 @@ using ImGuiNET;
 
 namespace WideEditor;
 
-enum GizmoMode { Move, Rotate, Scale }
+enum GizmoMode { All, Move, Rotate, Scale }
 
 sealed partial class Editor
 {
     static readonly Vector3[] Axes = [Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ];
-    GizmoMode _gizmo = GizmoMode.Move;
+    GizmoMode _gizmo = GizmoMode.All;
+    int _handle;
     float _rotStep = 15, _angle0, _angleNow, _scale0;
     Vector2 _pivotScreen0;
     uint _ctxHover;
@@ -51,42 +52,45 @@ sealed partial class Editor
         return pts;
     }
 
-    /// <summary>Handle under the mouse: 0-2 axis (or ring), 3 centre, 4-6 plane with that normal.</summary>
+    // Handles: 0-2 move along an axis, 3 move with the screen, 4-6 move on the plane with
+    // that normal, 10-12 rotate about an axis, 20-22 scale along an axis, 23 scale all.
+    bool GizmoMoves => _gizmo is GizmoMode.Move or GizmoMode.All;
+    bool GizmoRotates => _gizmo is GizmoMode.Rotate or GizmoMode.All;
+    float RingRadius(float len) => _gizmo == GizmoMode.All ? len * 1.3f : len * 0.85f;
+
     int GizmoHit(Vector2 mouse)
     {
         var pivot = SelPivotAll();
         if (!_cam.Project(pivot, _view, out var ps)) return -1;
-        float len = GizmoLength(pivot), tol = 8 * _ui;
-        if (_gizmo != GizmoMode.Rotate && Math.Abs(mouse.X - ps.X) < 10 * _ui && Math.Abs(mouse.Y - ps.Y) < 10 * _ui) return 3;
+        float len = GizmoLength(pivot), best = 8 * _ui;
         int hit = -1;
-        float best = tol;
-        if (_gizmo == GizmoMode.Rotate)
-        {
-            for (int a = 0; a < 3; a++)
-            {
-                var ring = Ring(pivot, a, len * 0.85f);
-                for (int i = 0; i + 1 < ring.Length; i++)
-                    if (_cam.Project(ring[i], _view, out var s0) && _cam.Project(ring[i + 1], _view, out var s1))
-                    {
-                        float d = SegmentDistance(mouse, s0, s1);
-                        if (d < best) { best = d; hit = a; }
-                    }
-            }
-            return hit;
-        }
-        if (_gizmo == GizmoMode.Move)
+        if (_gizmo != GizmoMode.Rotate && Math.Abs(mouse.X - ps.X) < 10 * _ui && Math.Abs(mouse.Y - ps.Y) < 10 * _ui)
+            return GizmoMoves ? 3 : 23;
+        if (GizmoMoves)
             for (int n = 0; n < 3; n++)
             {
                 var (u, v) = PlaneAxes(n);
                 if (_cam.Project(pivot + (u + v) * len * 0.3f, _view, out var pc) && Vector2.Distance(pc, mouse) < 11 * _ui)
                     return 4 + n;
             }
-        for (int a = 0; a < 3; a++)
-        {
-            if (!_cam.Project(pivot + Axes[a] * len, _view, out var pe)) continue;
-            float d = SegmentDistance(mouse, ps, pe);
-            if (d < best) { best = d; hit = a; }
-        }
+        if (_gizmo != GizmoMode.Rotate)
+            for (int a = 0; a < 3; a++)
+            {
+                if (!_cam.Project(pivot + Axes[a] * len, _view, out var pe)) continue;
+                float d = SegmentDistance(mouse, ps, pe);
+                if (d < best) { best = d; hit = GizmoMoves ? a : 20 + a; }
+            }
+        if (GizmoRotates)
+            for (int a = 0; a < 3; a++)
+            {
+                var ring = Ring(pivot, a, RingRadius(len));
+                for (int i = 0; i + 1 < ring.Length; i++)
+                    if (_cam.Project(ring[i], _view, out var s0) && _cam.Project(ring[i + 1], _view, out var s1))
+                    {
+                        float d = SegmentDistance(mouse, s0, s1);
+                        if (d < best) { best = d; hit = 10 + a; }
+                    }
+            }
         return hit;
     }
 
@@ -164,29 +168,32 @@ sealed partial class Editor
             }
         _pivot0 = SelPivot();
         _cam.Project(_pivot0, _view, out _pivotScreen0);
-        _axis = handle;
-        switch (_gizmo)
+        _handle = handle;
+        switch (handle)
         {
-            case GizmoMode.Move when handle < 3:
+            case < 3:
+                _axis = handle;
                 _s0 = AxisParam(mouse, Axes[handle]);
                 _drag = DragMode.Axis;
                 break;
-            case GizmoMode.Move when handle == 3:
+            case 3:
                 _hit0 = PlaneHit(mouse, _pivot0, _cam.Forward);
                 _drag = DragMode.Plane;
                 break;
-            case GizmoMode.Move:
+            case < 10:
                 _axis = handle - 4;
                 _hit0 = PlaneHit(mouse, _pivot0, Axes[_axis]);
                 _drag = DragMode.PlaneAxis;
                 break;
-            case GizmoMode.Rotate:
+            case < 20:
+                _axis = handle - 10;
                 _angle0 = MathF.Atan2(mouse.Y - _pivotScreen0.Y, mouse.X - _pivotScreen0.X);
                 _angleNow = 0;
                 _drag = DragMode.Rotate;
                 break;
             default:
-                _scale0 = handle < 3 ? AxisParam(mouse, Axes[handle]) : Math.Max(Vector2.Distance(mouse, _pivotScreen0), 1);
+                _axis = handle - 20;
+                _scale0 = _axis < 3 ? AxisParam(mouse, Axes[_axis]) : Math.Max(Vector2.Distance(mouse, _pivotScreen0), 1);
                 if (MathF.Abs(_scale0) < 1e-3f) _scale0 = 1e-3f;
                 _drag = DragMode.Scale;
                 break;
@@ -270,27 +277,26 @@ sealed partial class Editor
         uint yellow = Col(1, 1, 0.3f);
         uint[] colours = [Col(1, 0.25f, 0.25f), Col(0.3f, 1, 0.3f), Col(0.35f, 0.55f, 1)];
         bool dragging = _drag is DragMode.Axis or DragMode.Plane or DragMode.PlaneAxis or DragMode.Rotate or DragMode.Scale;
-        bool Hot(int handle) => dragging
-            ? handle == (_drag == DragMode.PlaneAxis ? _axis + 4 : _drag == DragMode.Plane ? 3 : _axis)
-            : _hoverAxis == handle;
+        bool Hot(int handle) => dragging ? handle == _handle : _hoverAxis == handle;
         string[] names = ["X", "Y", "Z"];
 
-        if (_gizmo == GizmoMode.Rotate)
-        {
+        if (GizmoRotates)
             for (int a = 0; a < 3; a++)
             {
-                var ring = Ring(pivot, a, len * 0.85f);
-                uint c = Hot(a) ? yellow : colours[a];
+                var ring = Ring(pivot, a, RingRadius(len));
+                uint c = Hot(10 + a) ? yellow : colours[a];
                 for (int i = 0; i + 1 < ring.Length; i++)
                     if (_cam.Project(ring[i], _view, out var s0) && _cam.Project(ring[i + 1], _view, out var s1))
-                        dl.AddLine(s0, s1, c, Hot(a) ? w * 1.4f : w);
+                        dl.AddLine(s0, s1, c, Hot(10 + a) ? w * 1.4f : w * 0.8f);
             }
-            if (_drag == DragMode.Rotate)
-                dl.AddText(ps + new Vector2(14, -24) * _ui, yellow, $"{names[_axis]} {_angleNow:0.#}°");
+        if (_drag == DragMode.Rotate)
+            dl.AddText(ps + new Vector2(14, -24) * _ui, yellow, $"{names[_axis]} {_angleNow:0.#}°");
+        if (_gizmo == GizmoMode.Rotate)
+        {
             dl.AddCircleFilled(ps, 4 * _ui, Col(1, 1, 1, 0.8f));
             return;
         }
-        if (_gizmo == GizmoMode.Move)
+        if (GizmoMoves)
             for (int n = 0; n < 3; n++)
             {
                 var (u, v) = PlaneAxes(n);
@@ -306,22 +312,23 @@ sealed partial class Editor
         for (int a = 0; a < 3; a++)
         {
             if (!_cam.Project(pivot + Axes[a] * len, _view, out var pe)) continue;
-            uint c = Hot(a) ? yellow : colours[a];
-            dl.AddLine(ps, pe, c, Hot(a) ? w * 1.4f : w);
+            int handle = GizmoMoves ? a : 20 + a;
+            uint c = Hot(handle) ? yellow : colours[a];
+            dl.AddLine(ps, pe, c, Hot(handle) ? w * 1.4f : w);
             var dir = pe - ps;
             if (dir.LengthSquared() > 1)
             {
                 dir = Vector2.Normalize(dir);
                 var side = new Vector2(-dir.Y, dir.X);
                 float head = 14 * _ui;
-                if (_gizmo == GizmoMode.Move)
+                if (GizmoMoves)
                     dl.AddTriangleFilled(pe + dir * head, pe + side * head * 0.45f, pe - side * head * 0.45f, c);
                 else
                     dl.AddRectFilled(pe - new Vector2(6 * _ui), pe + new Vector2(6 * _ui), c);
             }
             dl.AddText(pe + new Vector2(10, -10) * _ui, colours[a], names[a]);
         }
-        bool centre = Hot(3);
+        bool centre = Hot(GizmoMoves ? 3 : 23);
         dl.AddRectFilled(ps - new Vector2(8 * _ui), ps + new Vector2(8 * _ui), centre ? Col(1, 1, 0.3f, 0.9f) : Col(1, 1, 1, 0.6f));
         if (_drag == DragMode.Scale) dl.AddText(ps + new Vector2(14, -24) * _ui, yellow, $"{_angleNow:0}%");
     }
@@ -343,20 +350,19 @@ sealed partial class Editor
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(help);
             ImGui.SameLine();
         }
+        Mode(GizmoMode.All, "Sposta + ruota (T)", "Frecce e quadratini spostano, gli anelli esterni ruotano.");
         Mode(GizmoMode.Move, "Sposta (W)", "Frecce: lungo un asse. Quadratini: su un piano. Quadrato centrale: parallelo allo schermo.");
         Mode(GizmoMode.Rotate, "Ruota (E)", "Trascina un anello: ruota attorno a quell'asse.");
         Mode(GizmoMode.Scale, "Scala (R)", "Cubetti: scala lungo un asse. Quadrato centrale: scala tutto.");
-        if (_gizmo == GizmoMode.Rotate)
+        ImGui.SetNextItemWidth(60 * S);
+        ImGui.DragFloat("griglia", ref _grid, 1, 0, 2000, "%.0f");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Passo dello spostamento (0 = libero)");
+        if (GizmoRotates)
         {
-            ImGui.SetNextItemWidth(70 * S);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(60 * S);
             ImGui.DragFloat("passo °", ref _rotStep, 0.5f, 0, 90, "%.0f");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0 = rotazione libera");
-        }
-        else
-        {
-            ImGui.SetNextItemWidth(70 * S);
-            ImGui.DragFloat("griglia", ref _grid, 1, 0, 2000, "%.0f");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Passo dello spostamento (0 = libero)");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Passo della rotazione (0 = libera)");
         }
         ImGui.End();
     }
@@ -398,9 +404,9 @@ sealed partial class Editor
             if (user > 0 && ImGui.MenuItem("Elimina", "Canc")) DeleteSelection();
             if (auto > 0)
             {
+                if (ImGui.MenuItem("Elimina automatici", "Canc")) SetRepairsOff(true);
+                if (_showOff && ImGui.MenuItem("Ripristina automatici eliminati")) SetRepairsOff(false);
                 if (ImGui.MenuItem("Rendi modificabili")) EnsureEditable();
-                if (ImGui.MenuItem("Disattiva automatici")) SetRepairsOff(true);
-                if (ImGui.MenuItem("Riattiva automatici")) SetRepairsOff(false);
             }
             if (retail > 0)
             {

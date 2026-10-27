@@ -146,6 +146,7 @@ sealed partial class Editor
             if (ImGui.IsKeyPressed(ImGuiKey.W)) _gizmo = GizmoMode.Move;
             if (ImGui.IsKeyPressed(ImGuiKey.E)) _gizmo = GizmoMode.Rotate;
             if (ImGui.IsKeyPressed(ImGuiKey.R)) _gizmo = GizmoMode.Scale;
+            if (ImGui.IsKeyPressed(ImGuiKey.T)) _gizmo = GizmoMode.All;
         }
 
         // Camera: right drag looks, middle drag pans, wheel flies toward the mouse.
@@ -623,15 +624,23 @@ sealed partial class Editor
         Say($"{made.Count} triangoli copiati come tuoi: trascina le frecce per spostarli.");
     }
 
+    /// <summary>Deletes the user's triangles and switches off automatic repairs (they are
+    /// made by the game's code every time, so "deleting" one means switching it off).</summary>
     void DeleteSelection()
     {
         var idx = SelUser.OrderByDescending(i => i).ToList();
-        if (idx.Count == 0) return;
-        PushUndo();
+        int autos = _sel.Count(k => KindOf(k) == Kind.Auto);
+        if (idx.Count == 0 && autos == 0)
+        {
+            if (_sel.Count > 0) Say("Gli originali del gioco non si eliminano: tasto destro > Nascondi nelle bande 16:9.");
+            return;
+        }
+        BeginChange();
+        if (autos > 0) SetRepairsOff(true);
         foreach (int i in idx) _doc.Tris.RemoveAt(i);
         _sel.RemoveWhere(k => KindOf(k) == Kind.User);
         Changed();
-        Say($"{idx.Count} triangoli eliminati.");
+        Say($"{idx.Count + autos} triangoli eliminati.");
     }
 
     void SetHidden(bool hide)
@@ -648,7 +657,7 @@ sealed partial class Editor
 
     void SetRepairsOff(bool off)
     {
-        PushUndo();
+        BeginChange();
         foreach (var key in _sel.Where(k => KindOf(k) == Kind.Auto))
         {
             var t = _auto!.Tris[IndexOf(key)];
@@ -658,6 +667,7 @@ sealed partial class Editor
                 _doc.HiddenRepairs.RemoveAll(h => h.Poly == t.Poly && h.Mesh == t.Mesh.Name
                     && Vector3.DistanceSquared(h.Center, t.Center) < 4);
         }
+        if (off && !_showOff) _sel.RemoveWhere(k => KindOf(k) == Kind.Auto);
         _autoDirty = true;
         Changed();
     }
