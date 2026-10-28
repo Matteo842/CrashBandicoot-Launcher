@@ -380,7 +380,7 @@ sealed partial class Editor
                 if (ImGui.Button("Metti texture del pennello sull'originale")) SetRetexture(true);
                 ImGui.EndDisabled();
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip("Cambia la texture del poligono del gioco: si vede ovunque, anche al centro 4:3.\nIl pennello deve venire dalla stessa mesh. I colori dei vertici restano quelli dell'originale.");
+                    ImGui.SetTooltip("Cambia la texture del poligono del gioco: si vede ovunque, anche al centro 4:3.\nIl pennello deve venire dalla stessa mesh. I colori dei vertici restano quelli dell'originale.\nCon i 2 triangoli di un quad selezionati mette le due metà della texture, girate come sul pennello.");
                 if (ImGui.Button("Gira angoli##retex")) CornerUvs(false);
                 ImGui.SameLine();
                 if (ImGui.Button("Texture originale##retex")) SetRetexture(false);
@@ -656,13 +656,29 @@ sealed partial class Editor
             if (_hoverPos.W > 0.5f) hover += $"   ({_hoverPos.X:0}, {_hoverPos.Y:0}, {_hoverPos.Z:0})";
         }
         ImGui.Text($"Zona {_zone?.Name ?? "-"}   |   {hover}");
-        if (_status.Length > 0 && _time - _statusTime < 8)
+        bool longStatus = false;
+        if (_status.Length > 0 && _time - _statusTime < (_status.Length > 120 ? 20 : 8))
         {
             ImGui.SameLine(Math.Max(io.DisplaySize.X * 0.55f, ImGui.GetCursorPosX() + 20));
-            ImGui.TextColored(new Vector4(1, 0.85f, 0.4f, 1), _status);
+            longStatus = ImGui.CalcTextSize(_status).X > io.DisplaySize.X - ImGui.GetCursorPosX() - 16;
+            if (!longStatus) ImGui.TextColored(new Vector4(1, 0.85f, 0.4f, 1), _status);
         }
         ImGui.End();
         ImGui.PopStyleVar();
+        if (longStatus)
+        {
+            // Too long for the bar (warnings): wrapped in a box just above it.
+            float width = io.DisplaySize.X * 0.45f;
+            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - width - 8, io.DisplaySize.Y - StatusHeight - 4),
+                ImGuiCond.Always, new Vector2(0, 1));
+            ImGui.SetNextWindowSize(new Vector2(width, 0));
+            ImGui.Begin("##longstatus", ImGuiWindowFlags.NoDecoration
+                | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoSavedSettings);
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.85f, 0.4f, 1));
+            ImGui.TextWrapped(_status);
+            ImGui.PopStyleColor();
+            ImGui.End();
+        }
     }
 
     void LeavePopup()

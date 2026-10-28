@@ -720,27 +720,182 @@ sealed partial class Editor
     }
 
     /// <summary>Selected original polygons drawn with the brush texture (same mesh only:
-    /// texture tables are per mesh), or given back their own.</summary>
+    /// texture tables are per mesh), or given back their own. Two selected originals forming
+    /// a quad take the two halves of the brush's tile (the brush polygon and the one sharing
+    /// its diagonal), each turned so the texture runs the way it does on the brush.</summary>
     void SetRetexture(bool on)
     {
-        var retail = _sel.Where(k => KindOf(k) == Kind.Retail).Select(k => RetailOf(IndexOf(k))).ToList();
+        var retail = _sel.Where(k => KindOf(k) == Kind.Retail).Select(k => RetailOf(IndexOf(k))).Distinct().ToList();
         if (retail.Count == 0) return;
-        if (on)
+        if (!on)
         {
-            if (_brush == null) { Say("Prima prendi un pennello col contagocce."); return; }
-            if (retail.Any(r => r.Mesh.Name != _brush.Mesh))
+            BeginChange();
+            foreach (var (m, p) in retail) _doc.Retex.Remove((m.Name, p));
+            _retailDirty = true;
+            Changed();
+            Say("Texture originale rimessa.");
+            return;
+        }
+        if (_brush == null) { Say("Prima prendi un pennello col contagocce."); return; }
+        if (retail.Any(r => r.Mesh.Name != _brush.Mesh))
+        {
+            Say($"Il pennello deve venire dalla stessa mesh ({retail[0].Mesh.Name}): ogni mesh ha le sue texture. "
+                + "Prendilo col contagocce da un poligono di quella mesh.");
+            return;
+        }
+        var mesh = retail[0].Mesh;
+        int source = _brush.Poly;
+        if ((uint)source >= (uint)mesh.PolyCount || !L!.MaterialOf(mesh, source).Textured)
+        {
+            Say("Il pennello non ha una texture del gioco utilizzabile.");
+            return;
+        }
+        int partner = TilePartner(mesh, source);
+        var axes = TexelAxes([mesh.Corner(source, 0), mesh.Corner(source, 1), mesh.Corner(source, 2)], L.UvsOf(mesh, source));
+        var todo = retail.Select(r => r.Poly).ToList();
+        var result = new Dictionary<int, (int Source, int Turn)>();
+        int quads = 0;
+        while (todo.Count > 0)
+        {
+            int t1 = todo[0];
+            todo.RemoveAt(0);
+            if (partner >= 0)
             {
-                Say($"Il pennello deve venire dalla stessa mesh ({retail[0].Mesh.Name}): ogni mesh ha le sue texture.");
-                return;
+                int t2 = todo.FirstOrDefault(t => SharedCorners(mesh, t1, mesh, t).Count == 2 && Coplanar(mesh, t1, t), -1);
+                if (t2 >= 0 && QuadRetexture(mesh, t1, t2, source, partner, axes) is { } pair)
+                {
+                    todo.Remove(t2);
+                    result[t1] = pair.A;
+                    result[t2] = pair.B;
+                    quads++;
+                    continue;
+                }
             }
+            result[t1] = (source, BestTurn(mesh, t1, source, axes));
         }
         BeginChange();
-        foreach (var (m, p) in retail)
-            if (on) _doc.Retex[(m.Name, p)] = (_brush!.Poly, 0);
-            else _doc.Retex.Remove((m.Name, p));
+        foreach (var (p, r) in result) _doc.Retex[(mesh.Name, p)] = r;
         _retailDirty = true;
         Changed();
-        Say(on ? "Texture cambiata sugli originali: vale anche al centro 4:3. \"Gira angoli\" la gira." : "Texture originale rimessa.");
+        Say("Texture cambiata sugli originali: vale anche al centro 4:3."
+            + (quads > 0 ? $" {quads} quad con le due metà della texture." : partner < 0 ? " (La texture del pennello è un triangolo da sola.)" : "")
+            + " \"Gira angoli\" la gira.");
+    }
+
+    /// <summary>The polygon holding the other half of a polygon's texture tile: it shares an
+    /// edge with the same texture corners there, and the 4 corners together are a rectangle
+    /// of the page. -1 when the texture is a triangle on its own.</summary>
+    int TilePartner(Mesh m, int poly)
+    {
+        var uv = L!.UvsOf(m, poly);
+        var mat = L.MaterialOf(m, poly);
+        for (int q = 0; q < m.PolyCount; q++)
+        {
+            if (q == poly || m.Tpag[q] != m.Tpag[poly]) continue;
+            var shared = SharedCorners(m, poly, m, q);
+            if (shared.Count != 2) continue;
+            var qm = L.MaterialOf(m, q);
+            if (!qm.Textured || qm.ClutX != mat.ClutX || qm.ClutY != mat.ClutY) continue;
+            var quv = L.UvsOf(m, q);
+            if (shared.Any(e => quv[e.B] != uv[e.A])) continue;
+            var all = uv.Concat(quv).Distinct().ToList();
+            if (all.Count != 4) continue;
+            Vector2 lo = Vector2.Min(Vector2.Min(all[0], all[1]), Vector2.Min(all[2], all[3]));
+            Vector2 hi = Vector2.Max(Vector2.Max(all[0], all[1]), Vector2.Max(all[2], all[3]));
+            if (lo.X == hi.X || lo.Y == hi.Y) continue;
+            if (all.All(u => (u.X == lo.X || u.X == hi.X) && (u.Y == lo.Y || u.Y == hi.Y))) return q;
+        }
+        return -1;
+    }
+
+    /// <summary>Corner pairs (k in a, k in b) at the same place.</summary>
+    static List<(int A, int B)> SharedCorners(Mesh ma, int a, Mesh mb, int b)
+    {
+        var shared = new List<(int, int)>();
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                if (Vector3.DistanceSquared(ma.Corner(a, i), mb.Corner(b, j)) < 1) shared.Add((i, j));
+        return shared;
+    }
+
+    static Vector3 NormalOf(Mesh m, int p)
+    {
+        var n = Vector3.Cross(m.Corner(p, 1) - m.Corner(p, 0), m.Corner(p, 2) - m.Corner(p, 0));
+        return n.LengthSquared() > 1e-6f ? Vector3.Normalize(n) : Vector3.Zero;
+    }
+
+    static bool Coplanar(Mesh m, int a, int b) => MathF.Abs(Vector3.Dot(NormalOf(m, a), NormalOf(m, b))) > 0.8f;
+
+    /// <summary>The turn the runtime needs so target corner i shows source texture corner
+    /// corner[i] (slot k takes vertex (k + turn) % 3); -1 if that would mirror the texture.</summary>
+    static int TurnOf(ReadOnlySpan<int> corner)
+    {
+        int turn = (0 - corner[0] + 3) % 3;
+        for (int i = 1; i < 3; i++)
+            if ((i - corner[i] + 3) % 3 != turn) return -1;
+        return turn;
+    }
+
+    /// <summary>How well a polygon drawn with source turned by turn runs the way the brush
+    /// does: texture U and V directions compared in the target's plane (higher is better).</summary>
+    float TurnScore(Mesh m, int target, int source, int turn, (Vector3 U, Vector3 V)? brush)
+    {
+        if (brush is not { } b) return 0;
+        var su = L!.UvsOf(m, source);
+        Vector2[] uv = [.. Enumerable.Range(0, 3).Select(i => su[(i - turn + 3) % 3])];
+        if (TexelAxes([m.Corner(target, 0), m.Corner(target, 1), m.Corner(target, 2)], uv) is not { } t) return 0;
+        var n = NormalOf(m, target);
+        Vector3 Flat(Vector3 a)
+        {
+            var f = a - n * Vector3.Dot(a, n);
+            return f.LengthSquared() > 1e-6f ? Vector3.Normalize(f) : Vector3.Zero;
+        }
+        return Vector3.Dot(Flat(t.U), Flat(b.U)) + Vector3.Dot(Flat(t.V), Flat(b.V));
+    }
+
+    int BestTurn(Mesh m, int target, int source, (Vector3 U, Vector3 V)? brush) =>
+        Enumerable.Range(0, 3).MaxBy(turn => TurnScore(m, target, source, turn, brush));
+
+    /// <summary>Two originals forming a quad (t1, t2 share an edge) with the brush tile's two
+    /// halves (source, partner share its diagonal): the shared edge takes the diagonal, either
+    /// way round, keeping the one that runs like the brush.</summary>
+    ((int Source, int Turn) A, (int Source, int Turn) B)? QuadRetexture(Mesh m, int t1, int t2, int source, int partner,
+        (Vector3 U, Vector3 V)? brush)
+    {
+        var te = SharedCorners(m, t1, m, t2);
+        var se = SharedCorners(m, source, m, partner);
+        if (te.Count != 2 || se.Count != 2) return null;
+        var su = L!.UvsOf(m, source);
+        var pu = L.UvsOf(m, partner);
+        Vector2 sOpp = su[3 - se[0].A - se[1].A], pOpp = pu[3 - se[0].B - se[1].B];
+        ((int Source, int Turn) A, (int Source, int Turn) B)? best = null;
+        float bestScore = float.MinValue;
+        for (int swapEdge = 0; swapEdge < 2; swapEdge++)
+            for (int swapHalf = 0; swapHalf < 2; swapHalf++)
+            {
+                // The texture corner each target corner gets for this way of laying the tile.
+                var edge0 = su[se[swapEdge].A];
+                var edge1 = su[se[1 - swapEdge].A];
+                (int Source, int Turn)? Lay(bool first)
+                {
+                    int e0 = first ? te[0].A : te[0].B, e1 = first ? te[1].A : te[1].B;
+                    bool useSource = first ^ (swapHalf == 1);
+                    var srcUv = useSource ? su : pu;
+                    Span<int> corner = stackalloc int[3];
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var want = i == e0 ? edge0 : i == e1 ? edge1 : useSource ? sOpp : pOpp;
+                        corner[i] = Array.IndexOf(srcUv, want);
+                        if (corner[i] < 0) return null;
+                    }
+                    int turn = TurnOf(corner);
+                    return turn < 0 ? null : (useSource ? source : partner, turn);
+                }
+                if (Lay(true) is not { } a || Lay(false) is not { } b) continue;
+                float score = TurnScore(m, t1, a.Source, a.Turn, brush) + TurnScore(m, t2, b.Source, b.Turn, brush);
+                if (score > bestScore) { bestScore = score; best = (a, b); }
+            }
+        return best;
     }
 
     void SetRepairsOff(bool off)
@@ -800,11 +955,13 @@ sealed partial class Editor
 
     /// <summary>Directions in the world of the brush texture's +U and +V (one texel each),
     /// worked out from the triangle the brush was taken from; null without one.</summary>
-    (Vector3 U, Vector3 V)? BrushTexelAxes(Brush b)
+    (Vector3 U, Vector3 V)? BrushTexelAxes(Brush b) => b.Pos is { Length: 3 } p ? TexelAxes(p, b.Uv) : null;
+
+    /// <summary>Directions in the world of +U and +V (one texel each) on a triangle.</summary>
+    static (Vector3 U, Vector3 V)? TexelAxes(Vector3[] p, Vector2[] uv)
     {
-        if (b.Pos is not { Length: 3 } p) return null;
         Vector3 e1 = p[1] - p[0], e2 = p[2] - p[0];
-        Vector2 f1 = b.Uv[1] - b.Uv[0], f2 = b.Uv[2] - b.Uv[0];
+        Vector2 f1 = uv[1] - uv[0], f2 = uv[2] - uv[0];
         float det = f1.X * f2.Y - f1.Y * f2.X;
         if (MathF.Abs(det) < 1e-4f) return null;
         // P - P0 = [e1 e2] F^-1 (uv - uv0), F = [f1 f2].
@@ -878,6 +1035,39 @@ sealed partial class Editor
             t.Poly = b.Poly;
         }
         Changed();
+        if (CoveredOriginals(idx.Select(i => _doc.Tris[i])) is { } warn) Say(warn);
+    }
+
+    /// <summary>A warning when hand-made triangles lie on original polygons: in the side
+    /// bands they now cover them, but the 4:3 centre is drawn by the game alone (no depth),
+    /// so there the original stays. Null when they cover none.</summary>
+    string? CoveredOriginals(IEnumerable<UserTri> tris)
+    {
+        if (L == null) return null;
+        var hits = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var t in tris)
+        {
+            var c = t.Center;
+            foreach (var m in L.Meshes)
+            {
+                if (m.Backdrop) continue;
+                for (int p = 0; p < m.PolyCount; p++)
+                {
+                    Vector3 a = m.Corner(p, 0), b = m.Corner(p, 1), d = m.Corner(p, 2);
+                    var n = Vector3.Cross(b - a, d - a);
+                    float len = n.Length();
+                    if (len < 1e-3f || MathF.Abs(Vector3.Dot(c - a, n)) / len > 4) continue;
+                    // Inside the triangle (barycentric signs agree).
+                    float w0 = Vector3.Dot(Vector3.Cross(b - a, c - a), n), w1 = Vector3.Dot(Vector3.Cross(d - b, c - b), n),
+                        w2 = Vector3.Dot(Vector3.Cross(a - d, c - d), n);
+                    if (w0 >= 0 && w1 >= 0 && w2 >= 0) hits.Add($"{m.Name} {p}");
+                }
+            }
+        }
+        if (hits.Count == 0) return null;
+        return $"Attenzione: questi triangoli stanno sopra originali ({string.Join(", ", hits.Take(4))}{(hits.Count > 4 ? ", ..." : "")}). "
+            + "Nelle bande 16:9 vincono i tuoi, ma al centro 4:3 il gioco disegna sempre l'originale. Per cambiarlo anche lì: "
+            + "seleziona l'originale, prendi il pennello dalla stessa mesh e usa \"Metti texture del pennello sull'originale\".";
     }
 
     int _cellsX, _cellsY;
@@ -979,6 +1169,6 @@ sealed partial class Editor
             _doc.Tris.Add(t);
         }
         Changed();
-        Say($"Quad diviso in {nx} x {ny} celle con la texture del pennello.");
+        Say(CoveredOriginals(made) ?? $"Quad diviso in {nx} x {ny} celle con la texture del pennello.");
     }
 }

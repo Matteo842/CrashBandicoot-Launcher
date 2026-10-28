@@ -12,6 +12,10 @@ public enum WidePrimitiveMode : byte
     // Neighbour-zone scenery inside the 4:3 core, drawn before the retail
     // world so the game paints over it: only fills what it leaves empty.
     WorldCore,
+    // Wide Editor triangles in the side bands: like extensions, but a polygon
+    // offset towards the camera, so a hand-made copy of a retail face drawn
+    // with another texture wins over the face it lies on.
+    WorldUserSides,
 }
 
 public struct HleVertex

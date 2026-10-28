@@ -506,7 +506,8 @@ public static partial class FramePacing
                         if (!TryNativeWideMaterial(m, world, repair.Polygon, drawCount, out repairFlags,
                             out _, out _, out _, out _, out _, out _, out _)) continue;
                         if (repairFlags.WideMode != WidePrimitiveMode.BackdropSides)
-                            repairFlags.WideMode = WidePrimitiveMode.WorldExtensionSides;
+                            repairFlags.WideMode = repair.User && !repair.Behind
+                                ? WidePrimitiveMode.WorldUserSides : WidePrimitiveMode.WorldExtensionSides;
                     }
                     repairVertices[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
                     repairVertices[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
@@ -613,6 +614,13 @@ public static partial class FramePacing
                 _nativeWidePending.Add(_nativeWideOpaque[i]);
         for (int i = 0; i < _nativeWideTransparent.Count; i++)
             if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
+                _nativeWidePending.Add(_nativeWideTransparent[i]);
+        // Wide Editor triangles last, over the scenery they were drawn on.
+        for (int i = 0; i < _nativeWideOpaque.Count; i++)
+            if (_nativeWideOpaque[i].Flags.WideMode == WidePrimitiveMode.WorldUserSides)
+                _nativeWidePending.Add(_nativeWideOpaque[i]);
+        for (int i = 0; i < _nativeWideTransparent.Count; i++)
+            if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldUserSides)
                 _nativeWidePending.Add(_nativeWideTransparent[i]);
         _nativeWideCoreTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
         _nativeWideCorePending.AddRange(_nativeWideCoreOpaque);

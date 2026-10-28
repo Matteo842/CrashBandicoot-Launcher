@@ -98,7 +98,7 @@ public static partial class FramePacing
                     bool behind = t.TryGetProperty("behind", out var b) && b.GetBoolean();
                     user.Triangles.Add(new(t.GetProperty("poly").GetInt32(), Corner(0), Corner(1), Corner(2),
                         Boundary: !behind, Culled: t.TryGetProperty("culled", out var c) && c.GetBoolean(),
-                        Rank: t.TryGetProperty("rank", out var r) ? r.GetSingle() : 0, Behind: behind));
+                        Rank: t.TryGetProperty("rank", out var r) ? r.GetSingle() : 0, Behind: behind, User: true));
                 }
             if (mesh.TryGetProperty("hidden", out var hidden))
                 foreach (var h in hidden.EnumerateArray()) user.Hidden.Add(h.GetInt32());

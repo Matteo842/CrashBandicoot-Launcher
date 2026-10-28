@@ -306,7 +306,8 @@ public sealed class GlBackend : IGpuBackend
             FillWarmVertices(rt);
             _kWideMode = mode;
             _pendingWideMode = mode;
-            _kTransparent = mode is WidePrimitiveMode.OverlaySides or WidePrimitiveMode.WorldExtensionSides;
+            _kTransparent = mode is WidePrimitiveMode.OverlaySides or WidePrimitiveMode.WorldExtensionSides
+                or WidePrimitiveMode.WorldUserSides;
             Flush();
         }
 
@@ -842,6 +843,7 @@ public sealed class GlBackend : IGpuBackend
         WidePrimitiveMode.BackdropSides or
         WidePrimitiveMode.OverlaySides or
         WidePrimitiveMode.WorldExtensionSides or
+        WidePrimitiveMode.WorldUserSides or
         WidePrimitiveMode.DepthTest;
 
     // Primitives of the native-wide renderer itself (side bands and the core
@@ -934,9 +936,10 @@ public sealed class GlBackend : IGpuBackend
         }
 
         bool extension = _kWideMode == WidePrimitiveMode.WorldExtensionSides;
+        bool user = _kWideMode == WidePrimitiveMode.WorldUserSides;
         bool worldPass = _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore;
         bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore
-            or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.DepthTest;
+            or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.WorldUserSides or WidePrimitiveMode.DepthTest;
         if (extension)
         {
             // Extensions participate in real depth, including against the
@@ -944,6 +947,13 @@ public sealed class GlBackend : IGpuBackend
             // to the original surface, avoiding flicker at the shared seam.
             _gl.Enable(EnableCap.PolygonOffsetFill);
             _gl.PolygonOffset(1f, 1f);
+        }
+        else if (user)
+        {
+            // Wide Editor triangles: the other way round, a coplanar copy of a
+            // retail face (retextured by hand) must cover the original.
+            _gl.Enable(EnableCap.PolygonOffsetFill);
+            _gl.PolygonOffset(-1f, -1f);
         }
         else _gl.Disable(EnableCap.PolygonOffsetFill);
         if (depthTest)
@@ -954,7 +964,7 @@ public sealed class GlBackend : IGpuBackend
             // texels blend. The opaque texels still form solid world surfaces,
             // so the native-wide world pass must establish depth for the whole
             // triangle. Object translucency keeps the conventional no-write path.
-            _gl.DepthMask(worldPass || extension || !_kTransparent);
+            _gl.DepthMask(worldPass || extension || user || !_kTransparent);
         }
         else
         {
