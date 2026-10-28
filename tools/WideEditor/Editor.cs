@@ -13,7 +13,7 @@ namespace WideEditor;
 
 enum Kind { Retail = 0, Auto = 1, User = 2 }
 
-sealed record Brush(string Mesh, int Poly, Vector2[] Uv, Vector3[] Rgb)
+sealed record Brush(string Mesh, int Poly, Vector2[] Uv, Vector3[] Rgb, Vector3[]? Pos = null)
 {
     public Vector2 Min => Vector2.Min(Uv[0], Vector2.Min(Uv[1], Uv[2]));
     public Vector2 Max => Vector2.Max(Uv[0], Vector2.Max(Uv[1], Uv[2]));
@@ -327,6 +327,13 @@ sealed partial class Editor : IDisposable
                 {
                     var mat = L.MaterialOf(m, p);
                     var uv = L.UvsOf(m, p);
+                    if (_doc.Retex.TryGetValue((m.Name, p), out var retex) && retex.Source < m.PolyCount)
+                    {
+                        // As the runtime: corner slot k (vertex (k + turn) % 3) carries texture corner k.
+                        mat = L.MaterialOf(m, retex.Source);
+                        var su = L.UvsOf(m, retex.Source);
+                        uv = [.. Enumerable.Range(0, 3).Select(j => su[(j - retex.Turn % 3 + 3) % 3])];
+                    }
                     bool removed = _doc.Removed.Contains((m.Name, p));
                     if (removed && !_showOff) continue;
                     bool hidden = removed || _doc.Hidden.Contains((m.Name, p)) || RuntimeHidden(m, p);

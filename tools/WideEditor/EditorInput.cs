@@ -588,20 +588,23 @@ sealed partial class Editor
             {
                 var (m, p) = RetailOf(index);
                 if (m.Backdrop) { Say("Le texture del cielo non si possono usare."); return; }
-                _brush = new(m.Name, p, L.UvsOf(m, p), [.. Enumerable.Range(0, 3).Select(k => m.Rgb[m.Tri[p * 3 + k]])]);
+                _brush = new(m.Name, p, L.UvsOf(m, p), [.. Enumerable.Range(0, 3).Select(k => m.Rgb[m.Tri[p * 3 + k]])],
+                    [m.Corner(p, 0), m.Corner(p, 1), m.Corner(p, 2)]);
                 break;
             }
             case Kind.Auto:
             {
                 var t = _auto!.Tris[index];
                 if (t.Poly < 0 || t.Mesh.Backdrop) { Say("Questo triangolo non ha una texture utilizzabile."); return; }
-                _brush = new(t.Mesh.Name, t.Poly, [t.A.Uv, t.B.Uv, t.C.Uv], [t.A.Rgb, t.B.Rgb, t.C.Rgb]);
+                _brush = new(t.Mesh.Name, t.Poly, [t.A.Uv, t.B.Uv, t.C.Uv], [t.A.Rgb, t.B.Rgb, t.C.Rgb],
+                    [t.A.Pos, t.B.Pos, t.C.Pos]);
                 break;
             }
             default:
             {
                 var t = _doc.Tris[index];
-                _brush = new(t.Mesh, t.Poly, [.. t.V.Select(v => v.Uv)], [.. t.V.Select(v => v.Rgb)]);
+                _brush = new(t.Mesh, t.Poly, [.. t.V.Select(v => v.Uv)], [.. t.V.Select(v => v.Rgb)],
+                    [.. t.V.Select(v => v.Pos)]);
                 break;
             }
         }
@@ -716,6 +719,30 @@ sealed partial class Editor
         Changed();
     }
 
+    /// <summary>Selected original polygons drawn with the brush texture (same mesh only:
+    /// texture tables are per mesh), or given back their own.</summary>
+    void SetRetexture(bool on)
+    {
+        var retail = _sel.Where(k => KindOf(k) == Kind.Retail).Select(k => RetailOf(IndexOf(k))).ToList();
+        if (retail.Count == 0) return;
+        if (on)
+        {
+            if (_brush == null) { Say("Prima prendi un pennello col contagocce."); return; }
+            if (retail.Any(r => r.Mesh.Name != _brush.Mesh))
+            {
+                Say($"Il pennello deve venire dalla stessa mesh ({retail[0].Mesh.Name}): ogni mesh ha le sue texture.");
+                return;
+            }
+        }
+        BeginChange();
+        foreach (var (m, p) in retail)
+            if (on) _doc.Retex[(m.Name, p)] = (_brush!.Poly, 0);
+            else _doc.Retex.Remove((m.Name, p));
+        _retailDirty = true;
+        Changed();
+        Say(on ? "Texture cambiata sugli originali: vale anche al centro 4:3. \"Gira angoli\" la gira." : "Texture originale rimessa.");
+    }
+
     void SetRepairsOff(bool off)
     {
         BeginChange();
@@ -759,7 +786,9 @@ sealed partial class Editor
         Vector2 lo = new(float.MaxValue), hi = new(float.MinValue);
         foreach (int i in idx)
             foreach (var v in _doc.Tris[i].V) { lo = Vector2.Min(lo, v.Uv); hi = Vector2.Max(hi, v.Uv); }
-        var size = Vector2.Max(hi - lo, new Vector2(1e-3f));
+        // A side shorter than a texel stays as it is (dividing by it blew up).
+        var size = hi - lo;
+        if (size.X < 1 || size.Y < 1) { Say("La texture di questi triangoli è troppo piccola da girare: prima mettici la texture del pennello."); return; }
         foreach (int i in idx)
             for (int k = 0; k < 3; k++)
             {
@@ -769,28 +798,187 @@ sealed partial class Editor
         Changed();
     }
 
+    /// <summary>Directions in the world of the brush texture's +U and +V (one texel each),
+    /// worked out from the triangle the brush was taken from; null without one.</summary>
+    (Vector3 U, Vector3 V)? BrushTexelAxes(Brush b)
+    {
+        if (b.Pos is not { Length: 3 } p) return null;
+        Vector3 e1 = p[1] - p[0], e2 = p[2] - p[0];
+        Vector2 f1 = b.Uv[1] - b.Uv[0], f2 = b.Uv[2] - b.Uv[0];
+        float det = f1.X * f2.Y - f1.Y * f2.X;
+        if (MathF.Abs(det) < 1e-4f) return null;
+        // P - P0 = [e1 e2] F^-1 (uv - uv0), F = [f1 f2].
+        var u = (e1 * f2.Y - e2 * f1.Y) / det;
+        var v = (e2 * f1.X - e1 * f2.X) / det;
+        return (u, v);
+    }
+
+    /// <summary>The plane frame of the selection for laying the brush on it: "right" along
+    /// the brush texture's U and "down" along its V as on the triangle it came from (world
+    /// up for a brush without one), both in the selection's plane.</summary>
+    bool BrushFrame(List<int> idx, Brush b, out Vector3 right, out Vector3 down, out float texelU, out float texelV)
+    {
+        var normal = Vector3.Zero;
+        foreach (int i in idx)
+        {
+            var v = _doc.Tris[i].V;
+            var n = Vector3.Cross(v[1].Pos - v[0].Pos, v[2].Pos - v[0].Pos);
+            if (Vector3.Dot(n, normal) < 0) n = -n;
+            normal += n;
+        }
+        normal = normal.LengthSquared() > 1e-6f ? Vector3.Normalize(normal) : -_cam.Forward;
+        Vector3 Flat(Vector3 a) => a - normal * Vector3.Dot(a, normal);
+        texelU = texelV = 0;
+        if (BrushTexelAxes(b) is { } axes && Flat(axes.U).Length() > axes.U.Length() * 0.3f
+            && Flat(axes.V).Length() > axes.V.Length() * 0.3f)
+        {
+            texelU = axes.U.Length();
+            texelV = axes.V.Length();
+            right = Vector3.Normalize(Flat(axes.U));
+            var d = Flat(axes.V);
+            down = Vector3.Normalize(d - right * Vector3.Dot(d, right));
+            return true;
+        }
+        var upRef = MathF.Abs(normal.Y) > 0.8f ? -Vector3.UnitZ : Vector3.UnitY;
+        var up = Vector3.Normalize(upRef - normal * Vector3.Dot(upRef, normal));
+        right = Vector3.Normalize(Vector3.Cross(up, normal));
+        if (Vector3.Dot(right, _cam.Right) < 0) right = -right;
+        down = -up;
+        return false;
+    }
+
+    /// <summary>The brush tile laid once over the whole selection, in the brush's own
+    /// direction. The old texture coordinates play no part.</summary>
     void ApplyBrush(bool colours)
     {
         var b = _brush;
         var idx = SelUser.ToList();
         if (b == null || idx.Count == 0) return;
-        PushUndo();
-        Vector2 lo = new(float.MaxValue), hi = new(float.MinValue);
+        BeginChange();
+        BrushFrame(idx, b, out var right, out var down, out _, out _);
+        float r0 = float.MaxValue, r1 = float.MinValue, d0 = float.MaxValue, d1 = float.MinValue;
         foreach (int i in idx)
-            foreach (var v in _doc.Tris[i].V) { lo = Vector2.Min(lo, v.Uv); hi = Vector2.Max(hi, v.Uv); }
-        var size = Vector2.Max(hi - lo, new Vector2(1e-3f));
+            foreach (var v in _doc.Tris[i].V)
+            {
+                float r = Vector3.Dot(v.Pos, right), d = Vector3.Dot(v.Pos, down);
+                r0 = Math.Min(r0, r); r1 = Math.Max(r1, r); d0 = Math.Min(d0, d); d1 = Math.Max(d1, d);
+            }
+        float width = Math.Max(r1 - r0, 1e-3f), height = Math.Max(d1 - d0, 1e-3f);
         Vector2 blo = b.Min, bsize = b.Max - b.Min;
         foreach (int i in idx)
         {
             var t = _doc.Tris[i];
-            if (idx.Count == 1)
-                for (int k = 0; k < 3; k++) t.V[k].Uv = b.Uv[k];
-            else
-                for (int k = 0; k < 3; k++) t.V[k].Uv = blo + (t.V[k].Uv - lo) / size * bsize;
-            if (colours) for (int k = 0; k < 3; k++) t.V[k].Rgb = idx.Count == 1 ? b.Rgb[k] : b.MeanRgb;
+            for (int k = 0; k < 3; k++)
+            {
+                float s = (Vector3.Dot(t.V[k].Pos, right) - r0) / width, tt = (Vector3.Dot(t.V[k].Pos, down) - d0) / height;
+                t.V[k].Uv = blo + new Vector2(s, tt) * bsize;
+            }
+            if (colours) for (int k = 0; k < 3; k++) t.V[k].Rgb = b.MeanRgb;
             t.Mesh = b.Mesh;
             t.Poly = b.Poly;
         }
         Changed();
+    }
+
+    int _cellsX, _cellsY;
+
+    /// <summary>Cells the brush would need on the selected quad to keep the original's
+    /// texture size (0 when the selection is not a quad).</summary>
+    (int X, int Y) BrushCells()
+    {
+        var b = _brush;
+        var idx = SelUser.ToList();
+        if (b == null || !QuadOf(idx, b, out var c, out _, out _)) return (0, 0);
+        BrushFrame(idx, b, out _, out _, out float tu, out float tv);
+        var size = b.Max - b.Min;
+        if (tu <= 0 || tv <= 0) return (1, 1);
+        float width = (Vector3.Distance(c[0], c[3]) + Vector3.Distance(c[1], c[2])) / 2;
+        float height = (Vector3.Distance(c[0], c[1]) + Vector3.Distance(c[3], c[2])) / 2;
+        return (Math.Clamp((int)MathF.Round(width / (tu * Math.Max(size.X, 1))), 1, 64),
+            Math.Clamp((int)MathF.Round(height / (tv * Math.Max(size.Y, 1))), 1, 64));
+    }
+
+    /// <summary>The 4 corners of a selection of 2 triangles forming a quad, ordered
+    /// top-left, bottom-left, bottom-right, top-right in the brush frame, with their colours.</summary>
+    bool QuadOf(List<int> idx, Brush b, out Vector3[] corners, out Vector3[] colours, out string mesh)
+    {
+        corners = []; colours = []; mesh = "";
+        if (idx.Count != 2) return false;
+        var pts = new List<(Vector3 P, Vector3 Rgb)>();
+        foreach (int i in idx)
+            foreach (var v in _doc.Tris[i].V)
+                if (!pts.Any(q => Vector3.DistanceSquared(q.P, v.Pos) < 1)) pts.Add((v.Pos, v.Rgb));
+        if (pts.Count != 4) return false;
+        BrushFrame(idx, b, out var right, out var down, out _, out _);
+        var centre = (pts[0].P + pts[1].P + pts[2].P + pts[3].P) / 4;
+        // Around the centre, starting top-left, going down the left side first.
+        var ordered = pts.OrderBy(q => MathF.Atan2(Vector3.Dot(q.P - centre, down), -Vector3.Dot(q.P - centre, right))).ToList();
+        int start = 0;
+        float best = float.MaxValue;
+        for (int i = 0; i < 4; i++)
+        {
+            float score = Vector3.Dot(ordered[i].P - centre, right) + Vector3.Dot(ordered[i].P - centre, down);
+            if (score < best) { best = score; start = i; }
+        }
+        var loop = Enumerable.Range(0, 4).Select(i => ordered[(start + i) % 4]).ToList();
+        // Second corner must be below the first (left side), else the loop runs the other way.
+        if (Vector3.Dot(loop[1].P - loop[0].P, down) < Vector3.Dot(loop[3].P - loop[0].P, down))
+            loop = [loop[0], loop[3], loop[2], loop[1]];
+        corners = [.. loop.Select(q => q.P)];
+        colours = [.. loop.Select(q => q.Rgb)];
+        mesh = _doc.Tris[idx[0]].Mesh;
+        return true;
+    }
+
+    /// <summary>Replaces the selected quad with a grid of cells, the whole brush tile on
+    /// each, so the texture keeps the size it has on the original (UVs past a tile would
+    /// show other textures of the page).</summary>
+    void ApplyBrushCells(bool colours)
+    {
+        var b = _brush;
+        var idx = SelUser.ToList();
+        if (b == null) return;
+        if (!QuadOf(idx, b, out var c, out var rgb, out _))
+        {
+            Say("A celle serve un quad: seleziona i 2 triangoli di un rettangolo.");
+            return;
+        }
+        var (autoX, autoY) = BrushCells();
+        int nx = _cellsX > 0 ? _cellsX : autoX, ny = _cellsY > 0 ? _cellsY : autoY;
+        BeginChange();
+        var template = _doc.Tris[idx[0]];
+        Vector3 At(Vector3[] q, float s, float t) => Vector3.Lerp(Vector3.Lerp(q[0], q[3], s), Vector3.Lerp(q[1], q[2], s), t);
+        Vector2 lo = b.Min, hi = b.Max;
+        var made = new List<UserTri>();
+        int group = _doc.NextGroup++;
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++)
+            {
+                float s0 = (float)i / nx, s1 = (float)(i + 1) / nx, t0 = (float)j / ny, t1 = (float)(j + 1) / ny;
+                EdVertex V(float s, float t, Vector2 uv) => new()
+                {
+                    Pos = At(c, s, t), Uv = uv, Rgb = colours ? b.MeanRgb : At(rgb, s, t),
+                };
+                var tl = V(s0, t0, lo);
+                var bl = V(s0, t1, new(lo.X, hi.Y));
+                var br = V(s1, t1, hi);
+                var tr = V(s1, t0, new(hi.X, lo.Y));
+                UserTri T(EdVertex a, EdVertex bb, EdVertex cc) => new()
+                {
+                    Mesh = b.Mesh, Poly = b.Poly, Behind = template.Behind, Rank = template.Rank,
+                    Culled = template.Culled, Group = group, V = [a, bb, cc],
+                };
+                made.Add(T(tl, bl, br));
+                made.Add(T(tl, br, tr));
+            }
+        foreach (int i in idx.OrderByDescending(i => i)) _doc.Tris.RemoveAt(i);
+        _sel.Clear();
+        foreach (var t in made)
+        {
+            _sel.Add(Key(Kind.User, _doc.Tris.Count));
+            _doc.Tris.Add(t);
+        }
+        Changed();
+        Say($"Quad diviso in {nx} x {ny} celle con la texture del pennello.");
     }
 }

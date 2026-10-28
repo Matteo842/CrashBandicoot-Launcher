@@ -17,6 +17,7 @@ public static partial class FramePacing
         public readonly List<NativeWideRepair> Triangles = [];
         public readonly List<int> Hidden = [];
         public readonly HashSet<int> Removed = [];
+        public readonly Dictionary<int, (int Source, int Turn)> Retexture = [];
         public readonly List<(int Polygon, Vector3 Center)> HiddenRepairs = [];
     }
 
@@ -103,6 +104,9 @@ public static partial class FramePacing
                 foreach (var h in hidden.EnumerateArray()) user.Hidden.Add(h.GetInt32());
             if (mesh.TryGetProperty("removed", out var removed))
                 foreach (var r in removed.EnumerateArray()) user.Removed.Add(r.GetInt32());
+            if (mesh.TryGetProperty("retexture", out var retexture))
+                foreach (var r in retexture.EnumerateArray())
+                    user.Retexture[r[0].GetInt32()] = (r[1].GetInt32(), r[2].GetInt32());
             if (mesh.TryGetProperty("hiddenRepairs", out var off))
                 foreach (var h in off.EnumerateArray())
                 {
@@ -209,16 +213,18 @@ public static partial class FramePacing
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool AllowSetForegroundWindow(int processId);
 
-    // Removed polygons are gone everywhere, 4:3 core included: while the mesh is
-    // resident each one is collapsed onto its first corner in the WGEO polygon words
-    // (drawing only; collision lives elsewhere), so neither the game nor the side
-    // pass draws it. The original words are kept to undo it when the edit goes away.
-    sealed class NativeWideRemovedState
+    // Removed and retextured polygons, 4:3 core included, by rewriting the WGEO polygon
+    // words while the mesh is resident (drawing only; collision lives elsewhere):
+    // removed ones collapse onto their first corner, retextured ones take another
+    // polygon's texture words (texinfo, page, animation) with their corners turned so
+    // the texture sits the other way. The original words are kept, to restore them when
+    // the edit goes away and to start again when the mesh is paged in from disc.
+    sealed class NativeWidePatchState
     {
         public int Version = -1;
-        public readonly Dictionary<int, (uint P0, uint P1)> Applied = [];
+        public readonly Dictionary<int, (uint P0, uint P1, uint E0, uint E1)> Applied = [];
     }
-    static readonly Dictionary<NativeWideSceneryKey, NativeWideRemovedState> _nativeWideRemoved = [];
+    static readonly Dictionary<NativeWideSceneryKey, NativeWidePatchState> _nativeWidePatched = [];
 
     static (uint P0, uint P1) NativeWideCollapsed((uint P0, uint P1) p)
     {
@@ -226,44 +232,74 @@ public static partial class FramePacing
         return ((p.P0 & ~(0xFFFu << 20)) | (a << 20), (p.P1 & ~(0xFFFu << 8)) | (a << 8));
     }
 
+    static (uint P0, uint P1) NativeWideRetextured((uint P0, uint P1) p, (uint P0, uint P1) source, int turn)
+    {
+        uint p0 = (p.P0 & 0xFFF00000u) | (source.P0 & 0x000FFFFFu);
+        uint p1 = (p.P1 & 0xFFFFFF00u) | (source.P1 & 0xFFu);
+        // Corner slot k carries texture corner k: turning the corners moves the texture.
+        Span<uint> v = [(p1 >> 20) & 0xFFFu, (p1 >> 8) & 0xFFFu, (p0 >> 20) & 0xFFFu];
+        uint a = v[turn % 3], b = v[(turn + 1) % 3], c = v[(turn + 2) % 3];
+        return ((p0 & 0x000FFFFFu) | (c << 20), (p1 & 0x000000FFu) | (a << 20) | (b << 8));
+    }
+
     static void NativeWideApplyRemoved(IMemory m, NativeWideWorld world)
     {
-        if (world.PolyCount == 0 || (_nativeWideUserEdits.Count == 0 && _nativeWideRemoved.Count == 0)) return;
+        if (world.PolyCount == 0 || (_nativeWideUserEdits.Count == 0 && _nativeWidePatched.Count == 0)) return;
         var key = NativeWideUserKey(m, world);
-        var removed = _nativeWideUserEdits.TryGetValue(key, out var user) && user.Removed.Count > 0 ? user.Removed : null;
-        _nativeWideRemoved.TryGetValue(key, out var state);
-        if (removed == null && state == null) return;
-        state ??= _nativeWideRemoved[key] = new NativeWideRemovedState();
+        _nativeWideUserEdits.TryGetValue(key, out var user);
+        bool any = user != null && (user.Removed.Count > 0 || user.Retexture.Count > 0);
+        _nativeWidePatched.TryGetValue(key, out var state);
+        if (!any && state == null) return;
+        state ??= _nativeWidePatched[key] = new NativeWidePatchState();
+        (uint, uint) Current(int poly)
+        {
+            uint address = world.Polygons + (uint)poly * 8u;
+            return (m.ReadU32(address), m.ReadU32(address + 4u));
+        }
+        // The words a polygon had before any patch (a patched source counts unpatched).
+        (uint P0, uint P1) Original(int poly)
+        {
+            var cur = Current(poly);
+            return state.Applied.TryGetValue(poly, out var e) && cur == (e.E0, e.E1) ? (e.P0, e.P1) : cur;
+        }
         if (state.Version != _nativeWideUserVersion)
         {
             state.Version = _nativeWideUserVersion;
-            foreach (var (poly, original) in state.Applied.ToArray())
+            foreach (var (poly, e) in state.Applied.ToArray())
             {
-                if (removed != null && removed.Contains(poly)) continue;
+                if (user != null && (user.Removed.Contains(poly) || user.Retexture.ContainsKey(poly))) continue;
                 uint address = world.Polygons + (uint)poly * 8u;
-                var collapsed = NativeWideCollapsed(original);
-                if (m.ReadU32(address) == collapsed.P0 && m.ReadU32(address + 4u) == collapsed.P1)
+                if (Current(poly) == (e.E0, e.E1))
                 {
-                    m.WriteU32(address, original.P0);
-                    m.WriteU32(address + 4u, original.P1);
+                    m.WriteU32(address, e.P0);
+                    m.WriteU32(address + 4u, e.P1);
                 }
                 state.Applied.Remove(poly);
             }
         }
-        if (removed != null)
-            foreach (int poly in removed)
+        if (user != null)
+        {
+            void Patch(int poly, Func<(uint P0, uint P1), (uint P0, uint P1)> target)
             {
-                if ((uint)poly >= (uint)world.PolyCount) continue;
+                if ((uint)poly >= (uint)world.PolyCount) return;
+                var cur = Current(poly);
+                var original = Original(poly);
+                var want = target(original);
+                if (cur == want && state.Applied.ContainsKey(poly)) return;
                 uint address = world.Polygons + (uint)poly * 8u;
-                uint p0 = m.ReadU32(address), p1 = m.ReadU32(address + 4u);
-                if (state.Applied.TryGetValue(poly, out var original) && NativeWideCollapsed(original) == (p0, p1)) continue;
-                // First time, or the mesh was paged in again from disc.
-                state.Applied[poly] = (p0, p1);
-                var collapsed = NativeWideCollapsed((p0, p1));
-                m.WriteU32(address, collapsed.P0);
-                m.WriteU32(address + 4u, collapsed.P1);
+                m.WriteU32(address, want.P0);
+                m.WriteU32(address + 4u, want.P1);
+                state.Applied[poly] = (original.P0, original.P1, want.P0, want.P1);
             }
-        if (state.Applied.Count == 0) _nativeWideRemoved.Remove(key);
+            foreach (var (poly, (source, turn)) in user.Retexture)
+                if (!user.Removed.Contains(poly) && (uint)source < (uint)world.PolyCount)
+                {
+                    var src = Original(source);
+                    Patch(poly, o => NativeWideRetextured(o, src, turn));
+                }
+            foreach (int poly in user.Removed) Patch(poly, NativeWideCollapsed);
+        }
+        if (state.Applied.Count == 0) _nativeWidePatched.Remove(key);
     }
 
     static NativeWideSceneryKey NativeWideUserKey(IMemory m, NativeWideWorld world) =>

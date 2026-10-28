@@ -376,6 +376,14 @@ sealed partial class Editor
             {
                 if (ImGui.Button("Elimina originali (anche al centro) (Canc)")) SetRemoved(true);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Spariscono ovunque nel gioco, anche nel centro 4:3. Solo grafica: i muri restano solidi.");
+                ImGui.BeginDisabled(_brush == null);
+                if (ImGui.Button("Metti texture del pennello sull'originale")) SetRetexture(true);
+                ImGui.EndDisabled();
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip("Cambia la texture del poligono del gioco: si vede ovunque, anche al centro 4:3.\nIl pennello deve venire dalla stessa mesh. I colori dei vertici restano quelli dell'originale.");
+                if (ImGui.Button("Gira angoli##retex")) CornerUvs(false);
+                ImGui.SameLine();
+                if (ImGui.Button("Texture originale##retex")) SetRetexture(false);
                 if (ImGui.Button("Nascondi nelle bande 16:9")) SetHidden(true);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Il gioco non disegna più questi poligoni nelle bande laterali (al centro restano).");
                 ImGui.SameLine();
@@ -399,6 +407,7 @@ sealed partial class Editor
         return KindOf(key) switch
         {
             Kind.Retail when Valid(key) => $"Originale: mesh {RetailOf(i).Mesh.Name} poligono {RetailOf(i).Poly}"
+                + (_doc.Retex.ContainsKey((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [texture cambiata]" : "")
                 + (_doc.Removed.Contains((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [eliminato]"
                     : _doc.Hidden.Contains((RetailOf(i).Mesh.Name, RetailOf(i).Poly)) ? "  [nascosto nelle bande da te]"
                     : RuntimeHidden(RetailOf(i).Mesh, RetailOf(i).Poly) ? "  [nascosto nelle bande dal codice del gioco]" : ""),
@@ -531,6 +540,15 @@ sealed partial class Editor
         if (ImGui.IsItemDeactivated()) _uvShift = Vector2.Zero;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Sposta la texture (U, V in texel). Attento: fuori dal riquadro esce roba a caso.");
         ImGui.BeginDisabled(_brush == null);
+        if (ImGui.Button("Metti a celle (come l'originale)")) ApplyBrushCells(false);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Su un quad (2 triangoli): lo divide in celle grandi come quelle del triangolo\nda cui hai preso il pennello, la texture intera su ogni cella: stessa grandezza e verso dell'originale.");
+        var (ax, ay) = BrushCells();
+        ImGui.SetNextItemWidth(60 * S);
+        ImGui.DragInt("##cx", ref _cellsX, 0.1f, 0, 64, _cellsX == 0 ? $"auto {ax}" : "%d");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(60 * S);
+        ImGui.DragInt("celle (0 = auto)", ref _cellsY, 0.1f, 0, 64, _cellsY == 0 ? $"auto {ay}" : "%d");
         if (ImGui.Button("Metti texture del pennello")) ApplyBrush(false);
         ImGui.SameLine();
         if (ImGui.Button("+ colori")) ApplyBrush(true);

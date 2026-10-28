@@ -494,6 +494,13 @@ sealed partial class Editor
             }
             if (ImGui.BeginMenu("Texture"))
             {
+                if (retail > 0)
+                {
+                    if (ImGui.MenuItem("Metti texture del pennello sull'originale", "", false, _brush != null)) SetRetexture(true);
+                    if (ImGui.MenuItem("Gira angoli (originale)")) CornerUvs(false);
+                    if (ImGui.MenuItem("Rimetti la texture originale")) SetRetexture(false);
+                    ImGui.Separator();
+                }
                 if (ImGui.MenuItem("Gira angoli texture") && EnsureEditable()) CornerUvs(false);
                 if (ImGui.MenuItem("Scambia angoli texture") && EnsureEditable()) CornerUvs(true);
                 ImGui.Separator();
@@ -502,7 +509,8 @@ sealed partial class Editor
                 if (ImGui.MenuItem("Specchia orizzontale") && EnsureEditable()) UvSel(st => new(1 - st.X, st.Y));
                 if (ImGui.MenuItem("Specchia verticale") && EnsureEditable()) UvSel(st => new(st.X, 1 - st.Y));
                 ImGui.Separator();
-                if (ImGui.MenuItem("Metti texture del pennello", "", false, _brush != null) && EnsureEditable()) ApplyBrush(false);
+                if (ImGui.MenuItem("Metti a celle (come l'originale)", "", false, _brush != null) && EnsureEditable()) ApplyBrushCells(false);
+                if (ImGui.MenuItem("Metti texture del pennello (una volta, stirata)", "", false, _brush != null) && EnsureEditable()) ApplyBrush(false);
                 if (ImGui.MenuItem("Metti texture e colori del pennello", "", false, _brush != null) && EnsureEditable()) ApplyBrush(true);
                 ImGui.EndMenu();
             }
@@ -527,6 +535,13 @@ sealed partial class Editor
     void CornerUvs(bool swap)
     {
         BeginChange();
+        // Originals with a new texture: turn their corners (a swap would turn them inside out).
+        foreach (var key in _sel.Where(k => KindOf(k) == Kind.Retail))
+        {
+            var (m, p) = RetailOf(IndexOf(key));
+            if (_doc.Retex.TryGetValue((m.Name, p), out var r)) _doc.Retex[(m.Name, p)] = (r.Source, (r.Turn + 1) % 3);
+            _retailDirty = true;
+        }
         foreach (int i in SelUser)
         {
             var v = _doc.Tris[i].V;
