@@ -117,6 +117,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _gemHints;
     ThemeCheck? _singleBoxDrop;
     ThemeCheck? _introOnNewGame;
+    ThemeCheck? _startPauseMenu;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
     ThemeCheck? _cheatGod;
@@ -327,6 +328,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_gemHints, state, "gemHints");
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
         SetCheck(_introOnNewGame, state, "introOnNewGame");
+        SetCheck(_startPauseMenu, state, "startPauseMenu");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
         SetCheck(_cheatGod, state, "godMode");
@@ -1670,6 +1672,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         // ── Gameplay ──
         BeginPage(3);
+        _startPauseMenu = MakeCheck("Pause menu on Start");
+        _startPauseMenu.Location = new Point(12, y);
+        _startPauseMenu.Checked = true;
+        page.Controls.Add(_startPauseMenu);
+        y += 52;
+        AddHint("Start opens this port's pause menu in levels and on the map, instead of the original pause screen. Gamepad: Cross picks, Circle goes back, L2/R2 volume. Off: original pause; Esc still opens the menu.");
+
         _saveLives = MakeCheck("Save lives to memory card");
         _saveLives.Location = new Point(12, y);
         _saveLives.Checked = true;
@@ -1736,6 +1745,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 gemHints = _gemHints?.Checked ?? false,
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
                 introOnNewGame = _introOnNewGame?.Checked ?? false,
+                startPauseMenu = _startPauseMenu?.Checked ?? true,
             });
             CloseSheet();
         };

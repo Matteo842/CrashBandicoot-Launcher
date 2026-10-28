@@ -287,6 +287,7 @@ sealed partial class LauncherWindow
         var vol = Nav(new ThemeSlider { Value = (int)Math.Round(game.MasterVolume * 100) });
         var muted = Nav(new ThemeCheck("Muted") { Checked = game.Muted });
 
+        var startPauseMenu = Nav(new ThemeCheck("Pause menu on Start") { Checked = view.StartPauseMenu });
         var saveLives = Nav(new ThemeCheck("Save lives to memory card") { Checked = view.SaveLives });
         var analogMovement = Nav(new ThemeCheck("Analog movement (left stick)") { Checked = view.AnalogMovement });
         var boxCounter = Nav(new ThemeCheck("Box counter") { Checked = view.BoxCounter });
@@ -348,6 +349,8 @@ sealed partial class LauncherWindow
             {
                 Children =
                 {
+                    WithMargin(startPauseMenu, new Thickness(0, 0, 0, 14)),
+                    Hint("Start opens this port's pause menu in levels and on the map, instead of the original pause screen. Gamepad: Cross picks, Circle goes back, L2/R2 volume. Off: original pause; Esc still opens the menu."),
                     WithMargin(saveLives, new Thickness(0, 0, 0, 14)),
                     Hint("Load Game restores the lives you had when you saved, like Crash 2 and 3. Off: every load starts with 4 lives, as in the original."),
                     WithMargin(analogMovement, new Thickness(0, 0, 0, 14)),
@@ -399,6 +402,7 @@ sealed partial class LauncherWindow
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
+            view.StartPauseMenu = startPauseMenu.Checked;
             ConfigManager.SaveGame();
             SaveView();
             CloseSheet();

@@ -199,6 +199,15 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGui.TextDisabled("Launcher look for pause, Dev Menu and Settings; off = plain gray");
+
+        bool startPause = ConfigManager.View.StartPauseMenu;
+        if (ImGui.Checkbox("Pause menu on Start", ref startPause))
+        {
+            ConfigManager.View.StartPauseMenu = startPause;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Start opens this menu in levels and on the map; off = original pause");
+        ImGui.TextDisabled("screen. Esc opens this menu either way.");
     }
 
     static int IndexOfScale(int scale)

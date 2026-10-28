@@ -230,6 +230,7 @@ public sealed class LauncherHost : Form
             gemHints = ConfigManager.View.GemHints,
             singleBoxDrop = ConfigManager.View.SingleBoxDrop,
             introOnNewGame = ConfigManager.View.IntroOnNewGame,
+            startPauseMenu = ConfigManager.View.StartPauseMenu,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
             godMode = CheatConfig.GodMode,
@@ -696,6 +697,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.SingleBoxDrop = sbd.GetBoolean();
         if (root.TryGetProperty("introOnNewGame", out var ing))
             ConfigManager.View.IntroOnNewGame = ing.GetBoolean();
+        if (root.TryGetProperty("startPauseMenu", out var spm))
+            ConfigManager.View.StartPauseMenu = spm.GetBoolean();
 
         ConfigManager.SaveGame();
         // Persist Fullscreen etc. without touching ImGui layout (empty panel list

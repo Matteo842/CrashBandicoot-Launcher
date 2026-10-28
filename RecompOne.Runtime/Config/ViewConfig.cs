@@ -349,6 +349,17 @@ public class ViewConfig
         set => SetBool("CrashMenuStyle", value);
     }
 
+    /// <summary>
+    /// Start opens the recompiled pause menu instead of the game's pause screen, wherever the
+    /// game would pause (levels and the island map). Off = the original pause screen; Esc
+    /// still opens the menu. On by default.
+    /// </summary>
+    public bool StartPauseMenu
+    {
+        get => GetBool("StartPauseMenu", true);
+        set => SetBool("StartPauseMenu", value);
+    }
+
     /// <summary>Keys 1–5 switch frame-rate presets during gameplay. On by default.</summary>
     public bool FrameRateHotkeys
     {

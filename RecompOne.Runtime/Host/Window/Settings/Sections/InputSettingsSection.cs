@@ -36,9 +36,23 @@ internal sealed class InputSettingsSection : ISettingsSection
     int _remapRow = -1;
     bool _remapAdd;
     bool _remapCheatMenu;
+    /// <summary>
+    /// Capture takes a press only after everything was let go once: Cross or Enter that
+    /// picked the row is still down on the next frames and would bind itself.
+    /// </summary>
+    bool _captureArmed;
+
+    static long _padCaptureUntil;
+
+    /// <summary>Waiting for a pad button to bind: the pause menu leaves the pad alone.</summary>
+    public static bool PadCaptureActive => Environment.TickCount64 < _padCaptureUntil;
 
     public void Draw()
     {
+        // Refreshed while the row waits; lapses on its own when Settings closes.
+        if (_gamepadMode && _remapRow >= 0)
+            _padCaptureUntil = Environment.TickCount64 + 250;
+
         DrawDeviceSelector();
         ImGui.Spacing();
         DrawPadSelector();
@@ -165,18 +179,22 @@ internal sealed class InputSettingsSection : ISettingsSection
                 {
                     _remapRow = i;
                     _remapAdd = false;
+                    _captureArmed = false;
                 }
                 ImGui.SameLine();
                 if (ImGui.Button($"+##add{i}", new Vector2(plusW, 0)))
                 {
                     _remapRow = i;
                     _remapAdd = true;
+                    _captureArmed = false;
                 }
 
                 if (awaiting)
                 {
                     var p = InputManager.GetFirstPressedPadButton(_padIndex);
-                    if (p.HasValue)
+                    if (!_captureArmed)
+                        _captureArmed = !p.HasValue;
+                    else if (p.HasValue)
                     {
                         if (_remapAdd)
                         {
@@ -196,11 +214,14 @@ internal sealed class InputSettingsSection : ISettingsSection
                 {
                     _remapRow = i;
                     _remapCheatMenu = false;
+                    _captureArmed = false;
                 }
                 if (awaiting)
                 {
                     var p = GetPressedKey();
-                    if (p != null) { setKey(keys, p); _remapRow = -1; ConfigManager.SaveGame(); }
+                    if (!_captureArmed)
+                        _captureArmed = p == null;
+                    else if (p != null) { setKey(keys, p); _remapRow = -1; ConfigManager.SaveGame(); }
                 }
             }
         }
@@ -230,11 +251,14 @@ internal sealed class InputSettingsSection : ISettingsSection
         {
             _remapCheatMenu = true;
             _remapRow = -1;
+            _captureArmed = false;
         }
         if (_remapCheatMenu)
         {
             var p = GetPressedKey();
-            if (p != null)
+            if (!_captureArmed)
+                _captureArmed = p == null;
+            else if (p != null)
             {
                 ConfigManager.View.CheatMenuKey = p;
                 _remapCheatMenu = false;

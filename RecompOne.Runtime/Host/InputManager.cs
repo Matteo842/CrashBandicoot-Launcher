@@ -162,6 +162,51 @@ internal static unsafe class InputManager
         ApplyVirtualPad();
         AnalogMovement.ApplyStickDirections();
         Controller.Connected2 = _pad1 != null || HasAnyKey(ConfigManager.Game.Keys2);
+        StartPauseMenu.Filter(_pad0 != null && AnyPressed(_pad0, ConfigManager.Game.Pad.Start));
+    }
+
+    /// <summary>Pause menu buttons (<see cref="ReadMenuPad"/>).</summary>
+    [Flags]
+    public enum MenuPad
+    {
+        None = 0,
+        Up = 1 << 0,
+        Down = 1 << 1,
+        Left = 1 << 2,
+        Right = 1 << 3,
+        Cross = 1 << 4,
+        Circle = 1 << 5,
+        L1 = 1 << 6,
+        R1 = 1 << 7,
+        L2 = 1 << 8,
+        R2 = 1 << 9,
+        /// <summary>Start, Select: only mark the pad as in use.</summary>
+        Other = 1 << 10,
+    }
+
+    /// <summary>
+    /// Menu buttons on either pad in the launcher layout, not the game bindings: D-pad or left
+    /// stick, Cross (A) / Circle (B), L1/R1, L2/R2.
+    /// </summary>
+    public static MenuPad ReadMenuPad() => _sdl == null ? MenuPad.None : ReadMenuPad(_pad0) | ReadMenuPad(_pad1);
+
+    static MenuPad ReadMenuPad(GameController* ctrl)
+    {
+        if (ctrl == null) return MenuPad.None;
+        var b = MenuPad.None;
+        if (Pressed(ctrl, (int)GameControllerButton.DpadUp) || Pressed(ctrl, LeftStickUp)) b |= MenuPad.Up;
+        if (Pressed(ctrl, (int)GameControllerButton.DpadDown) || Pressed(ctrl, LeftStickDown)) b |= MenuPad.Down;
+        if (Pressed(ctrl, (int)GameControllerButton.DpadLeft) || Pressed(ctrl, LeftStickLeft)) b |= MenuPad.Left;
+        if (Pressed(ctrl, (int)GameControllerButton.DpadRight) || Pressed(ctrl, LeftStickRight)) b |= MenuPad.Right;
+        if (Pressed(ctrl, (int)GameControllerButton.A)) b |= MenuPad.Cross;
+        if (Pressed(ctrl, (int)GameControllerButton.B)) b |= MenuPad.Circle;
+        if (Pressed(ctrl, (int)GameControllerButton.Leftshoulder)) b |= MenuPad.L1;
+        if (Pressed(ctrl, (int)GameControllerButton.Rightshoulder)) b |= MenuPad.R1;
+        if (Pressed(ctrl, LeftTrigger)) b |= MenuPad.L2;
+        if (Pressed(ctrl, RightTrigger)) b |= MenuPad.R2;
+        if (Pressed(ctrl, (int)GameControllerButton.Start) || Pressed(ctrl, (int)GameControllerButton.Back))
+            b |= MenuPad.Other;
+        return b;
     }
 
     // Embedded child HWND often doesn't get Silk KeyDown (focus on parent / lost focus).
@@ -506,12 +551,15 @@ internal static unsafe class InputManager
         return s;
     }
 
-    static ushort Apply(GameController* ctrl, int[] bindings, ushort bit, ushort s)
+    static ushort Apply(GameController* ctrl, int[] bindings, ushort bit, ushort s) =>
+        AnyPressed(ctrl, bindings) ? (ushort)(s & ~bit) : s;
+
+    static bool AnyPressed(GameController* ctrl, int[] bindings)
     {
         foreach (var binding in bindings)
             if (Pressed(ctrl, binding))
-                return (ushort)(s & ~bit);
-        return s;
+                return true;
+        return false;
     }
 
     static bool Pressed(GameController* ctrl, int binding)

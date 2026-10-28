@@ -401,6 +401,12 @@ internal static class HostWindow
                     pause.HandleEscape();
             }
         }
+        // Start in place of the game's pause screen, pad Start to resume (StartPauseMenu).
+        if (StartPauseMenu.ConsumeToggle() && !ExitToMapInjector.Active
+            && PanelManager.Get<PauseMenuPopup>() is { } startPause)
+            startPause.IsOpen = !startPause.IsOpen;
+        if (StartPauseMenu.ConsumeExit() && PanelManager.Get<PauseMenuPopup>() is { IsOpen: true } exitPause)
+            exitPause.ExitToMap();
         if (InputManager.TryConsumeFrameRateIndex(out int fpsIndex)
             && ConfigManager.View.FrameRateHotkeys
             && !ImGuiWantsTextInput()
@@ -852,6 +858,8 @@ internal static class HostWindow
     {
         Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Events);
         var gl = _gl!;
+        // Pad input for the pause menu is queued before ImGui's NewFrame.
+        PauseMenuPad.Update();
         if (_imguiEs != null) _imguiEs.Update((float)dt);
         else
         {

@@ -11,6 +11,20 @@ namespace RecompOne.Runtime.Host.Window;
 internal sealed class SettingsView
 {
     string _selectedId = "";
+    /// <summary>Frames the old-style tab bar needs to show a tab picked with L1/R1.</summary>
+    int _stepFrames;
+
+    /// <summary>Previous / next section, wrapping like the launcher sheet (L1/R1).</summary>
+    public void StepTab(int direction)
+    {
+        var sections = SettingsRegistry.Sections;
+        if (ResolveSelection(sections) is not { } current) return;
+        int index = 0;
+        for (int i = 0; i < sections.Count; i++)
+            if (sections[i] == current) index = i;
+        _selectedId = sections[(index + direction + sections.Count) % sections.Count].Id;
+        _stepFrames = 2;
+    }
 
     /// <summary>Draws the tabs and the selected section, <paramref name="height"/> px tall.</summary>
     public void Draw(float ui, float height)
@@ -28,8 +42,11 @@ internal sealed class SettingsView
                 titles[i] = sections[i].Title;
                 if (sections[i] == current) index = i;
             }
-            int picked = CrashUi.Tabs("settings-tabs", titles, index, ui);
-            if (picked != index)
+            bool stepping = _stepFrames > 0;
+            int picked = CrashUi.Tabs("settings-tabs", titles, index, ui, select: stepping);
+            if (stepping)
+                _stepFrames--;
+            else if (picked != index)
             {
                 current = sections[picked];
                 _selectedId = current.Id;
@@ -52,7 +69,9 @@ internal sealed class SettingsView
 
     static void DrawContent(ISettingsSection? current, float height)
     {
-        ImGui.BeginChild("##settings-content", new Vector2(0f, height), ImGuiChildFlags.Border);
+        // Flattened: D-pad / arrows go from the tabs straight to the options, no "enter box" step.
+        ImGui.BeginChild("##settings-content", new Vector2(0f, height), ImGuiChildFlags.Border,
+            ImGuiWindowFlags.NavFlattened);
 
         if (current == null)
         {

@@ -396,12 +396,14 @@ internal static class CrashUi
 
     /// <summary>
     /// Section tabs of the launcher Settings sheet: equal-width boxes across the card, the
-    /// selected one filled Wumpa. Returns the selected index. Old style: ImGui tab bar.
+    /// selected one filled Wumpa. Returns the selected index. Old style: ImGui tab bar, where
+    /// <paramref name="select"/> moves it to <paramref name="selected"/> (L1/R1); it shows
+    /// the new tab from the next frame.
     /// </summary>
-    public static int Tabs(string id, IReadOnlyList<string> labels, int selected, float ui)
+    public static int Tabs(string id, IReadOnlyList<string> labels, int selected, float ui, bool select = false)
     {
         if (labels.Count == 0) return selected;
-        if (!Enabled) return ClassicTabs(id, labels, selected);
+        if (!Enabled) return ClassicTabs(id, labels, selected, select);
 
         float gap = 8f * ui;
         float h = 30f * ui;
@@ -415,9 +417,11 @@ internal static class CrashUi
             if (i > 0) ImGui.SameLine(0f, gap);
             if (ImGui.InvisibleButton($"##{id}-{i}", new Vector2(w, h)))
                 result = i;
+            bool sel = i == selected;
+            // Keyboard / pad navigation starts on the open tab when the window appears.
+            if (sel) ImGui.SetItemDefaultFocus();
             bool hover = ImGui.IsItemHovered();
             bool focus = ImGui.IsItemFocused() && ImGui.GetIO().NavVisible;
-            bool sel = i == selected;
             var min = ImGui.GetItemRectMin();
             var max = ImGui.GetItemRectMax();
 
@@ -448,18 +452,30 @@ internal static class CrashUi
         return result;
     }
 
-    static int ClassicTabs(string id, IReadOnlyList<string> labels, int selected)
+    static int ClassicTabs(string id, IReadOnlyList<string> labels, int selected, bool select)
     {
         int result = selected;
         if (!ImGui.BeginTabBar("##" + id)) return result;
         for (int i = 0; i < labels.Count; i++)
         {
-            if (!ImGui.BeginTabItem($"{labels[i]}##{id}-{i}")) continue;
+            var flags = select && i == selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            if (!BeginTabItem($"{labels[i]}##{id}-{i}", flags)) continue;
             result = i;
             ImGui.EndTabItem();
         }
         ImGui.EndTabBar();
         return result;
+    }
+
+    /// <summary>ImGui.NET has flags only with p_open, and a p_open draws a close button on the tab.</summary>
+    static unsafe bool BeginTabItem(string label, ImGuiTabItemFlags flags)
+    {
+        int n = System.Text.Encoding.UTF8.GetByteCount(label);
+        byte* text = stackalloc byte[n + 1];
+        fixed (char* c = label)
+            System.Text.Encoding.UTF8.GetBytes(c, label.Length, text, n);
+        text[n] = 0;
+        return ImGuiNative.igBeginTabItem(text, null, flags) != 0;
     }
 
     /// <summary>Fading Wumpa rule between blocks (old style: separator).</summary>
