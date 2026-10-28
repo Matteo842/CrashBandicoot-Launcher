@@ -106,8 +106,12 @@
           ]
         }
       ],
-      "hidden": [],
-      "removed": [],
+      "hidden": [
+        1731
+      ],
+      "removed": [
+        1731
+      ],
       "retexture": [],
       "hiddenRepairs": []
     }
