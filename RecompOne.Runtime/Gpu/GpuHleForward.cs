@@ -68,9 +68,11 @@ public sealed partial class Gpu
         if (flags.WideMode == WidePrimitiveMode.Default && depth)
         {
             // The original centre relies on the PS1 ordering table, including
-            // authored exceptions to geometric depth. Preserve that ordering.
-            flags.WideMode = WidePrimitiveMode.CoreOnly;
-            be.DrawTri(HV(a, sub, false), HV(b, sub, false), HV(c, sub, false), flags);
+            // authored exceptions to geometric depth. Preserve that ordering,
+            // except for objects it sorts over nearer scenery (#178).
+            bool coreDepth = GpuHle.CurrentCoreDepth;
+            flags.WideMode = coreDepth ? WidePrimitiveMode.CoreDepthTest : WidePrimitiveMode.CoreOnly;
+            be.DrawTri(HV(a, sub, coreDepth), HV(b, sub, coreDepth), HV(c, sub, coreDepth), flags);
             float ax = sub ? a.Fx : a.X, bx = sub ? b.Fx : b.X, cx = sub ? c.Fx : c.X;
             float minX = Math.Min(ax, Math.Min(bx, cx));
             float maxX = Math.Max(ax, Math.Max(bx, cx));

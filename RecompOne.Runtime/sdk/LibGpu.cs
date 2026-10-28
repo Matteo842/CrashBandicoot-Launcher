@@ -36,12 +36,14 @@ public static class LibGpu
                     Host.FramePacing.DrawNativeWideCore();
                     GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.World;
                     GpuHle.CurrentHudRange = -1;
+                    GpuHle.CurrentCoreDepth = false;
                 }
                 else
                 {
                     int hud = Host.FramePacing.NativeWideHudRangeOf(addr);
                     GpuHle.CurrentHudRange = hud;
                     GpuHle.CurrentPrimitiveKind = hud >= 0 ? GpuHle.PrimitiveKind.Hud : GpuHle.PrimitiveKind.Default;
+                    GpuHle.CurrentCoreDepth = hud < 0 && Host.FramePacing.IsNativeWideCoreDepthPrimitive(addr);
                 }
                 for (uint i = 0; i < count; i++)
                 {
@@ -59,6 +61,7 @@ public static class LibGpu
             GpuHle.CurrentPrimitiveKind = GpuHle.PrimitiveKind.Default;
             GpuHle.CurrentHudRange = -1;
             GpuHle.CurrentOtSlot = -1;
+            GpuHle.CurrentCoreDepth = false;
             Host.FramePacing.FinishNativeWideDraw();
         }
 

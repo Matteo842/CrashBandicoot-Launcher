@@ -22,6 +22,12 @@ public static class GpuHle
     /// </summary>
     public static int CurrentOtSlot { get; set; } = -1;
 
+    /// <summary>
+    /// The primitive DrawOTag is decoding belongs to an object whose 4:3 core
+    /// part is depth-tested (see <see cref="Host.FramePacing.IsNativeWideCoreDepthPrimitive"/>).
+    /// </summary>
+    public static bool CurrentCoreDepth { get; set; }
+
     static int _wideWorldPositive;
     static int _wideWorldNegative;
 

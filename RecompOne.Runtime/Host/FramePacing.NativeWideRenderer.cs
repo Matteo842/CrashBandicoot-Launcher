@@ -113,6 +113,7 @@ public static partial class FramePacing
         _nativeWideFogBackground = null;
         _nativeWideSkyFill = null;
         _nativeWideView = null;
+        ClearNativeWideCoreDepth();
         GpuHle.NativeWideRendererActive = false;
         if (!GpuHle.WideFovActive)
         {
@@ -282,6 +283,7 @@ public static partial class FramePacing
         _nativeWideCorePending.Clear();
         _nativeWideView = null;
         ClearNativeWideHudRanges();
+        ClearNativeWideCoreDepth();
         GpuHle.NativeWideRendererActive = false;
     }
 
@@ -293,6 +295,7 @@ public static partial class FramePacing
         _nativeWideLogCount = 0;
         _nativeWideSceneryRepairs.Clear();
         _nativeWideSkyArcs.Clear();
+        _nativeWideCoreOccluders.Clear();
     }
 
     /// <summary>
@@ -536,11 +539,13 @@ public static partial class FramePacing
             }
             if (world.PolyCount == 0) continue;
             // Neighbour meshes also fill the 4:3 core (#105); the zone's own
-            // meshes are drawn there by the game itself.
+            // meshes are drawn there by the game itself, except a few
+            // polygons whose depth objects are tested against (#178).
             bool fillCore = world.Neighbor && world.Only == null;
+            int[]? coreOccluders = fillCore || world.Only != null ? null : NativeWideCoreOccluders(m, world);
             bool worldSides = NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
                 viewCenterX, coreHalf);
-            if (!worldSides && !fillCore)
+            if (!worldSides && !fillCore && coreOccluders == null)
                 continue;
             int gemColumn = gemTempleHidden && NativeWideGemColumnMesh(m, world) ? NativeWideGemColumnFirst : -1;
             int[]? hiddenSides = NativeWideWithUserHidden(m, world, NativeWideHiddenSides(m, world));
@@ -558,7 +563,8 @@ public static partial class FramePacing
                     && NativeWideTouchesSides(world, indexA, indexB, indexC, near,
                         projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
                         viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
-                bool core = fillCore && NativeWideTouchesCore(world, indexA, indexB, indexC, near,
+                bool core = (fillCore || coreOccluders != null && Array.BinarySearch(coreOccluders, pi) >= 0)
+                    && NativeWideTouchesCore(world, indexA, indexB, indexC, near,
                         projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
                         viewCenterX, viewCenterY, coreHalf, halfHeight);
                 if (!sides && !core)

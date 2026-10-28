@@ -861,7 +861,8 @@ public sealed class GlBackend : IGpuBackend
 
         int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
         int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
-        if (_kWideMode is WidePrimitiveMode.CoreOnly or WidePrimitiveMode.WorldCore && rt.Margin > 0)
+        if (_kWideMode is WidePrimitiveMode.CoreOnly or WidePrimitiveMode.WorldCore
+                or WidePrimitiveMode.CoreDepthTest && rt.Margin > 0)
         {
             cx0 = rt.Margin;
             cx1 = rt.Margin + rt.W - 1;
@@ -939,7 +940,8 @@ public sealed class GlBackend : IGpuBackend
         bool user = _kWideMode == WidePrimitiveMode.WorldUserSides;
         bool worldPass = _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore;
         bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore
-            or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.WorldUserSides or WidePrimitiveMode.DepthTest;
+            or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.WorldUserSides or WidePrimitiveMode.DepthTest
+            or WidePrimitiveMode.CoreDepthTest;
         if (extension)
         {
             // Extensions participate in real depth, including against the
@@ -964,7 +966,10 @@ public sealed class GlBackend : IGpuBackend
             // texels blend. The opaque texels still form solid world surfaces,
             // so the native-wide world pass must establish depth for the whole
             // triangle. Object translucency keeps the conventional no-write path.
-            _gl.DepthMask(worldPass || extension || user || !_kTransparent);
+            // An object's core part only tests against the scenery: its own
+            // faces keep the ordering table's order, edges included.
+            _gl.DepthMask(worldPass || extension || user
+                || !_kTransparent && _kWideMode != WidePrimitiveMode.CoreDepthTest);
         }
         else
         {

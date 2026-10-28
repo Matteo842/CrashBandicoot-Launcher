@@ -22,6 +22,7 @@ public static partial class FramePacing
         RestoreNativeWideObjectFrustum(m);
         WidenNativeWideObjectFrustum(c, m);
         BeginNativeWideObjectRepair(c, m);
+        BeginNativeWideCoreDepthObject(c, m);
         if (!IsActive(m)) return true;
         if (GamePaused(m)) return true;
         // Full original 33 ms step already landed on the GOOL pose.
@@ -56,6 +57,7 @@ public static partial class FramePacing
     public static void PostGfxTransformMesh(CpuContext c, IMemory m)
     {
         EndNativeWideObjectRepair(m);
+        EndNativeWideCoreDepthObject(m);
         RestoreSvtx(m);
         RestoreNativeWideObjectFrustum(m);
     }

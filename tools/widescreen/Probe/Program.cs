@@ -56,7 +56,8 @@ Directory.CreateDirectory(output);
 AppPaths.SetRoot(Path.Combine(output, "state")); Directory.CreateDirectory(AppPaths.Root);
 Directory.SetCurrentDirectory(AppPaths.Root); ConfigManager.Load();
 ConfigManager.Game.CdPath = disc; ConfigManager.Game.Muted = true;
-ConfigManager.View.Widescreen = true; ConfigManager.View.InternalResolution = 2;
+// WIDE=0 runs the original 4:3 view (retail comparison frames).
+ConfigManager.View.Widescreen = Environment.GetEnvironmentVariable("WIDE") != "0"; ConfigManager.View.InternalResolution = 2;
 ConfigManager.View.Fullscreen = false; ConfigManager.View.FrameRate = fps;
 ConfigManager.View.HideTopBar = true;
 CheatConfig.GodMode = false; CheatConfig.Fly = false;
@@ -118,6 +119,34 @@ using var noDeath = new Hook(game.GetMethod("func_8001D698")!,
         if (flying && c.A0 == m.ReadU32(CrashPointer) && c.A1 is (>= 22 and <= 31) or 40 or 41) return;
         original(c, m);
     }));
+// OBJHIDE=<entity id,...> skips drawing those objects' SVTX meshes; OBJSIZE=<entity id>:<value>
+// draws those objects (ids comma-separated) with another OT bias (obj->size, 0x138, the GOOL zindex).
+var hideIds = (Environment.GetEnvironmentVariable("OBJHIDE") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+    .Select(int.Parse).ToHashSet();
+string[] sizeSpec = (Environment.GetEnvironmentVariable("OBJSIZE") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries);
+var sizeIds = sizeSpec.Length == 2 ? sizeSpec[0].Split(',').Select(int.Parse).ToHashSet() : [];
+int EntityId(IMemory m, uint obj)
+{
+    uint entity = m.ReadU32(obj + 0x110);
+    return (entity & 0xFFE00000u) == 0x80000000u ? m.ReadU16(entity + 8) : -1;
+}
+using var svtxHook = hideIds.Count > 0 || sizeSpec.Length == 2
+    ? new Hook(game.GetMethod("func_80018964")!,
+        (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((original, c, m) =>
+        {
+            int id = (c.A2 & 0xFFE00000u) == 0x80000000u ? EntityId(m, c.A2) : -1;
+            if (hideIds.Contains(id)) return;
+            if (sizeIds.Contains(id))
+            {
+                uint saved = m.ReadU32(c.A2 + 0x138);
+                m.WriteU32(c.A2 + 0x138, (uint)int.Parse(sizeSpec[1]));
+                original(c, m);
+                m.WriteU32(c.A2 + 0x138, saved);
+                return;
+            }
+            original(c, m);
+        }))
+    : null;
 const string Alpha = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_!";
 static string Eid(uint e) => new([.. new[] { 25, 19, 13, 7, 1 }.Select(s => Alpha[(int)(e >> s) & 63])]);
 

@@ -16,6 +16,10 @@ public enum WidePrimitiveMode : byte
     // offset towards the camera, so a hand-made copy of a retail face drawn
     // with another texture wins over the face it lies on.
     WorldUserSides,
+    // 4:3 core part of an object that the ordering table sorts in front of
+    // nearer scenery (#178): depth-tested against the core fill, like its
+    // side-band part against the side world.
+    CoreDepthTest,
 }
 
 public struct HleVertex
