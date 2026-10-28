@@ -2,7 +2,7 @@
   "version": 1,
   "level": 35,
   "name": "Sunset Vista",
-  "nextGroup": 37,
+  "nextGroup": 39,
   "meshes": [
     {
       "name": "a__zW",
@@ -283,6 +283,7 @@
         316,
         349
       ],
+      "retexture": [],
       "hiddenRepairs": []
     },
     {
@@ -420,6 +421,7 @@
       ],
       "hidden": [],
       "removed": [],
+      "retexture": [],
       "hiddenRepairs": []
     },
     {
@@ -557,6 +559,7 @@
       ],
       "hidden": [],
       "removed": [],
+      "retexture": [],
       "hiddenRepairs": []
     },
     {
@@ -690,10 +693,73 @@
             36,
             72
           ]
+        },
+        {
+          "poly": 311,
+          "behind": false,
+          "group": 38,
+          "v": [
+            125592,
+            -44384,
+            -6288,
+            128,
+            32,
+            25,
+            39,
+            81,
+            125328,
+            -44272,
+            -6968,
+            128,
+            63,
+            25,
+            39,
+            81,
+            125560,
+            -42904,
+            -6840,
+            159,
+            63,
+            44,
+            50,
+            91
+          ]
+        },
+        {
+          "poly": 311,
+          "behind": false,
+          "group": 38,
+          "v": [
+            125592,
+            -44384,
+            -6288,
+            128,
+            32,
+            25,
+            39,
+            81,
+            125560,
+            -42904,
+            -6840,
+            159,
+            63,
+            44,
+            50,
+            91,
+            125824,
+            -43008,
+            -6160,
+            159,
+            32,
+            44,
+            50,
+            91
+          ]
         }
       ],
       "hidden": [],
       "removed": [],
+      "retexture": [],
       "hiddenRepairs": []
     },
     {
@@ -893,6 +959,7 @@
       ],
       "hidden": [],
       "removed": [],
+      "retexture": [],
       "hiddenRepairs": []
     },
     {
@@ -4941,6 +5008,7 @@
         703,
         704
       ],
+      "retexture": [],
       "hiddenRepairs": []
     }
   ]
