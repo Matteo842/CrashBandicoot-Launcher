@@ -152,6 +152,10 @@ sealed partial class Editor
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Poi clic su un triangolo: la sua texture diventa il pennello.");
         if (_tool == Tool.Eyedropper) ImGui.TextColored(new Vector4(1, 0.9f, 0.3f, 1), "Clic su un triangolo per prendere la texture");
+        ToolButton(Tool.Sculpt, "Scolpisci terreno", "Tieni premuto e passa sui tuoi triangoli: li alza, abbassa, liscia o appiattisce (solo in altezza).\nGli automatici toccati diventano tuoi (si può spegnere qui sotto).\nCtrl: al contrario. Shift: liscia. Ctrl+rotella: raggio del pennello.");
+        if (_tool == Tool.Sculpt) SculptPanel();
+        ToolButton(Tool.Bridge, "Ponte (clic sui vertici)", "Collega due bordi con un pezzo di terreno nuovo.\nClic sui vertici del primo bordo in fila, Invio, clic sui vertici dell'altro bordo, Invio.\nBackspace toglie l'ultimo punto, Esc ricomincia.");
+        if (_tool == Tool.Bridge) BridgeToolPanel();
         if (_tool is Tool.Quad or Tool.Triangle)
         {
             ImGui.Text($"Punti: {_points.Count}/{(_tool == Tool.Quad ? 4 : 3)}");
@@ -185,9 +189,12 @@ sealed partial class Editor
         ImGui.Checkbox("Automatici", ref _pickAuto);
         ImGui.SameLine();
         ImGui.Checkbox("Miei", ref _pickUser);
+        ImGui.Checkbox("Rettangolo attraverso", ref _boxThrough);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Il rettangolo prende anche i triangoli nascosti dietro altri (conta il centro del triangolo).\nUtile per ripulire strati di automatici uno sopra l'altro.");
 
         ImGui.SeparatorText("Comandi");
-        ImGui.TextWrapped("Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nW / E / R: sposta / ruota / scala.\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, T sposta+ruota, Esc annulla.");
+        ImGui.TextWrapped("Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nW / E / R: sposta / ruota / scala.\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, T sposta+ruota, L seleziona collegati, Esc annulla.");
         ImGui.End();
     }
 
@@ -398,6 +405,8 @@ sealed partial class Editor
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Disattiva questi automatici e ne crea una copia tua uguale da sistemare.");
             }
         }
+        BridgeSelectionSection();
+        TerrainSelectionSection();
         if (user.Count > 0) UserSection(user);
     }
 
@@ -799,6 +808,9 @@ sealed partial class Editor
         }
 
         if (_tool == Tool.Select && _sel.Count > 0) DrawGizmo(dl);
+        if (_tool == Tool.Sculpt && _view.Contains(ImGui.GetIO().MousePos)) SculptOverlay(dl);
+        if (_tool == Tool.Bridge) BridgeOverlay(dl);
+        BridgePieceOverlay(dl);
         if (_tool == Tool.Vertex)
         {
             foreach (var t in _doc.Tris)

@@ -360,6 +360,7 @@ sealed partial class Editor : IDisposable
             _autoDirty = false;
             var list = new List<GpuVertex>(_auto.Tris.Count * 3);
             _autoRange.Clear();
+            var repairOff = RepairOffTest();
             foreach (var m in L.Meshes)
             {
                 int start = list.Count;
@@ -367,7 +368,7 @@ sealed partial class Editor : IDisposable
                     for (int i = range.Start; i < range.Start + range.Count; i++)
                     {
                         var t = _auto.Tris[i];
-                        bool off = _doc.IsRepairHidden(t);
+                        bool off = repairOff(t);
                         if (off && !_showOff) continue;
                         var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
                         var (info, clut) = Bits.Of(mat, (int)Kind.Auto, off, t.Behind, t.Rank, m.Backdrop);
@@ -710,6 +711,17 @@ sealed partial class Editor : IDisposable
         _viewBright = Math.Clamp(p.ViewBright, 0.5f, 4f);
         _markHidden = p.MarkHidden;
         _ghostCore = p.GhostCore;
+        _boxThrough = p.BoxThrough;
+        _extendLone = p.ExtendLone;
+        _bridgeCurve = p.BridgeCurve;
+        _sculptMode = Enum.TryParse<SculptMode>(p.SculptMode, out var sm) ? sm : SculptMode.Smooth;
+        _sculptRadius = Math.Clamp(p.SculptRadius, 50, 8000);
+        _sculptStrength = Math.Clamp(p.SculptStrength, 0.05f, 2);
+        _sculptAutos = p.SculptAutos;
+        _sculptLockOriginals = p.SculptLockOriginals;
+        _extendSteps = Math.Clamp(p.ExtendSteps, 1, 30);
+        _extendSlope = Enum.TryParse<ExtendSlope>(p.ExtendSlope, out var es) ? es : ExtendSlope.Fade;
+        _extendSide = Enum.TryParse<ExtendSide>(p.ExtendSide, out var ed) ? ed : ExtendSide.Bands;
     }
 
     /// <summary>Writes the settings file when anything in it changed.</summary>
@@ -728,6 +740,17 @@ sealed partial class Editor : IDisposable
         p.ViewBright = _viewBright;
         p.MarkHidden = _markHidden;
         p.GhostCore = _ghostCore;
+        p.BoxThrough = _boxThrough;
+        p.ExtendLone = _extendLone;
+        p.BridgeCurve = _bridgeCurve;
+        p.SculptMode = _sculptMode.ToString();
+        p.SculptRadius = _sculptRadius;
+        p.SculptStrength = _sculptStrength;
+        p.SculptAutos = _sculptAutos;
+        p.SculptLockOriginals = _sculptLockOriginals;
+        p.ExtendSteps = _extendSteps;
+        p.ExtendSlope = _extendSlope.ToString();
+        p.ExtendSide = _extendSide.ToString();
         if (L != null && _screen == Screen.Edit)
             p.Cameras[L.Id.ToString()] = new CameraPref
             {

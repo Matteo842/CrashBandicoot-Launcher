@@ -469,6 +469,11 @@ sealed partial class Editor
                 if (ImGui.MenuItem("Nascondi solo nelle bande 16:9")) SetHidden(true);
                 if (ImGui.MenuItem("Mostra nelle bande 16:9")) SetHidden(false);
             }
+            if (ImGui.MenuItem("Seleziona collegati", "L")) SelectLinked();
+            if (auto > 0 && ImGui.MenuItem("Seleziona tutti gli automatici della mesh")) SelectMeshAutos();
+            if (ImGui.MenuItem("Estendi terreno dal bordo")) ExtendTerrain();
+            if (ImGui.MenuItem("Ponte: questo è il pezzo A")) MarkBridgeA();
+            if (ImGui.MenuItem(_bridgeA != null ? "Ponte: crea dal pezzo A a questo" : "Ponte tra i 2 pezzi selezionati")) BridgePieces();
             if (_sel.Count == 1 && KindOf(_sel.First()) != Kind.Retail
                 && ImGui.MenuItem("Seleziona tutto il pezzo", "doppio clic"))
             {

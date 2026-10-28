@@ -5,8 +5,8 @@ using ImGuiNET;
 
 namespace WideEditor;
 
-enum Tool { Select, Vertex, Quad, Triangle, Eyedropper }
-enum DragMode { None, ClickPending, Box, Axis, Plane, PlaneAxis, Rotate, Scale, Vertex }
+enum Tool { Select, Vertex, Quad, Triangle, Eyedropper, Sculpt, Bridge }
+enum DragMode { None, ClickPending, Box, Axis, Plane, PlaneAxis, Rotate, Scale, Vertex, Sculpt }
 
 sealed partial class Editor
 {
@@ -121,12 +121,14 @@ sealed partial class Editor
         var io = ImGui.GetIO();
         var mouse = io.MousePos;
         bool over = _view.Contains(mouse) && !io.WantCaptureMouse;
+        _frameDt = dt;
 
         // Every key is polled each frame (edges need it), then acted on.
         bool z = KeyHit(Silk.NET.Input.Key.Z), y = KeyHit(Silk.NET.Input.Key.Y), s = KeyHit(Silk.NET.Input.Key.S);
         bool d = KeyHit(Silk.NET.Input.Key.D), del = KeyHit(Silk.NET.Input.Key.Delete), esc = KeyHit(Silk.NET.Input.Key.Escape);
         bool f = KeyHit(Silk.NET.Input.Key.F), w = KeyHit(Silk.NET.Input.Key.W), e = KeyHit(Silk.NET.Input.Key.E);
-        bool r = KeyHit(Silk.NET.Input.Key.R), t = KeyHit(Silk.NET.Input.Key.T);
+        bool r = KeyHit(Silk.NET.Input.Key.R), t = KeyHit(Silk.NET.Input.Key.T), l = KeyHit(Silk.NET.Input.Key.L);
+        bool enter = KeyHit(Silk.NET.Input.Key.Enter) | KeyHit(Silk.NET.Input.Key.KeypadEnter), back = KeyHit(Silk.NET.Input.Key.Backspace);
         if (!io.WantTextInput && _drag == DragMode.None)
         {
             if (Ctrl && z) { if (Shift) Redo(); else Undo(); }
@@ -134,9 +136,12 @@ sealed partial class Editor
             if (Ctrl && s) Save();
             if (Ctrl && d) CopyAsMine(false);
             if (del) DeleteSelection();
+            if (_tool == Tool.Bridge && enter) BridgeNext();
+            if (_tool == Tool.Bridge && back) BridgeUndoPoint();
             if (esc)
             {
-                if (_points.Count > 0) _points.Clear();
+                if (_tool == Tool.Bridge && BridgeHasPoints) BridgeReset();
+                else if (_points.Count > 0) _points.Clear();
                 else if (_tool != Tool.Select) _tool = Tool.Select;
                 else _sel.Clear();
             }
@@ -147,6 +152,7 @@ sealed partial class Editor
                 if (e) _gizmo = GizmoMode.Rotate;
                 if (r) _gizmo = GizmoMode.Scale;
                 if (t) _gizmo = GizmoMode.All;
+                if (l) SelectLinked();
             }
         }
 
@@ -194,7 +200,9 @@ sealed partial class Editor
         CaptureCursor((_looking && _rightMoved) || _panning);
         if (_panning) StopFollow();
         if (_panning) _cam.Pos += (-_cam.Right * io.MouseDelta.X + _cam.Up * io.MouseDelta.Y) * _panScale;
-        if (over && io.MouseWheel != 0)
+        if (over && io.MouseWheel != 0 && _tool == Tool.Sculpt && Ctrl)
+            _sculptRadius = Math.Clamp(_sculptRadius * MathF.Pow(1.15f, io.MouseWheel), 50, 8000);
+        else if (over && io.MouseWheel != 0)
         {
             float dist = _hoverPos.W > 0.5f ? Vector3.Distance(_cam.Pos, new(_hoverPos.X, _hoverPos.Y, _hoverPos.Z)) : 2000;
             StopFollow();
@@ -249,6 +257,11 @@ sealed partial class Editor
             }
             _pointPreview = PointFor(mouse);
         }
+        if (_tool == Tool.Bridge && _snapVerts)
+        {
+            EnsureSnapTargets([]);
+            if (FindSnap(mouse, 12, out var p)) _snapHit = p;
+        }
     }
 
     void LeftPress(Vector2 mouse)
@@ -277,6 +290,12 @@ sealed partial class Editor
                 TakeBrush(_hoverId);
                 _tool = _toolBefore;
                 break;
+            case Tool.Sculpt:
+                StartSculpt();
+                break;
+            case Tool.Bridge:
+                BridgeClick();
+                break;
         }
     }
 
@@ -296,6 +315,9 @@ sealed partial class Editor
                 break;
             case DragMode.Vertex:
                 UpdateVertexDrag(mouse);
+                break;
+            case DragMode.Sculpt:
+                SculptStep();
                 break;
         }
     }
@@ -366,6 +388,7 @@ sealed partial class Editor
         var min = Vector2.Max(Vector2.Min(a, b), new Vector2(_view.X, _view.Y));
         var max = Vector2.Min(Vector2.Max(a, b), new Vector2(_view.X + _view.W - 1, _view.Y + _view.H - 1));
         if (max.X <= min.X || max.Y <= min.Y) return;
+        if (_boxThrough) { BoxSelectThrough(min, max); return; }
         var (x0, y1) = ToTarget(min);
         var (x1, y0) = ToTarget(max);
         var ids = _gfx.ReadIds(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
@@ -452,6 +475,7 @@ sealed partial class Editor
             _snapS.Add(s);
             _snapP.Add(p);
         }
+        var repairOff = RepairOffTest();
         foreach (var m in _drawMeshes)
         {
             if (m.Backdrop) continue;
@@ -460,7 +484,7 @@ sealed partial class Editor
                 for (int i = r.Start; i < r.Start + r.Count; i++)
                 {
                     var t = _auto.Tris[i];
-                    if (_doc.IsRepairHidden(t)) continue;
+                    if (repairOff(t)) continue;
                     Add(t.A.Pos); Add(t.B.Pos); Add(t.C.Pos);
                 }
         }

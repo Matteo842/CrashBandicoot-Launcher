@@ -43,6 +43,17 @@ sealed class Prefs
     public float ViewBright { get; set; } = 1;
     public bool MarkHidden { get; set; } = true;
     public bool GhostCore { get; set; } = true;
+    public bool BoxThrough { get; set; }
+    public bool ExtendLone { get; set; }
+    public bool BridgeCurve { get; set; } = true;
+    public string SculptMode { get; set; } = nameof(WideEditor.SculptMode.Smooth);
+    public float SculptRadius { get; set; } = 600;
+    public float SculptStrength { get; set; } = 0.5f;
+    public bool SculptAutos { get; set; } = true;
+    public bool SculptLockOriginals { get; set; } = true;
+    public int ExtendSteps { get; set; } = 3;
+    public string ExtendSlope { get; set; } = nameof(WideEditor.ExtendSlope.Fade);
+    public string ExtendSide { get; set; } = nameof(WideEditor.ExtendSide.Bands);
     public Dictionary<string, CameraPref> Cameras { get; set; } = [];
 
     public static Prefs Load()

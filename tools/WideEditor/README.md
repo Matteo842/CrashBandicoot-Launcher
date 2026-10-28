@@ -32,4 +32,24 @@ mesh è disegnata (zona della camera + zone vicine), come nell'editor in "Come n
 - Gizmo su qualsiasi selezione: W sposta (frecce, quadratini = piani, quadrato centrale = schermo),
   E ruota (anelli, passo in gradi), R scala. Gli automatici trascinati diventano tuoi; gli originali
   si copiano (l'originale resta). Alt+trascina: sposta una copia. Aggancio ai vertici.
-- Ctrl+Z / Ctrl+Y / Ctrl+S / Ctrl+D (copia) / Canc / F (inquadra) / Esc.
+- Ctrl+Z / Ctrl+Y / Ctrl+S / Ctrl+D (copia) / Canc / F (inquadra) / L (seleziona collegati) / Esc.
+
+## Terreno e pulizia
+
+- **Estendi il bordo** (pannello Selezione > Terreno, o tasto destro): i bordi liberi della
+  selezione continuano con nuove celle grandi come quella dietro, texture specchiata, altezza
+  che continua / si spegne / piatta. Di default solo verso le bande (sinistra e destra).
+  Salta i bordi dei buchi interni, i triangoli isolati e le file che finirebbero sopra altra
+  geometria (quindi prima elimina gli automatici che coprono quel bordo).
+- **Ponte tra due pezzi** (Selezione > Ponte, o tasto destro): seleziona i due pezzi insieme
+  (oppure segna prima il pezzo A) e premi "Crea ponte": riempie lo spazio tra i bordi che si
+  guardano, attaccato a tutti i loro vertici, altezza curva (segue le pendenze) o dritta, texture
+  del pennello o del pezzo A, specchiata cella per cella. **Strumento Ponte (clic sui vertici)**:
+  clic sui vertici del bordo A in fila, Invio, clic sui vertici del bordo B, Invio
+  (Backspace toglie l'ultimo, Esc ricomincia).
+- **Scolpisci terreno** (strumento): tieni premuto sui tuoi triangoli per alzare, abbassare,
+  lisciare o appiattire (solo in altezza). Gli automatici toccati diventano tuoi; i vertici
+  attaccati agli originali restano fermi. Ctrl = al contrario, Shift = liscia, Ctrl+rotella = raggio.
+- **Seleziona collegati (L)**: aggiunge tutto ciò che è attaccato (tuoi con tuoi, automatici
+  della stessa mesh, originali nella loro mesh). **Automatici della mesh**: tutti in blocco.
+- **Rettangolo attraverso** (Selezionabili): il rettangolo prende anche quello che sta dietro.
