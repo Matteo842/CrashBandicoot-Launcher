@@ -472,6 +472,9 @@ sealed partial class Editor
             if (ImGui.MenuItem("Seleziona collegati", "L")) SelectLinked();
             if (auto > 0 && ImGui.MenuItem("Seleziona tutti gli automatici della mesh")) SelectMeshAutos();
             if (ImGui.MenuItem("Estendi terreno dal bordo")) ExtendTerrain();
+            if (ImGui.MenuItem("Luce: questa è la sorgente")) MarkLightSource();
+            if (user > 0 && ImGui.MenuItem("Luce: copia dalla sorgente", "", false, _lightSource != null)) CopyLightFromSource();
+            if (user > 0 && ImGui.MenuItem("Luce: dagli originali vicini")) LightFromNeighbours();
             if (ImGui.MenuItem("Ponte: questo è il pezzo A")) MarkBridgeA();
             if (ImGui.MenuItem(_bridgeA != null ? "Ponte: crea dal pezzo A a questo" : "Ponte tra i 2 pezzi selezionati")) BridgePieces();
             if (_sel.Count == 1 && KindOf(_sel.First()) != Kind.Retail

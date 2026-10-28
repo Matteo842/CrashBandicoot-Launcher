@@ -405,6 +405,7 @@ sealed partial class Editor
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Disattiva questi automatici e ne crea una copia tua uguale da sistemare.");
             }
         }
+        LightSelectionSection();
         BridgeSelectionSection();
         TerrainSelectionSection();
         if (user.Count > 0) UserSection(user);
