@@ -136,7 +136,8 @@ sealed partial class Editor
         BuildBridge(ca, cb);
     }
 
-    /// <summary>Triangles split into pieces joined by corners, biggest first.</summary>
+    /// <summary>Triangles split into pieces joined by a shared side (two pieces touching at
+    /// one corner, like a V, stay two), biggest first.</summary>
     static List<List<Geo>> Pieces(List<Geo> geo)
     {
         var parent = Enumerable.Range(0, geo.Count).ToArray();
@@ -145,11 +146,13 @@ sealed partial class Editor
             while (parent[x] != x) x = parent[x] = parent[parent[x]];
             return x;
         }
-        var owner = new Dictionary<VKey, int>();
+        var owner = new Dictionary<(VKey, VKey), int>();
         for (int i = 0; i < geo.Count; i++)
-            foreach (var p in geo[i].P)
+            for (int k = 0; k < 3; k++)
             {
-                var key = LooseKeyOf(p);
+                VKey ka = LooseKeyOf(geo[i].P[k]), kb = LooseKeyOf(geo[i].P[(k + 1) % 3]);
+                if (ka == kb) continue;
+                var key = (ka.X != kb.X ? ka.X < kb.X : ka.Y != kb.Y ? ka.Y < kb.Y : ka.Z < kb.Z) ? (ka, kb) : (kb, ka);
                 if (owner.TryGetValue(key, out int o)) parent[Find(i)] = Find(o);
                 else owner[key] = i;
             }
@@ -174,8 +177,12 @@ sealed partial class Editor
                 var e = Edge(g.P[k], g.P[(k + 1) % 3]);
                 counts[e] = counts.GetValueOrDefault(e) + 1;
             }
-        var targets = other.SelectMany(g => g.P).ToList();
+        // Corners of the other piece, without those it shares with this one (the tip of a V:
+        // every edge ending there would seem to point at it).
+        var own = piece.SelectMany(g => g.P).Select(LooseKeyOf).ToHashSet();
+        var targets = other.SelectMany(g => g.P).Where(p => !own.Contains(LooseKeyOf(p))).ToList();
         if (targets.Count == 0) return null;
+        var centre = Centre(other);
         Vector3 Nearest(Vector3 p) => targets.MinBy(q => Vector3.DistanceSquared(p, q));
         // Facing open edges, joined into runs by their corners.
         var facing = new List<(Vector3 A, Vector3 B, float Dist)>();
@@ -190,8 +197,12 @@ sealed partial class Editor
                 var outward = mid - x;
                 outward -= ab * (Vector3.Dot(outward, ab) / ab.LengthSquared());
                 var to = Nearest(mid) - mid;
-                if (outward.LengthSquared() < 1e-3f || to.LengthSquared() < 1e-3f) continue;
-                if (Vector3.Dot(Vector3.Normalize(outward), Vector3.Normalize(to)) < 0.3f) continue;
+                var toCentre = centre - mid;
+                if (outward.LengthSquared() < 1e-3f || to.LengthSquared() < 1e-3f || toCentre.LengthSquared() < 1e-3f) continue;
+                // Facing: out toward the other piece's nearest corner and toward its middle
+                // (the nearest corner alone also catches edges at the ends of a strip).
+                outward = Vector3.Normalize(outward);
+                if (Vector3.Dot(outward, Vector3.Normalize(to)) < 0.3f || Vector3.Dot(outward, Vector3.Normalize(toCentre)) < 0.2f) continue;
                 facing.Add((a, b, to.Length()));
             }
         if (facing.Count == 0) return null;
@@ -410,8 +421,10 @@ sealed partial class Editor
             {
                 if (Vector3.DistanceSquared(grid[i, j].Pos, grid[i + 1, j].Pos) < 1e-2f
                     && Vector3.DistanceSquared(grid[i, j + 1].Pos, grid[i + 1, j + 1].Pos) < 1e-2f) continue;
-                made.Add(Tri(grid[i, j], grid[i + 1, j], grid[i + 1, j + 1]));
-                made.Add(Tri(grid[i, j], grid[i + 1, j + 1], grid[i, j + 1]));
+                // Where both edges start at the same corner the cells there are triangles.
+                foreach (var tri in new[] { Tri(grid[i, j], grid[i + 1, j], grid[i + 1, j + 1]), Tri(grid[i, j], grid[i + 1, j + 1], grid[i, j + 1]) })
+                    if (Vector3.Cross(tri.V[1].Pos - tri.V[0].Pos, tri.V[2].Pos - tri.V[0].Pos).LengthSquared() > 1)
+                        made.Add(tri);
             }
         _sel.Clear();
         foreach (var t in made)
