@@ -88,7 +88,7 @@ sealed partial class Editor
             default:
             {
                 var t = _doc.Tris[i];
-                for (int k = 0; k < 3; k++) c[k] = t.V[k].Pos;
+                for (int k = 0; k < 3; k++) c[k] = Shown(t, t.V[k].Pos);
                 return true;
             }
         }
@@ -103,8 +103,38 @@ sealed partial class Editor
         Vector3 sum = Vector3.Zero;
         int n = 0;
         foreach (int i in SelUser)
-            foreach (var v in _doc.Tris[i].V) { sum += v.Pos; n++; }
+            foreach (var v in _doc.Tris[i].V) { sum += Shown(_doc.Tris[i], v.Pos); n++; }
         return n > 0 ? sum / n : Vector3.Zero;
+    }
+
+    /// <summary>Own triangles on a sky mesh (backdrop) are kept like the game keeps the sky,
+    /// mesh-relative, but drawn around the camera: <see cref="Shown"/> is where they are on
+    /// screen (what every tool works with), <see cref="Stored"/> turns that back.</summary>
+    bool OnBackdrop(UserTri t, out Vector3 offset)
+    {
+        offset = default;
+        if (L == null || !L.MeshByName.TryGetValue(t.Mesh, out var m) || !m.Backdrop) return false;
+        offset = _cam.Pos - m.Trans;
+        return true;
+    }
+
+    bool OnBackdrop(UserTri t) => OnBackdrop(t, out _);
+
+    Vector3 Shown(UserTri t, Vector3 p) => OnBackdrop(t, out var o) ? p + o : p;
+
+    Vector3 Stored(UserTri t, Vector3 p) => OnBackdrop(t, out var o) ? p - o : p;
+
+    void SetShown(int tri, int k, Vector3 p) => _doc.Tris[tri].V[k].Pos = Stored(_doc.Tris[tri], p);
+
+    float _skyStep = 15;
+
+    /// <summary>The selection turned about the vertical axis through the camera: the sky's
+    /// centre, so a copied piece of sky slides along its arc.</summary>
+    void RotateAroundSky(float degrees)
+    {
+        var q = Quaternion.CreateFromAxisAngle(Vector3.UnitY, degrees * MathF.PI / 180);
+        var centre = _cam.Pos;
+        TransformSel(p => centre + Vector3.Transform(p - centre, q));
     }
 
     void Changed()
@@ -241,7 +271,7 @@ sealed partial class Editor
             {
                 if (!drawn.Contains(_doc.Tris[i].Mesh)) continue;
                 for (int k = 0; k < 3; k++)
-                    if (_cam.Project(_doc.Tris[i].V[k].Pos, _view, out var s) && Vector2.Distance(s, mouse) < best)
+                    if (_cam.Project(Shown(_doc.Tris[i], _doc.Tris[i].V[k].Pos), _view, out var s) && Vector2.Distance(s, mouse) < best)
                     {
                         best = Vector2.Distance(s, mouse);
                         _hoverVertex = (i, k);
@@ -420,13 +450,13 @@ sealed partial class Editor
     {
         BeginChange();
         _moving.Clear();
-        var at = _doc.Tris[tri].V[k].Pos;
+        var at = Shown(_doc.Tris[tri], _doc.Tris[tri].V[k].Pos);
         var exclude = new HashSet<(int, int)>();
         for (int i = 0; i < _doc.Tris.Count; i++)
             for (int j = 0; j < 3; j++)
-                if ((i == tri && j == k) || (_weld && Vector3.DistanceSquared(_doc.Tris[i].V[j].Pos, at) < 0.25f))
+                if ((i == tri && j == k) || (_weld && Vector3.DistanceSquared(Shown(_doc.Tris[i], _doc.Tris[i].V[j].Pos), at) < 0.25f))
                 {
-                    _moving.Add((i, j, _doc.Tris[i].V[j].Pos));
+                    _moving.Add((i, j, Shown(_doc.Tris[i], _doc.Tris[i].V[j].Pos)));
                     exclude.Add((i, j));
                 }
         _pivot0 = at;
@@ -445,7 +475,7 @@ sealed partial class Editor
             p = target;
             _snapHit = target;
         }
-        foreach (var (tri, k, _) in _moving) _doc.Tris[tri].V[k].Pos = p;
+        foreach (var (tri, k, _) in _moving) SetShown(tri, k, p);
         Changed();
     }
 
@@ -478,19 +508,20 @@ sealed partial class Editor
         var repairOff = RepairOffTest();
         foreach (var m in _drawMeshes)
         {
-            if (m.Backdrop) continue;
-            foreach (var p in m.Pos) Add(p);
+            // Sky meshes sit around the camera.
+            var off = m.Backdrop ? _cam.Pos - m.Trans : Vector3.Zero;
+            foreach (var p in m.Pos) Add(p + off);
             if (_showAuto && _auto!.Ranges.TryGetValue(m, out var r))
                 for (int i = r.Start; i < r.Start + r.Count; i++)
                 {
                     var t = _auto.Tris[i];
                     if (repairOff(t)) continue;
-                    Add(t.A.Pos); Add(t.B.Pos); Add(t.C.Pos);
+                    Add(t.A.Pos + off); Add(t.B.Pos + off); Add(t.C.Pos + off);
                 }
         }
         for (int i = 0; i < _doc.Tris.Count; i++)
             for (int k = 0; k < 3; k++)
-                if (!exclude.Contains((i, k))) Add(_doc.Tris[i].V[k].Pos);
+                if (!exclude.Contains((i, k))) Add(Shown(_doc.Tris[i], _doc.Tris[i].V[k].Pos));
     }
 
     bool FindSnap(Vector2 s, float radius, out Vector3 p) => FindSnap(s, radius, out p, out _);
@@ -579,10 +610,12 @@ sealed partial class Editor
         PushUndo();
         int group = _doc.NextGroup++;
         var made = new List<UserTri>();
+        // Clicked points are where they show; on a sky mesh they are kept around its origin.
+        var skyOff = L!.MeshByName.TryGetValue(b.Mesh, out var bm) && bm.Backdrop ? _cam.Pos - bm.Trans : Vector3.Zero;
         UserTri Tri(Vector3[] p, Vector2[] uv, Vector3[] rgb) => new()
         {
             Mesh = b.Mesh, Poly = b.Poly, Behind = _newBehind, Group = group,
-            V = [.. Enumerable.Range(0, 3).Select(k => new EdVertex { Pos = p[k], Uv = uv[k], Rgb = rgb[k] })],
+            V = [.. Enumerable.Range(0, 3).Select(k => new EdVertex { Pos = p[k] - skyOff, Uv = uv[k], Rgb = rgb[k] })],
         };
         if (_points.Count == 4)
         {
@@ -611,7 +644,6 @@ sealed partial class Editor
             case Kind.Retail:
             {
                 var (m, p) = RetailOf(index);
-                if (m.Backdrop) { Say("Le texture del cielo non si possono usare."); return; }
                 _brush = new(m.Name, p, L.UvsOf(m, p), [.. Enumerable.Range(0, 3).Select(k => m.Rgb[m.Tri[p * 3 + k]])],
                     [m.Corner(p, 0), m.Corner(p, 1), m.Corner(p, 2)]);
                 break;
@@ -619,7 +651,7 @@ sealed partial class Editor
             case Kind.Auto:
             {
                 var t = _auto!.Tris[index];
-                if (t.Poly < 0 || t.Mesh.Backdrop) { Say("Questo triangolo non ha una texture utilizzabile."); return; }
+                if (t.Poly < 0) { Say("Questo triangolo non ha una texture utilizzabile."); return; }
                 _brush = new(t.Mesh.Name, t.Poly, [t.A.Uv, t.B.Uv, t.C.Uv], [t.A.Rgb, t.B.Rgb, t.C.Rgb],
                     [t.A.Pos, t.B.Pos, t.C.Pos]);
                 break;
@@ -647,7 +679,6 @@ sealed partial class Editor
             case Kind.Retail:
             {
                 var (m, p) = RetailOf(i);
-                if (m.Backdrop) return null;
                 var uv = L.UvsOf(m, p);
                 return new UserTri
                 {
@@ -658,7 +689,7 @@ sealed partial class Editor
             case Kind.Auto:
             {
                 var t = _auto!.Tris[i];
-                if (t.Poly < 0 || t.Mesh.Backdrop) return null;
+                if (t.Poly < 0) return null;
                 return new UserTri
                 {
                     Mesh = t.Mesh.Name, Poly = t.Poly, Behind = t.Behind, Rank = t.Rank, Culled = t.Culled, Group = group,
@@ -944,7 +975,7 @@ sealed partial class Editor
         foreach (int i in SelUser)
         {
             var t = _doc.Tris[i];
-            for (int k = 0; k < 3; k++) t.V[k].Pos = f(t.V[k].Pos);
+            for (int k = 0; k < 3; k++) t.V[k].Pos = Stored(t, f(Shown(t, t.V[k].Pos)));
             if (mirror) (t.V[1], t.V[2]) = (t.V[2], t.V[1]);
         }
         Changed();

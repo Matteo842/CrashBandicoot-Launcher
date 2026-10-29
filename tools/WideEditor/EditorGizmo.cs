@@ -168,7 +168,7 @@ sealed partial class Editor
         foreach (int i in SelUser)
             for (int k = 0; k < 3; k++)
             {
-                _moving.Add((i, k, _doc.Tris[i].V[k].Pos));
+                _moving.Add((i, k, Shown(_doc.Tris[i], _doc.Tris[i].V[k].Pos)));
                 exclude.Add((i, k));
             }
         _pivot0 = SelPivot();
@@ -246,7 +246,7 @@ sealed partial class Editor
             if (_rotStep > 0) degrees = MathF.Round(degrees / _rotStep) * _rotStep;
             _angleNow = degrees;
             var q = Quaternion.CreateFromAxisAngle(Axes[_axis], degrees * MathF.PI / 180);
-            foreach (var (tri, k, orig) in _moving) _doc.Tris[tri].V[k].Pos = _pivot0 + Vector3.Transform(orig - _pivot0, q);
+            foreach (var (tri, k, orig) in _moving) SetShown(tri, k, _pivot0 + Vector3.Transform(orig - _pivot0, q));
             Changed();
             return;
         }
@@ -258,7 +258,7 @@ sealed partial class Editor
             f = Math.Max(f, 0.01f);
             var scale = _axis < 3 ? Vector3.One + Axes[_axis] * (f - 1) : new Vector3(f);
             _angleNow = f * 100;
-            foreach (var (tri, k, orig) in _moving) _doc.Tris[tri].V[k].Pos = _pivot0 + (orig - _pivot0) * scale;
+            foreach (var (tri, k, orig) in _moving) SetShown(tri, k, _pivot0 + (orig - _pivot0) * scale);
             Changed();
             return;
         }
@@ -319,7 +319,7 @@ sealed partial class Editor
                 };
             }
         }
-        foreach (var (tri, k, orig) in _moving) _doc.Tris[tri].V[k].Pos = orig + delta;
+        foreach (var (tri, k, orig) in _moving) SetShown(tri, k, orig + delta);
         Changed();
     }
 

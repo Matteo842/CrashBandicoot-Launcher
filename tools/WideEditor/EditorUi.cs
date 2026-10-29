@@ -479,6 +479,19 @@ sealed partial class Editor
             if (ImGui.Button($"180##r{a}")) { PushUndo(); RotateSel(Axes[a], 180); }
         }
 
+        if (user.Any(i => OnBackdrop(_doc.Tris[i])))
+        {
+            ImGui.SeparatorText("Cielo");
+            ImGui.TextWrapped("Il cielo gira attorno alla camera: per allungarlo copia un pezzo e giralo qui.");
+            if (ImGui.Button("<- Gira##sky")) { PushUndo(); RotateAroundSky(-_skyStep); }
+            ImGui.SameLine();
+            if (ImGui.Button("Gira ->##sky")) { PushUndo(); RotateAroundSky(_skyStep); }
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(70 * S);
+            ImGui.DragFloat("gradi##sky", ref _skyStep, 0.5f, 0.5f, 180, "%.1f");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Di quanto gira ogni clic, attorno all'asse verticale che passa per la camera.");
+        }
+
         ImGui.SeparatorText("Scala e specchio");
         ImGui.SetNextItemWidth(130 * S);
         float us = _uniformScale;
@@ -816,8 +829,8 @@ sealed partial class Editor
         {
             foreach (var t in _doc.Tris)
                 foreach (var v in t.V)
-                    if (_cam.Project(v.Pos, _view, out var p)) dl.AddCircleFilled(p, 3.5f, Col(1, 0.85f, 0.1f, 0.9f));
-            if (_hoverVertex is { } hv && _cam.Project(_doc.Tris[hv.Tri].V[hv.K].Pos, _view, out var hp))
+                    if (_cam.Project(Shown(t, v.Pos), _view, out var p)) dl.AddCircleFilled(p, 3.5f, Col(1, 0.85f, 0.1f, 0.9f));
+            if (_hoverVertex is { } hv && _cam.Project(Shown(_doc.Tris[hv.Tri], _doc.Tris[hv.Tri].V[hv.K].Pos), _view, out var hp))
                 dl.AddCircle(hp, 8, Col(1, 1, 1), 0, 2);
         }
         if (_tool is Tool.Quad or Tool.Triangle)
