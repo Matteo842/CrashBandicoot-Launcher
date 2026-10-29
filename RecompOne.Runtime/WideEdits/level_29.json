@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "level": 29,
+  "name": "Jaws of Darkness",
+  "nextGroup": 1,
+  "meshes": [
+    {
+      "name": "b__tW",
+      "x": 87625,
+      "y": 5931,
+      "z": 126164,
+      "polys": 3484,
+      "verts": 3672,
+      "triangles": [],
+      "hidden": [
+        2670,
+        2693,
+        2912,
+        2913,
+        2914,
+        2915
+      ],
+      "removed": [],
+      "retexture": [],
+      "hiddenRepairs": []
+    }
+  ]
+}
