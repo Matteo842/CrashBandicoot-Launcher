@@ -8,11 +8,17 @@ namespace WideEditor;
 
 sealed partial class Editor
 {
-    // Panel sizes follow the screen (_ui) and the A-/A+ text size (_text).
+    // Layout like Photoshop: menu bar and tool options on top, a narrow tool strip on the
+    // left, panels on the right, status bar at the bottom. Sizes follow the screen (_ui)
+    // and the text size (_text).
     float S => _ui * _text;
-    float LeftWidth => 320 * S;
-    float RightWidth => 400 * S;
-    float StatusHeight => 32 * S;
+    float ToolWidth => 52 * S;
+    float RightWidth => 380 * S;
+    float StatusHeight => 30 * S;
+    float OptionsHeight => 44 * S;
+    float TopHeight => _menuHeight + OptionsHeight;
+    float _menuHeight = 30;
+    bool _showHelp;
     const ImGuiWindowFlags Fixed = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse
         | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoBringToFrontOnFocus;
 
@@ -110,91 +116,304 @@ sealed partial class Editor
     void Panels()
     {
         var io = ImGui.GetIO();
-        LeftPanel(io);
+        MenuBar();
+        OptionsBar(io);
+        ToolStrip(io);
         RightPanel(io);
         StatusBar(io);
-        GizmoBar();
         LeavePopup();
+        HelpWindow();
         ContextMenu();
     }
 
-    void LeftPanel(ImGuiIOPtr io)
+    void AskLeave()
     {
-        ImGui.SetNextWindowPos(Vector2.Zero);
-        ImGui.SetNextWindowSize(new Vector2(LeftWidth, io.DisplaySize.Y - StatusHeight));
-        ImGui.Begin("Strumenti", Fixed);
-        ImGui.TextWrapped($"{L!.Id} - {L.Name}");
-        TextSizeButtons();
-        if (ImGui.Button("Cambia livello"))
+        if (_dirty) _confirmLeave = true;
+        else LeaveLevel();
+    }
+
+    void StartEyedropper()
+    {
+        _toolBefore = _tool == Tool.Eyedropper ? _toolBefore : _tool;
+        _tool = Tool.Eyedropper;
+    }
+
+    static string ToolName(Tool tool) => tool switch
+    {
+        Tool.Select => "Seleziona / sposta",
+        Tool.Vertex => "Muovi vertici",
+        Tool.Quad => "Nuovo quad",
+        Tool.Triangle => "Nuovo triangolo",
+        Tool.Eyedropper => "Contagocce",
+        Tool.Sculpt => "Scolpisci terreno",
+        Tool.Bridge => "Ponte",
+        _ => "",
+    };
+
+    static string ToolIcon(Tool tool) => tool switch
+    {
+        Tool.Vertex => Icon.Vertex,
+        Tool.Quad => Icon.Quad,
+        Tool.Triangle => Icon.Triangle,
+        Tool.Eyedropper => Icon.Eyedropper,
+        Tool.Sculpt => Icon.Sculpt,
+        Tool.Bridge => Icon.Bridge,
+        _ => Icon.Select,
+    };
+
+    // ---- Menu bar ----
+
+    void MenuBar()
+    {
+        if (!ImGui.BeginMainMenuBar()) return;
+        _menuHeight = ImGui.GetWindowHeight();
+        if (ImGui.BeginMenu("File"))
         {
-            if (_dirty) _confirmLeave = true;
-            else LeaveLevel();
+            if (ImGui.MenuItem("Cambia livello...")) AskLeave();
+            if (ImGui.MenuItem("Salva", "Ctrl+S")) Save();
+            ImGui.EndMenu();
         }
+        if (ImGui.BeginMenu("Modifica"))
+        {
+            if (ImGui.MenuItem("Annulla", "Ctrl+Z", false, _undo.Count > 0)) Undo();
+            if (ImGui.MenuItem("Ripeti", "Ctrl+Y", false, _redo.Count > 0)) Redo();
+            ImGui.Separator();
+            bool any = _sel.Count > 0;
+            if (ImGui.MenuItem("Copia come miei / duplica", "Ctrl+D", false, any)) CopyAsMine(false);
+            if (ImGui.MenuItem("Elimina", "Canc", false, any)) DeleteSelection();
+            ImGui.EndMenu();
+        }
+        if (ImGui.BeginMenu("Selezione"))
+        {
+            bool any = _sel.Count > 0;
+            if (ImGui.MenuItem("Deseleziona", null, false, any)) _sel.Clear();
+            if (ImGui.MenuItem("Inquadra", "F", false, any)) FrameSelection();
+            if (ImGui.MenuItem("Seleziona collegati", "L", false, any)) SelectLinked();
+            ImGui.SeparatorText("Selezionabili");
+            ImGui.MenuItem("Originali", null, ref _pickRetail);
+            ImGui.MenuItem("Automatici", null, ref _pickAuto);
+            ImGui.MenuItem("Miei", null, ref _pickUser);
+            ImGui.MenuItem("Rettangolo attraverso", null, ref _boxThrough);
+            ImGui.EndMenu();
+        }
+        if (ImGui.BeginMenu("Vista"))
+        {
+            if (ImGui.MenuItem("Come nel gioco", null, _gameView)) _gameView = true;
+            if (ImGui.MenuItem("Tutto ovunque", null, !_gameView)) _gameView = false;
+            ImGui.Separator();
+            ImGui.MenuItem("Buchi in magenta", null, ref _void);
+            ImGui.MenuItem("Fil di ferro", null, ref _wire);
+            if (_gameView) ImGui.MenuItem("Mie anche al centro (a griglia)", null, ref _ghostCore);
+            else ImGui.MenuItem("Segna in rosso i nascosti nelle bande", null, ref _markHidden);
+            ImGui.MenuItem("Riparazioni automatiche", null, ref _showAuto);
+            if (ImGui.MenuItem("Eliminati (rossi)", null, ref _showOff)) _autoDirty = _retailDirty = true;
+            ImGui.MenuItem("Mie", null, ref _showUser);
+            ImGui.MenuItem("Colora automatiche (azzurro)", null, ref _tintAuto);
+            ImGui.MenuItem("Colora mie (verde)", null, ref _tintUser);
+            ImGui.MenuItem("Tutto il livello (non solo zona + vicine)", null, ref _allMeshes);
+            ImGui.MenuItem("Senza ombre (luce piena)", null, ref _flatLight);
+            ImGui.Separator();
+            if (ImGui.MenuItem("Testo più grande", null, false, _text < 2f)) _text = Math.Min(2f, _text + 0.1f);
+            if (ImGui.MenuItem("Testo più piccolo", null, false, _text > 0.7f)) _text = Math.Max(0.7f, _text - 0.1f);
+            ImGui.EndMenu();
+        }
+        if (ImGui.BeginMenu("Aiuto"))
+        {
+            if (ImGui.MenuItem("Comandi e scorciatoie")) _showHelp = true;
+            ImGui.EndMenu();
+        }
+        string title = $"{L!.Id} - {L.Name}{(_dirty ? "  *" : "")}";
+        float w = ImGui.CalcTextSize(title).X;
+        ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX() + 20, ImGui.GetWindowWidth() - w - 16 * S));
+        ImGui.TextDisabled(title);
+        ImGui.EndMainMenuBar();
+    }
+
+    // ---- Tool options bar (under the menu) ----
+
+    void OptionsBar(ImGuiIOPtr io)
+    {
+        ImGui.SetNextWindowPos(new Vector2(0, _menuHeight));
+        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, OptionsHeight));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8 * S, Math.Max(2, (OptionsHeight - ImGui.GetFrameHeight()) / 2)));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(3 * S, 4 * S));
+        ImGui.Begin("##options", Fixed | ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+
+        if (IconButton(Icon.Levels, "Cambia livello")) AskLeave();
         ImGui.SameLine();
-        if (ImGui.Button(_dirty ? "Salva *" : "Salva")) Save();
+        if (IconButton(Icon.Save, _dirty ? "Salva (Ctrl+S): ci sono modifiche" : "Salva (Ctrl+S)", null, _dirty)) Save();
+        BarDivider();
         ImGui.BeginDisabled(_undo.Count == 0);
-        if (ImGui.Button("Annulla (Ctrl+Z)")) Undo();
+        if (IconButton(Icon.Undo, "Annulla (Ctrl+Z)")) Undo();
         ImGui.EndDisabled();
         ImGui.SameLine();
         ImGui.BeginDisabled(_redo.Count == 0);
-        if (ImGui.Button("Ripeti (Ctrl+Y)")) Redo();
+        if (IconButton(Icon.Redo, "Ripeti (Ctrl+Y)")) Redo();
         ImGui.EndDisabled();
+        BarDivider();
 
-        ImGui.SeparatorText("Strumento");
-        ToolButton(Tool.Select, "Seleziona / sposta", "Clic: un triangolo. Doppio clic: tutto il pezzo. Trascina nel vuoto: selezione a rettangolo.\nCtrl+clic: aggiunge o toglie un pezzo. Shift+clic: aggiunge. Alt+clic: tutto il pezzo.\nRettangolo con Shift o Ctrl: aggiunge, con Alt: toglie.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
-        ToolButton(Tool.Vertex, "Muovi vertici", "Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
-        ToolButton(Tool.Quad, "Nuovo quad (4 clic)", "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.\nIl pallino arancione mostra dove va il punto. Nel vuoto il punto resta sul piano dei punti già messi; Shift+clic: sempre sul piano.");
-        ToolButton(Tool.Triangle, "Nuovo triangolo (3 clic)", "3 clic: crea un triangolo con la texture del pennello, mappata come il triangolo d'origine.");
-        if (ImGui.Button("Contagocce texture", new Vector2(-1, 0)))
+        IconToggle(Icon.Snap, "Aggancia ai vertici", ref _snapVerts, "I punti e le cose trascinate si attaccano ai vertici vicini.");
+        ImGui.SameLine();
+        IconToggle(Icon.Weld, "Muovi insieme i vertici uniti", ref _weld, "Trascinando un vertice si muovono anche quelli attaccati.");
+        ImGui.SameLine();
+        IconLabel(Icon.Grid, "Griglia: passo dello spostamento (0 = libero)");
+        ImGui.SetNextItemWidth(64 * S);
+        ImGui.DragFloat("##grid", ref _grid, 1, 0, 2000, "%.0f");
+        BarDivider();
+
+        IconToggle(Icon.Original, "Selezionabili: originali", ref _pickRetail, "La scena del gioco.");
+        ImGui.SameLine();
+        IconToggle(Icon.Auto, "Selezionabili: automatici", ref _pickAuto, "Le riparazioni automatiche 16:9.");
+        ImGui.SameLine();
+        IconToggle(Icon.Mine, "Selezionabili: miei", ref _pickUser, "I triangoli fatti da te.");
+        ImGui.SameLine();
+        IconToggle(Icon.Through, "Rettangolo attraverso", ref _boxThrough,
+            "Il rettangolo prende anche i triangoli nascosti dietro altri (conta il centro del triangolo).\nUtile per ripulire strati di automatici uno sopra l'altro.");
+        BarDivider();
+
+        ImGui.AlignTextToFramePadding();
+        ImGui.Text(ToolName(_tool));
+        ImGui.SameLine(0, 10 * S);
+        switch (_tool)
         {
-            _toolBefore = _tool == Tool.Eyedropper ? _toolBefore : _tool;
-            _tool = Tool.Eyedropper;
-        }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Poi clic su un triangolo: la sua texture diventa il pennello.");
-        if (_tool == Tool.Eyedropper) ImGui.TextColored(new Vector4(1, 0.9f, 0.3f, 1), "Clic su un triangolo per prendere la texture");
-        ToolButton(Tool.Sculpt, "Scolpisci terreno", "Tieni premuto e passa sui tuoi triangoli: li alza, abbassa, liscia o appiattisce (solo in altezza).\nGli automatici toccati diventano tuoi (si può spegnere qui sotto).\nCtrl: al contrario. Shift: liscia. Ctrl+rotella: raggio del pennello.");
-        if (_tool == Tool.Sculpt) SculptPanel();
-        ToolButton(Tool.Bridge, "Ponte (clic sui vertici)", "Collega due bordi con un pezzo di terreno nuovo.\nClic sui vertici del primo bordo in fila, Invio, clic sui vertici dell'altro bordo, Invio.\nBackspace toglie l'ultimo punto, Esc ricomincia.");
-        if (_tool == Tool.Bridge) BridgeToolPanel();
-        if (_tool is Tool.Quad or Tool.Triangle)
-        {
-            ImGui.Text($"Punti: {_points.Count}/{(_tool == Tool.Quad ? 4 : 3)}");
-            ImGui.SameLine();
-            if (ImGui.Button("Annulla punti")) _points.Clear();
+            case Tool.Select:
+                GizmoOptions();
+                break;
+            case Tool.Vertex:
+                ImGui.TextDisabled("Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
+                break;
+            case Tool.Quad or Tool.Triangle:
+                ImGui.Text($"Punti {_points.Count}/{(_tool == Tool.Quad ? 4 : 3)}");
+                ImGui.SameLine();
+                ImGui.BeginDisabled(_points.Count == 0);
+                if (IconButton(Icon.Close, "Annulla punti (Esc)")) _points.Clear();
+                ImGui.EndDisabled();
+                ImGui.SameLine();
+                NewDepthOptions();
+                break;
+            case Tool.Eyedropper:
+                ImGui.TextColored(new Vector4(1, 0.9f, 0.3f, 1), "Clic su un triangolo per prendere la texture");
+                break;
+            case Tool.Sculpt:
+                ImGui.TextDisabled("Ctrl: al contrario. Shift: liscia. Ctrl+rotella: raggio. Opzioni nel pannello a destra.");
+                break;
+            case Tool.Bridge:
+                ImGui.TextDisabled(_bridgeSide == 0 ? $"Lato A: {_bridgePts[0].Count} vertici" : $"Lato B: {_bridgePts[1].Count} vertici");
+                ImGui.SameLine();
+                NewDepthOptions();
+                break;
         }
 
-        ImGui.SeparatorText("Pennello (texture)");
+        ImGui.SameLine(io.DisplaySize.X - ImGui.GetFrameHeight() - 8 * S);
+        if (IconButton(Icon.Help, "Comandi e scorciatoie", null, _showHelp)) _showHelp = !_showHelp;
+        ImGui.End();
+        ImGui.PopStyleVar(2);
+    }
+
+    void NewDepthOptions()
+    {
+        if (IconButton(Icon.Depth, "Nuovi triangoli: vera profondità", "Davanti o dietro come un oggetto vero della scena.", !_newBehind))
+            _newBehind = false;
+        ImGui.SameLine();
+        if (IconButton(Icon.Behind, "Nuovi triangoli: dietro la scena", "Disegnati dietro a tutto: tappano solo i buchi.", _newBehind))
+            _newBehind = true;
+        ImGui.SameLine();
+    }
+
+    // ---- Tool strip (left) ----
+
+    void ToolStrip(ImGuiIOPtr io)
+    {
+        ImGui.SetNextWindowPos(new Vector2(0, TopHeight));
+        ImGui.SetNextWindowSize(new Vector2(ToolWidth, io.DisplaySize.Y - TopHeight - StatusHeight));
+        float pad = 6 * S;
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(pad, 8 * S));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(4 * S, 4 * S));
+        ImGui.Begin("##tools", Fixed | ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        float side = ToolWidth - 2 * pad;
+        ToolButton(Tool.Select, side, "Clic: un triangolo. Doppio clic: tutto il pezzo. Trascina nel vuoto: selezione a rettangolo.\nCtrl+clic: aggiunge o toglie un pezzo. Shift+clic: aggiunge. Alt+clic: tutto il pezzo.\nRettangolo con Shift o Ctrl: aggiunge, con Alt: toglie.\nTrascina le frecce (X rossa, Y verde, Z blu), i quadratini (piani) o il quadrato centrale.\nW sposta, E ruota, R scala. Alt+trascina: sposta una copia.");
+        ToolButton(Tool.Vertex, side, "Trascina un pallino giallo: il vertice si aggancia ai vertici vicini.");
+        ToolButton(Tool.Quad, side, "4 clic sui vertici (si agganciano) in giro: crea un quadrilatero con la texture del pennello.\nIl pallino arancione mostra dove va il punto. Nel vuoto il punto resta sul piano dei punti già messi; Shift+clic: sempre sul piano.");
+        ToolButton(Tool.Triangle, side, "3 clic: crea un triangolo con la texture del pennello, mappata come il triangolo d'origine.");
+        if (IconButton(Icon.Eyedropper, "Contagocce texture", "Poi clic su un triangolo: la sua texture diventa il pennello.", _tool == Tool.Eyedropper, side))
+            StartEyedropper();
+        ToolButton(Tool.Sculpt, side, "Tieni premuto e passa sui tuoi triangoli: li alza, abbassa, liscia o appiattisce (solo in altezza).\nGli automatici toccati diventano tuoi (si può spegnere nel pannello Strumento).\nCtrl: al contrario. Shift: liscia. Ctrl+rotella: raggio del pennello.");
+        ToolButton(Tool.Bridge, side, "Collega due bordi con un pezzo di terreno nuovo.\nClic sui vertici del primo bordo in fila, Invio, clic sui vertici dell'altro bordo, Invio.\nBackspace toglie l'ultimo punto, Esc ricomincia.");
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        BrushSwatch(side);
+        ImGui.End();
+        ImGui.PopStyleVar(2);
+    }
+
+    void ToolButton(Tool tool, float side, string help)
+    {
+        if (IconButton(ToolIcon(tool), ToolName(tool), help, _tool == tool, side))
+        {
+            _tool = tool;
+            _points.Clear();
+        }
+    }
+
+    /// <summary>The texture brush as a swatch, like Photoshop's colour square: click = eyedropper.</summary>
+    void BrushSwatch(float side)
+    {
+        var dl = ImGui.GetWindowDrawList();
         if (_brush != null)
         {
             BrushThumb();
-            ImGui.Image((IntPtr)_brushThumb, new Vector2(96 * S, 96 * S));
-            ImGui.SameLine();
-            ImGui.TextWrapped($"mesh {_brush.Mesh}\npoligono {_brush.Poly}");
+            ImGui.Image((IntPtr)_brushThumb, new Vector2(side));
         }
-        else ImGui.TextDisabled("Nessuno: usa il contagocce.");
+        else
+        {
+            ImGui.Dummy(new Vector2(side));
+            var a = ImGui.GetItemRectMin();
+            var b = ImGui.GetItemRectMax();
+            dl.AddRectFilled(a, b, Col(0.9f, 0.9f, 0.9f));
+            dl.AddLine(new Vector2(a.X + 2, b.Y - 2), new Vector2(b.X - 2, a.Y + 2), Col(0.85f, 0.15f, 0.15f), 2 * _ui);
+        }
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        dl.AddRect(min - Vector2.One, max + Vector2.One, Col(0.1f, 0.1f, 0.1f));
+        dl.AddRect(min, max, Col(0.75f, 0.75f, 0.75f, 0.6f));
+        if (ImGui.IsItemClicked()) StartEyedropper();
+        if (!ImGui.IsItemHovered()) return;
+        ImGui.BeginTooltip();
+        ImGui.Text("Pennello (texture)");
+        if (_brush != null)
+        {
+            ImGui.Image((IntPtr)_brushThumb, new Vector2(128 * S));
+            ImGui.TextDisabled($"mesh {_brush.Mesh}  poligono {_brush.Poly}");
+        }
+        else ImGui.TextDisabled("Nessuno.");
+        ImGui.TextDisabled("Clic: contagocce.");
+        ImGui.EndTooltip();
+    }
 
-        ImGui.SeparatorText("Aggancio");
-        ImGui.Checkbox("Aggancia ai vertici", ref _snapVerts);
-        ImGui.Checkbox("Muovi insieme i vertici uniti", ref _weld);
-        ImGui.SetNextItemWidth(120 * S);
-        ImGui.DragFloat("Griglia (0 = no)", ref _grid, 1, 0, 2000, "%.0f");
-
-        ImGui.SeparatorText("Nuovi triangoli");
-        if (ImGui.RadioButton("Vera profondità##new", !_newBehind)) _newBehind = false;
-        if (ImGui.RadioButton("Dietro la scena##new", _newBehind)) _newBehind = true;
-
-        ImGui.SeparatorText("Selezionabili");
-        ImGui.Checkbox("Originali", ref _pickRetail);
-        ImGui.SameLine();
-        ImGui.Checkbox("Automatici", ref _pickAuto);
-        ImGui.SameLine();
-        ImGui.Checkbox("Miei", ref _pickUser);
-        ImGui.Checkbox("Rettangolo attraverso", ref _boxThrough);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Il rettangolo prende anche i triangoli nascosti dietro altri (conta il centro del triangolo).\nUtile per ripulire strati di automatici uno sopra l'altro.");
-
-        ImGui.SeparatorText("Comandi");
-        ImGui.TextWrapped("Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola).\nW / E / R: sposta / ruota / scala.\nRotella: avanti/indietro verso il mouse.\nTasto centrale trascinato: sposta la vista.\nCtrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia, Canc elimina, F inquadra, T sposta+ruota, L seleziona collegati, Esc annulla.");
+    void HelpWindow()
+    {
+        if (!_showHelp) return;
+        var io = ImGui.GetIO();
+        ImGui.SetNextWindowPos(io.DisplaySize / 2, ImGuiCond.Appearing, new Vector2(0.5f));
+        ImGui.SetNextWindowSize(new Vector2(560 * S, 0), ImGuiCond.Appearing);
+        if (ImGui.Begin("Comandi e scorciatoie", ref _showHelp, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        {
+            string[] lines =
+            [
+                "Tasto destro: menu. Tasto destro trascinato: guarda intorno (con W A S D Q E vola, Shift veloce).",
+                "Rotella: avanti/indietro verso il mouse. Tasto centrale trascinato: sposta la vista.",
+                "W / E / R: sposta / ruota / scala. T: sposta + ruota.",
+                "Ctrl+Z annulla, Ctrl+Y ripeti, Ctrl+S salva, Ctrl+D copia.",
+                "Canc elimina, F inquadra, L seleziona collegati, Esc annulla.",
+                "Passa il mouse su un'icona per sapere cosa fa.",
+            ];
+            foreach (var line in lines)
+            {
+                ImGui.Bullet();
+                ImGui.TextWrapped(line);
+            }
+        }
         ImGui.End();
     }
 
@@ -207,89 +426,84 @@ sealed partial class Editor
         ImGui.TextDisabled("dimensione testo");
     }
 
-    void ToolButton(Tool tool, string label, string help)
-    {
-        bool active = _tool == tool;
-        if (active) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.25f, 0.45f, 0.8f, 1));
-        if (ImGui.Button(label, new Vector2(-1, 0)))
-        {
-            _tool = tool;
-            _points.Clear();
-        }
-        if (active) ImGui.PopStyleColor();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(help);
-    }
-
     void RightPanel(ImGuiIOPtr io)
     {
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - RightWidth, 0));
-        ImGui.SetNextWindowSize(new Vector2(RightWidth, io.DisplaySize.Y - StatusHeight));
-        ImGui.Begin("Vista e selezione", Fixed);
-        if (ImGui.CollapsingHeader("Vista", ImGuiTreeNodeFlags.DefaultOpen)) ViewSection();
-        if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen)) CameraSection();
-        if (ImGui.CollapsingHeader("Selezione", ImGuiTreeNodeFlags.DefaultOpen)) SelectionSection();
-        if (ImGui.CollapsingHeader("Nascosti e disattivati")) HiddenSection();
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - RightWidth, TopHeight));
+        ImGui.SetNextWindowSize(new Vector2(RightWidth, io.DisplaySize.Y - TopHeight - StatusHeight));
+        ImGui.Begin("##panels", Fixed | ImGuiWindowFlags.NoTitleBar);
+        if ((_tool is Tool.Sculpt or Tool.Bridge) && PanelHeader(ToolIcon(_tool), $"Strumento: {ToolName(_tool)}"))
+        {
+            if (_tool == Tool.Sculpt) SculptPanel();
+            else BridgeToolPanel();
+        }
+        if (PanelHeader(Icon.Eye, "Vista")) ViewSection();
+        if (PanelHeader(Icon.Camera, "Camera")) CameraSection();
+        if (PanelHeader(Icon.Select, "Selezione")) SelectionSection();
+        if (PanelHeader(Icon.Trash, "Nascosti e disattivati", false)) HiddenSection();
         ImGui.End();
     }
 
     void ViewSection()
     {
-        if (ImGui.RadioButton("Come nel gioco", _gameView)) _gameView = true;
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Centro 4:3: solo la scena originale. Bande laterali: scena + riparazioni + tue modifiche, come le disegna il gioco.");
+        if (IconButton(Icon.GameView, "Come nel gioco",
+                "Centro 4:3: solo la scena originale. Bande laterali: scena + riparazioni + tue modifiche, come le disegna il gioco.", _gameView))
+            _gameView = true;
         ImGui.SameLine();
-        if (ImGui.RadioButton("Tutto ovunque", !_gameView)) _gameView = false;
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Mostra tutto anche al centro. I poligoni nascosti appaiono rossi.");
-        ImGui.Checkbox("Buchi in magenta", ref _void);
+        if (IconButton(Icon.AllView, "Tutto ovunque", "Mostra tutto anche al centro. I poligoni nascosti appaiono rossi.", !_gameView))
+            _gameView = false;
+        BarDivider();
+        IconToggle(Icon.Holes, "Buchi in magenta", ref _void, "Magenta dove non viene disegnato niente.");
         ImGui.SameLine();
-        ImGui.Checkbox("Fil di ferro", ref _wire);
+        IconToggle(Icon.Wire, "Fil di ferro", ref _wire);
+        ImGui.SameLine();
         if (_gameView)
-        {
-            ImGui.Checkbox("Mie anche al centro (a griglia)", ref _ghostCore);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Al centro 4:3 il gioco NON disegna riparazioni né modifiche: solo la scena originale.\nQui le tue si vedono a griglia per non perderle; nel gioco contano solo nelle bande laterali.");
-        }
-        if (!_gameView)
-        {
-            ImGui.Checkbox("Segna in rosso i nascosti nelle bande", ref _markHidden);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Rosso = il gioco NON lo disegna nelle bande 16:9.\nAl centro 4:3 lo disegna comunque (lì non si può togliere).");
-        }
-        ImGui.Checkbox("Riparazioni automatiche", ref _showAuto);
+            IconToggle(Icon.Core, "Mie anche al centro (a griglia)", ref _ghostCore,
+                "Al centro 4:3 il gioco NON disegna riparazioni né modifiche: solo la scena originale.\nQui le tue si vedono a griglia per non perderle; nel gioco contano solo nelle bande laterali.");
+        else
+            IconToggle(Icon.Eye, "Segna in rosso i nascosti nelle bande", ref _markHidden,
+                "Rosso = il gioco NON lo disegna nelle bande 16:9.\nAl centro 4:3 lo disegna comunque (lì non si può togliere).");
+
+        IconToggle(Icon.Auto, "Riparazioni automatiche", ref _showAuto, "Mostra le riparazioni automatiche 16:9 del gioco.");
         ImGui.SameLine();
-        if (ImGui.Checkbox("eliminati (rossi)", ref _showOff)) _autoDirty = _retailDirty = true;
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Mostra in rosso quello che hai eliminato (automatici e originali),\nper ripristinarle (tasto destro > Ripristina).");
+        if (IconToggle(Icon.Trash, "Eliminati (rossi)", ref _showOff,
+                "Mostra in rosso quello che hai eliminato (automatici e originali),\nper ripristinarlo (tasto destro > Ripristina)."))
+            _autoDirty = _retailDirty = true;
         ImGui.SameLine();
-        ImGui.Checkbox("Mie", ref _showUser);
-        if (ImGui.Checkbox("Colora automatiche (azzurro)", ref _tintAuto)) { }
-        ImGui.Checkbox("Colora mie (verde)", ref _tintUser);
-        ImGui.Checkbox("Tutto il livello (non solo zona + vicine)", ref _allMeshes);
-        ImGui.Checkbox("Senza ombre (luce piena)", ref _flatLight);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Solo nell'editor: ignora le ombre dei vertici e mostra le texture come sono. Il gioco non cambia.");
-        ImGui.SetNextItemWidth(160 * S);
-        ImGui.SliderFloat("Luminosità vista", ref _viewBright, 0.5f, 4, "%.1f");
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Solo nell'editor. Doppio clic per scrivere il valore (1 = normale).");
-        ImGui.SetNextItemWidth(160 * S);
-        ImGui.SliderFloat("Velocità camera", ref _speed, 0.1f, 5, "%.1f");
+        IconToggle(Icon.Mine, "Mie", ref _showUser, "Mostra i triangoli fatti da te.");
+        BarDivider();
+        IconToggle(Icon.Palette, "Colora automatiche (azzurro)", ref _tintAuto, null, Col(0.45f, 0.75f, 1));
+        ImGui.SameLine();
+        IconToggle(Icon.Palette, "Colora mie (verde)", ref _tintUser, null, Col(0.45f, 1, 0.5f));
+        BarDivider();
+        IconToggle(Icon.Globe, "Tutto il livello", ref _allMeshes, "Non solo la zona della camera e quelle vicine.");
+        ImGui.SameLine();
+        IconToggle(Icon.Sun, "Senza ombre (luce piena)", ref _flatLight,
+            "Solo nell'editor: ignora le ombre dei vertici e mostra le texture come sono. Il gioco non cambia.");
+
+        IconLabel(Icon.Bright, "Luminosità vista (solo nell'editor, 1 = normale). Doppio clic per scrivere il valore.");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.SliderFloat("##viewbright", ref _viewBright, 0.5f, 4, "luminosità %.1f");
+        IconLabel(Icon.Speed, "Velocità camera");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.SliderFloat("##speed", ref _speed, 0.1f, 5, "velocità %.1f");
     }
 
     void CameraSection()
     {
         if (L == null) return;
-        if (_follow) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.55f, 0.3f, 1));
-        if (ImGui.Button(_follow ? "Segue la camera del gioco (clic per fermare)" : "Segui la camera del gioco", new Vector2(-1, 0)))
+        if (IconTextButton(Icon.Camera, _follow ? "Segue la camera del gioco (clic per fermare)" : "Segui la camera del gioco",
+                "Apri il gioco nello stesso livello e mettilo in pausa dove vedi il problema:\nl'editor mostra la stessa inquadratura. Muovere la camera qui la stacca.",
+                -1, _follow))
         {
             _follow = !_follow;
             _followNote = "";
         }
-        if (_follow) ImGui.PopStyleColor();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Apri il gioco nello stesso livello e mettilo in pausa dove vedi il problema:\nl'editor mostra la stessa inquadratura. Muovere la camera qui la stacca.");
         if (_follow && _followNote.Length > 0) ImGui.TextWrapped(_followNote);
         bool auto = !_lockZone;
-        if (ImGui.Checkbox("Zona automatica (dove sta la camera)", ref auto)) _lockZone = !auto;
-        ImGui.SetNextItemWidth(200 * S);
-        if (ImGui.BeginCombo("Zona", _zone?.Name ?? "(nessuna)"))
+        if (IconToggle(Icon.Pin, "Zona automatica (dove sta la camera)", ref auto)) _lockZone = !auto;
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##zone", $"Zona {_zone?.Name ?? "(nessuna)"}"))
         {
             foreach (var z in L.Zones.Values)
                 if (ImGui.Selectable($"{z.Name}  ({z.Paths.Sum(p => p.Points.Count)} punti)", z == _zone))
@@ -306,32 +520,31 @@ sealed partial class Editor
         if (L.Zones.TryGetValue(_pathZone, out var pz) && pz.Paths.Count > 0)
         {
             _pathIndex = Math.Clamp(_pathIndex, 0, pz.Paths.Count - 1);
-            ImGui.SetNextItemWidth(200 * S);
-            if (ImGui.SliderInt("Percorso", ref _pathIndex, 0, pz.Paths.Count - 1)) { _pathPoint = 0; GoPath(); }
+            IconLabel(Icon.Path, "Percorso della camera");
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.SliderInt("##path", ref _pathIndex, 0, pz.Paths.Count - 1, "percorso %d")) { _pathPoint = 0; GoPath(); }
             int n = pz.Paths[_pathIndex].Points.Count;
             if (n > 0)
             {
-                ImGui.SetNextItemWidth(200 * S);
-                if (ImGui.SliderInt("Punto camera", ref _pathPoint, 0, n - 1)) GoPath();
-                if (ImGui.Button("<")) { _pathPoint = Math.Max(0, _pathPoint - 1); GoPath(); }
+                if (IconButton(Icon.Prev, "Punto precedente")) { _pathPoint = Math.Max(0, _pathPoint - 1); GoPath(); }
                 ImGui.SameLine();
-                if (ImGui.Button(">")) { _pathPoint = Math.Min(n - 1, _pathPoint + 1); GoPath(); }
+                float h = ImGui.GetFrameHeight(), sp = ImGui.GetStyle().ItemSpacing.X;
+                ImGui.SetNextItemWidth(Math.Max(60, ImGui.GetContentRegionAvail().X - 2 * (h + sp)));
+                if (ImGui.SliderInt("##point", ref _pathPoint, 0, n - 1, "punto camera %d")) GoPath();
                 ImGui.SameLine();
-                if (ImGui.Button("Torna sul percorso")) GoPath();
+                if (IconButton(Icon.Next, "Punto successivo")) { _pathPoint = Math.Min(n - 1, _pathPoint + 1); GoPath(); }
+                ImGui.SameLine();
+                if (IconButton(Icon.Path, "Torna sul percorso")) GoPath();
             }
         }
         var own = _slots.Where(s => s.Level == L.Id).ToList();
-        if (own.Count > 0)
+        if (IconButton(Icon.Refresh, "Ricarica salvataggi rapidi")) _slots = SaveSlot.All();
+        foreach (var s in own)
         {
-            ImGui.Text("Salvataggi rapidi:");
-            foreach (var s in own)
-            {
-                if (ImGui.SmallButton($"{s.Name}##{s.File}")) ApplySlot(s);
-                ImGui.SameLine();
-            }
-            ImGui.NewLine();
+            ImGui.SameLine();
+            if (ImGui.Button($"{s.Name}##{s.File}")) ApplySlot(s);
+            Tip($"Camera del salvataggio rapido {s.Name}", null);
         }
-        if (ImGui.SmallButton("Ricarica salvataggi")) _slots = SaveSlot.All();
         ImGui.TextDisabled($"Camera {_cam.Pos.X:0} {_cam.Pos.Y:0} {_cam.Pos.Z:0}");
     }
 
@@ -368,41 +581,56 @@ sealed partial class Editor
             ImGui.TextWrapped("Niente selezionato. Clic su un triangolo, oppure trascina un rettangolo.");
             return;
         }
-        ImGui.Text($"Originali {retail}   Automatici {auto}   Miei {user.Count}");
-        if (_sel.Count == 1) ImGui.TextDisabled(Describe(_sel.First()));
-        if (ImGui.Button("Deseleziona")) _sel.Clear();
+        if (IconButton(Icon.Deselect, "Deseleziona")) _sel.Clear();
         ImGui.SameLine();
-        if (ImGui.Button("Inquadra (F)")) FrameSelection();
+        if (IconButton(Icon.Frame, "Inquadra (F)")) FrameSelection();
+        ImGui.SameLine();
+        if (IconButton(Icon.Linked, "Seleziona collegati (L)",
+                "Aggiunge tutto ciò che è attaccato alla selezione: tuoi con tuoi,\nautomatici con automatici della stessa mesh, originali nella loro mesh.")) SelectLinked();
+        ImGui.SameLine();
+        if (IconButton(Icon.Copy, "Copia come miei / duplica (Ctrl+D)", "Crea una copia tua, uguale, da spostare/girare. L'originale resta.")) CopyAsMine(false);
+        ImGui.SameLine();
+        if (IconButton(Icon.Trash, "Elimina (Canc)", "Gli originali spariscono ovunque (anche al centro 4:3), gli automatici si spengono, i tuoi si cancellano.")) DeleteSelection();
+        BarDivider();
+        IconLabel(Icon.Original, "Originali selezionati");
+        ImGui.Text($"{retail}");
+        ImGui.SameLine(0, 12 * S);
+        IconLabel(Icon.Auto, "Automatici selezionati");
+        ImGui.Text($"{auto}");
+        ImGui.SameLine(0, 12 * S);
+        IconLabel(Icon.Mine, "Miei selezionati");
+        ImGui.Text($"{user.Count}");
+        if (_sel.Count == 1) ImGui.TextDisabled(Describe(_sel.First()));
 
         if (retail + auto > 0)
         {
             ImGui.SeparatorText("Originali / automatici");
-            if (ImGui.Button("Copia come miei (modificabili)", new Vector2(-1, 0))) CopyAsMine(false);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Crea una copia tua, uguale, da spostare/girare. L'originale resta.");
+            if (IconTextButton(Icon.Copy, "Copia come miei (modificabili)", "Crea una copia tua, uguale, da spostare/girare. L'originale resta.", -1))
+                CopyAsMine(false);
             if (retail > 0)
             {
-                if (ImGui.Button("Elimina originali (anche al centro) (Canc)")) SetRemoved(true);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Spariscono ovunque nel gioco, anche nel centro 4:3. Solo grafica: i muri restano solidi.");
+                if (IconTextButton(Icon.Trash, "Elimina originali (anche al centro) (Canc)",
+                        "Spariscono ovunque nel gioco, anche nel centro 4:3. Solo grafica: i muri restano solidi.")) SetRemoved(true);
                 ImGui.BeginDisabled(_brush == null);
-                if (ImGui.Button("Metti texture del pennello sull'originale")) SetRetexture(true);
+                if (IconTextButton(Icon.Pencil, "Metti texture del pennello sull'originale")) SetRetexture(true);
                 ImGui.EndDisabled();
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                     ImGui.SetTooltip("Cambia la texture del poligono del gioco: si vede ovunque, anche al centro 4:3.\nIl pennello deve venire dalla stessa mesh. I colori dei vertici restano quelli dell'originale.\nCon i 2 triangoli di un quad selezionati mette le due metà della texture, girate come sul pennello.");
                 if (ImGui.Button("Gira angoli##retex")) CornerUvs(false);
                 ImGui.SameLine();
                 if (ImGui.Button("Texture originale##retex")) SetRetexture(false);
-                if (ImGui.Button("Nascondi nelle bande 16:9")) SetHidden(true);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Il gioco non disegna più questi poligoni nelle bande laterali (al centro restano).");
+                if (IconTextButton(Icon.Eye, "Nascondi nelle bande 16:9",
+                        "Il gioco non disegna più questi poligoni nelle bande laterali (al centro restano).")) SetHidden(true);
                 ImGui.SameLine();
                 if (ImGui.Button("Mostra##retail")) SetHidden(false);
             }
             if (auto > 0)
             {
-                if (ImGui.Button("Elimina automatici (Canc)")) SetRepairsOff(true);
+                if (IconTextButton(Icon.Trash, "Elimina automatici (Canc)")) SetRepairsOff(true);
                 ImGui.SameLine();
-                if (ImGui.Button("Ripristina")) SetRepairsOff(false);
-                if (ImGui.Button("Rendi modificabili (sostituisci)", new Vector2(-1, 0))) CopyAsMine(true);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Disattiva questi automatici e ne crea una copia tua uguale da sistemare.");
+                if (IconTextButton(Icon.Undo, "Ripristina##auto")) SetRepairsOff(false);
+                if (IconTextButton(Icon.Pencil, "Rendi modificabili (sostituisci)",
+                        "Disattiva questi automatici e ne crea una copia tua uguale da sistemare.", -1)) CopyAsMine(true);
             }
         }
         LightSelectionSection();
@@ -430,11 +658,6 @@ sealed partial class Editor
 
     void UserSection(List<int> user)
     {
-        ImGui.SeparatorText("Miei");
-        if (ImGui.Button("Duplica (Ctrl+D)")) CopyAsMine(false);
-        ImGui.SameLine();
-        if (ImGui.Button("Elimina (Canc)")) DeleteSelection();
-
         ImGui.SeparatorText("Posizione");
         var pivot = SelPivot();
         var moved = pivot;
@@ -538,12 +761,13 @@ sealed partial class Editor
         ImGui.Image((IntPtr)_selThumb, new Vector2(72 * S, 72 * S));
         ImGui.SameLine();
         ImGui.BeginGroup();
-        if (ImGui.Button("Ruota a sinistra")) { PushUndo(); UvSel(st => new(st.Y, 1 - st.X)); }
+        if (IconButton(Icon.Undo, "Ruota la texture a sinistra")) { PushUndo(); UvSel(st => new(st.Y, 1 - st.X)); }
         ImGui.SameLine();
-        if (ImGui.Button("a destra")) { PushUndo(); UvSel(st => new(1 - st.Y, st.X)); }
-        if (ImGui.Button("Specchia orizz.")) { PushUndo(); UvSel(st => new(1 - st.X, st.Y)); }
+        if (IconButton(Icon.Redo, "Ruota la texture a destra")) { PushUndo(); UvSel(st => new(1 - st.Y, st.X)); }
         ImGui.SameLine();
-        if (ImGui.Button("vert.")) { PushUndo(); UvSel(st => new(st.X, 1 - st.Y)); }
+        if (IconButton(Icon.MirrorH, "Specchia la texture in orizzontale")) { PushUndo(); UvSel(st => new(1 - st.X, st.Y)); }
+        ImGui.SameLine();
+        if (IconButton(Icon.MirrorV, "Specchia la texture in verticale")) { PushUndo(); UvSel(st => new(st.X, 1 - st.Y)); }
         if (ImGui.Button("Gira angoli")) { PushUndo(); CornerUvs(false); }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Per ogni triangolo: gli angoli della texture passano al vertice accanto.\nPremi più volte (e prova Scambia) finché le righe vanno nel verso giusto.");
@@ -576,7 +800,7 @@ sealed partial class Editor
         ImGui.SameLine();
         if (ImGui.Button("+ colori")) ApplyBrush(true);
         ImGui.EndDisabled();
-        if (ImGui.Button("Prendi come pennello")) TakeBrush(PickId(Kind.User, user[0]));
+        if (IconTextButton(Icon.Eyedropper, "Prendi come pennello")) TakeBrush(PickId(Kind.User, user[0]));
 
         ImGui.SeparatorText("Colore");
         ImGui.SetNextItemWidth(130 * S);

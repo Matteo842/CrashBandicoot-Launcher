@@ -104,12 +104,9 @@ sealed partial class Editor : IDisposable
     {
         var io = ImGui.GetIO();
         unsafe { io.NativePtr->IniFilename = null; }
-        var style = ImGui.GetStyle();
-        style.FrameRounding = 4;
-        style.WindowRounding = 0;
-        style.FramePadding = new Vector2(8, 5);
-        style.ItemSpacing = new Vector2(8, 6);
-        style.ScaleAllSizes(ui);
+        ApplyTheme();
+        ImGui.GetStyle().ScaleAllSizes(ui);
+        LoadIconFont(ui);
     }
 
     void LoadLevelList()
@@ -581,7 +578,7 @@ sealed partial class Editor : IDisposable
         var io = ImGui.GetIO();
         _fbScale = io.DisplaySize.X > 0 ? size.X / io.DisplaySize.X : 1;
         _gl.Viewport(0, 0, (uint)size.X, (uint)size.Y);
-        _gl.ClearColor(0.11f, 0.11f, 0.13f, 1);
+        _gl.ClearColor(0.15f, 0.15f, 0.15f, 1);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         try
@@ -625,11 +622,11 @@ sealed partial class Editor : IDisposable
     void Layout()
     {
         var io = ImGui.GetIO();
-        float left = LeftWidth, right = RightWidth, bottom = StatusHeight;
-        float aw = Math.Max(io.DisplaySize.X - left - right, 64), ah = Math.Max(io.DisplaySize.Y - bottom, 36);
+        float left = ToolWidth, right = RightWidth, top = TopHeight, bottom = StatusHeight;
+        float aw = Math.Max(io.DisplaySize.X - left - right, 64), ah = Math.Max(io.DisplaySize.Y - top - bottom, 36);
         float w = aw, h = w * 9 / 16;
         if (h > ah) { h = ah; w = h * 16 / 9; }
-        _view = new Rect(MathF.Floor(left + (aw - w) / 2), MathF.Floor((ah - h) / 2), MathF.Floor(w), MathF.Floor(h));
+        _view = new Rect(MathF.Floor(left + (aw - w) / 2), MathF.Floor(top + (ah - h) / 2), MathF.Floor(w), MathF.Floor(h));
     }
 
     public void Close()

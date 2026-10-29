@@ -23,6 +23,15 @@ Per ogni mesh del livello:
 Lo legge `FramePacing.NativeWideUserEdits.cs`. Un triangolo si vede solo quando la sua
 mesh è disegnata (zona della camera + zone vicine), come nell'editor in "Come nel gioco".
 
+## Interfaccia
+
+Come Photoshop: in alto il menu (File, Modifica, Selezione, Vista, Aiuto) e la barra opzioni
+(livello, salva, annulla/ripeti, aggancio, griglia, cosa si può selezionare, opzioni dello
+strumento attivo); a sinistra la striscia degli strumenti a icone e sotto il pennello (clic =
+contagocce); a destra i pannelli Strumento, Vista, Camera, Selezione. Passa il mouse su
+un'icona per il nome e la spiegazione. Le icone vengono dal font di Windows `segmdl2.ttf`;
+senza quel font i pulsanti mostrano il testo.
+
 ## Comandi
 
 - Tasto destro trascinato: guarda intorno (W A S D Q E per volare, Shift veloce).

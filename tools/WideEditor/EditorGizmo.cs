@@ -387,38 +387,25 @@ sealed partial class Editor
         if (_drag == DragMode.Scale) dl.AddText(ps + new Vector2(14, -24) * _ui, yellow, $"{_angleNow:0}%");
     }
 
-    /// <summary>Move / rotate / scale buttons in the corner of the 3D view.</summary>
-    void GizmoBar()
+    /// <summary>Move / rotate / scale modes in the options bar (Select tool).</summary>
+    void GizmoOptions()
     {
-        if (_tool != Tool.Select) return;
-        ImGui.SetNextWindowPos(new Vector2(_view.X + 8 * _ui, _view.Y + 8 * _ui));
-        ImGui.SetNextWindowBgAlpha(0.75f);
-        ImGui.Begin("##gizmobar", ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove
-            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing);
-        void Mode(GizmoMode mode, string label, string help)
+        void Mode(GizmoMode mode, string icon, string label, string help)
         {
-            bool on = _gizmo == mode;
-            if (on) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.25f, 0.45f, 0.8f, 1));
-            if (ImGui.Button(label)) _gizmo = mode;
-            if (on) ImGui.PopStyleColor();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(help);
+            if (IconButton(icon, label, help, _gizmo == mode)) _gizmo = mode;
             ImGui.SameLine();
         }
-        Mode(GizmoMode.All, "Sposta + ruota (T)", "Frecce e quadratini spostano, gli anelli esterni ruotano.");
-        Mode(GizmoMode.Move, "Sposta (W)", "Frecce: lungo un asse. Quadratini: su un piano. Quadrato centrale: parallelo allo schermo.");
-        Mode(GizmoMode.Rotate, "Ruota (E)", "Trascina un anello: ruota attorno a quell'asse.");
-        Mode(GizmoMode.Scale, "Scala (R)", "Cubetti: scala lungo un asse. Quadrato centrale: scala tutto.");
-        ImGui.SetNextItemWidth(60 * S);
-        ImGui.DragFloat("griglia", ref _grid, 1, 0, 2000, "%.0f");
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Passo dello spostamento (0 = libero)");
+        Mode(GizmoMode.All, Icon.MoveRotate, "Sposta + ruota (T)", "Frecce e quadratini spostano, gli anelli esterni ruotano.");
+        Mode(GizmoMode.Move, Icon.Move, "Sposta (W)", "Frecce: lungo un asse. Quadratini: su un piano. Quadrato centrale: parallelo allo schermo.");
+        Mode(GizmoMode.Rotate, Icon.Rotate, "Ruota (E)", "Trascina un anello: ruota attorno a quell'asse.");
+        Mode(GizmoMode.Scale, Icon.Scale, "Scala (R)", "Cubetti: scala lungo un asse. Quadrato centrale: scala tutto.");
         if (GizmoRotates)
         {
+            IconLabel(Icon.Rotate, "Passo della rotazione in gradi (0 = libera)");
+            ImGui.SetNextItemWidth(64 * S);
+            ImGui.DragFloat("##rotstep", ref _rotStep, 0.5f, 0, 90, "%.0f°");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(60 * S);
-            ImGui.DragFloat("passo °", ref _rotStep, 0.5f, 0, 90, "%.0f");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Passo della rotazione (0 = libera)");
         }
-        ImGui.End();
     }
 
     // ---- Right-click menu ----
