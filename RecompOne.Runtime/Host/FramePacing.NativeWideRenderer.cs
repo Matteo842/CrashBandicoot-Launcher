@@ -124,6 +124,12 @@ public static partial class FramePacing
         // gutters with leftover scenery around the orbit.
         if ((m.ReadU32(DisplayFlagsAddr) & FlagSpinDeath) != 0)
             return;
+        // After the loading screen (draw_skip_counter = 2) GpuUpdate neither
+        // swaps nor draws this frame's ordering table; the DrawOTag that still
+        // runs walks the other buffer's empty one. Side scenery drawn there sat
+        // beside the LOADING picture, shown one frame before the level (#82).
+        if (m.ReadU32(DrawSkipAddr) != 0)
+            return;
         uint zoneEntry = m.ReadU32(CamZoneAddr);
         uint zone = NativeWideGuestPointer(zoneEntry) ? EntryItem(m, zoneEntry, 0) : 0;
         uint level = m.ReadU32(Catalog.LevelIdAddr);

@@ -16,6 +16,12 @@ internal sealed class OutputPanel : IPanel
     /// <summary>Screen rect of the game image, for overlays drawn on it (box counter).</summary>
     public static Vector2 ImageMin { get; private set; }
     public static Vector2 ImageMax { get; private set; }
+    /// <summary>
+    /// Rect for HUD overlays: the 16:9 image during widescreen gameplay, even on
+    /// frames still presented at 4:3 (level entry), so the HUD does not jump.
+    /// </summary>
+    public static Vector2 HudMin { get; private set; }
+    public static Vector2 HudMax { get; private set; }
     /// <summary>ImGui frame the rect was taken; older = no image this frame.</summary>
     public static int ImageFrame { get; private set; } = -1;
 
@@ -94,6 +100,22 @@ internal sealed class OutputPanel : IPanel
         ImageMin = ImGui.GetItemRectMin();
         ImageMax = ImGui.GetItemRectMax();
         ImageFrame = ImGui.GetFrameCount();
+        (HudMin, HudMax) = (ImageMin, ImageMax);
+        // The first frames after a loading screen are presented at 4:3 before
+        // the side bands exist; the box counter moved from the 4:3 corner to
+        // the 16:9 one. Anchor HUD overlays to the 16:9 rect throughout. Read
+        // the level live: coming from the map, WideFovActive only turns on at
+        // the level's first PutDrawEnv, after the counter already shows.
+        float wide = Hle.GpuHle.WideAspect;
+        var mem = Runtime.Mem;
+        if (wide > _aspect + 0.01f && mem != null
+            && !Catalogs.Catalog.Levels.IsUiOrCinema(mem.ReadU32(Catalogs.Catalog.LevelIdAddr)))
+        {
+            var size = Hle.DisplayLayout.Fit(avail.X, avail.Y, wide, _nativeH, ConfigManager.View.IntegerScale);
+            var center = (ImageMin + ImageMax) * 0.5f;
+            var half = new Vector2(size.Width, size.Height) * 0.5f;
+            (HudMin, HudMax) = (center - half, center + half);
+        }
     }
 
     static uint CrtTexture(Hle.GlBackend gl, ref Vector2 imageSize)

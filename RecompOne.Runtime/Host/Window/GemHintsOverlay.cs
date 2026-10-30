@@ -26,8 +26,8 @@ internal static class GemHintsOverlay
         _visible = true;
         _slide = Math.Min(1f, _slide + dt * 7f);
 
-        var min = OutputPanel.ImageMin;
-        var max = OutputPanel.ImageMax;
+        var min = OutputPanel.HudMin;
+        var max = OutputPanel.HudMax;
         float w = max.X - min.X;
         float h = max.Y - min.Y;
         if (h < 120f || w < 160f) return;

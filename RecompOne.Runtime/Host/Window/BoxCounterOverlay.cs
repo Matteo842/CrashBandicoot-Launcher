@@ -27,8 +27,8 @@ internal static class BoxCounterOverlay
         _shown = r.Broken;
         _bump = Math.Max(0f, _bump - dt * 6f);
 
-        var min = OutputPanel.ImageMin;
-        var max = OutputPanel.ImageMax;
+        var min = OutputPanel.HudMin;
+        var max = OutputPanel.HudMax;
         float h = max.Y - min.Y;
         if (h < 32f) return;
 
