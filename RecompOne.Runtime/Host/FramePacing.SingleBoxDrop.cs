@@ -23,10 +23,15 @@ public static partial class FramePacing
     /// <summary>c1 GOOL global 70 (gooc PREVBOXCOUNT): BOXCOUNT copied by WillC at the level end.</summary>
     const uint PrevBoxCountAddr = 0x800619A4u;
     const int OneBox = 0x100;
+    /// <summary>gool_process.creator / .player. Willy sets <c>player = child</c> right after spawning the counter text.</summary>
+    const uint ObjCreatorOff = 0x70u;
+    const uint ObjPlayerOff = 0x74u;
 
     static uint _boxDropUpdateObj;
     static uint _boxDropObj;
     static int _boxDropMissed;
+    /// <summary>#174: counter text kept hidden until the box has hit Crash.</summary>
+    static uint _boxDropHiddenText;
 
     static void NoteBoxDropUpdate(uint obj) => _boxDropUpdateObj = obj;
 
@@ -38,14 +43,23 @@ public static partial class FramePacing
     {
         uint obj = _boxDropUpdateObj;
         _boxDropUpdateObj = 0;
-        if (!ConfigManager.View.SingleBoxDrop || (obj & 0xFF000000u) != 0x80000000u) return;
+        if (!ConfigManager.View.SingleBoxDrop)
+        {
+            _boxDropHiddenText = 0;
+            return;
+        }
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
         try
         {
             if (m.ReadU32(Catalog.LevelIdAddr) != LidLevelEnd
                 || m.ReadU32(obj + ObjStateOff) != StateWillyLose
                 || !TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeGamO)
             {
-                if (obj == _boxDropObj) _boxDropObj = 0;
+                if (obj == _boxDropObj)
+                {
+                    _boxDropObj = 0;
+                    _boxDropHiddenText = 0;
+                }
                 return;
             }
             if (obj != _boxDropObj)
@@ -61,11 +75,37 @@ public static partial class FramePacing
                 _boxDropMissed = (total - prev) >> 8;
                 m.WriteU32(obj + GamoLevelBoxCountOff, (uint)(prev + OneBox));
             }
+            // #174: NTSC-J shows the count before the box falls. The state starts with
+            // var0 = 0 and the loop writes var0 = 1 after Crash's hit squash, so keep the
+            // text hidden while var0 is 0 and only then show the full missed count.
+            if (m.ReadU32(obj + GamoCounterOff) == 0)
+            {
+                _boxDropHiddenText = m.ReadU32(obj + ObjPlayerOff);
+                return;
+            }
+            _boxDropHiddenText = 0;
             if (_boxDropMissed > 1)
                 m.WriteU32(obj + GamoCounterOff, (uint)_boxDropMissed);
         }
         catch
         {
         }
+    }
+
+    /// <summary>PreTransform: false skips the counter text's draw (end of its GoolObjectUpdate).</summary>
+    static bool DrawBoxDropObject(IMemory m, uint obj)
+    {
+        if (_boxDropHiddenText == 0 || obj != _boxDropHiddenText) return true;
+        try
+        {
+            if (m.ReadU32(Catalog.LevelIdAddr) == LidLevelEnd
+                && m.ReadU32(obj + ObjCreatorOff) == _boxDropObj)
+                return false;
+        }
+        catch
+        {
+        }
+        _boxDropHiddenText = 0;
+        return true;
     }
 }

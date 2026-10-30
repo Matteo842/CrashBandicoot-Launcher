@@ -332,6 +332,7 @@ public static partial class FramePacing
 
     public static bool PreTransform(CpuContext c, IMemory m)
     {
+        if (!DrawBoxDropObject(m, c.A0)) return false;
         NoteNativeWideHudTransform(m, c.A0);
         if (IsActive(m))
         {

@@ -427,8 +427,8 @@ public class ViewConfig
 
     /// <summary>
     /// Japanese level end (#170): after a deathless run with missed boxes, only one
-    /// box drops on Crash, and the counter shows the missed count at once. Off by
-    /// default (NTSC-U: one box per missed box).
+    /// box drops on Crash, and the counter text appears with the full missed count once
+    /// that box has hit him (#174). Off by default (NTSC-U: one box per missed box).
     /// </summary>
     public bool SingleBoxDrop
     {
