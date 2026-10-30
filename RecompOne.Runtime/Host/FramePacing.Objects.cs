@@ -638,7 +638,7 @@ public static partial class FramePacing
             int qz = (int)m.ReadU32(obj + ObjTransOff + 8);
             // The skip presents of a new object's first gate hold its CODE
             // pose instead of finishing a lerp from the spawn trans (#94).
-            bool born = _newObj && obj == _obj;
+            bool born = NoDrawnPose(obj);
             bool hadPose = _gateRot.TryGetValue(obj, out GatePose prev);
             var pose = new GatePose
             {
@@ -669,6 +669,18 @@ public static partial class FramePacing
             // object freed
         }
     }
+
+    /// <summary>
+    /// The Update now running starts from a pose that was never drawn: a
+    /// newborn (#94), or an object that had no animation yet. GoolObjectInit
+    /// clears anim_seq and Transform skips an object without one. Crash's
+    /// Warp_In flares (WillC Willy_Effect_Stance) <c>playnull</c> on their
+    /// first Update; the next one SETs them to Crash's top vertex and starts
+    /// the sprite. Lerping from the spawn trans drew the flare at Crash's
+    /// feet for one gate at level start (#158).
+    /// </summary>
+    static bool NoDrawnPose(uint obj) =>
+        obj == _obj && (_newObj || (_oanimSequence & 0xFF000000u) != 0x80000000u);
 
     /// <summary>
     /// Seesaw slab (#181). The gated lerp P→Q draws, collides and carries
@@ -727,7 +739,7 @@ public static partial class FramePacing
         if (obj != _obj) return;
         if (!_solidObj) return;
         // First Update after GoolObjectInit: no drawn pose to lerp from (#94).
-        if (_newObj && !_gatedSolid) return;
+        if (!_gatedSolid && NoDrawnPose(obj)) return;
         if (GamePaused(m)) return;
         // HUD / flying icons are screen-space. Lerping rot+trans of Tawna's
         // portrait between 30 Hz poses swings it across the top of the frame.
