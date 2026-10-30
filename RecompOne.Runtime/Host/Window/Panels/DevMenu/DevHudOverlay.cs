@@ -80,6 +80,10 @@ internal static class DevHudOverlay
 
         var pad = new Vector2(0f, 16 * ui);
         ImGui.SetNextWindowPos(vp.WorkPos + new Vector2(vp.WorkSize.X * 0.5f, pad.Y), ImGuiCond.Always, new Vector2(0.5f, 0f));
+        // #182: auto-resize centres with last frame's size, so a shorter label
+        // (Original (30 FPS) -> 60 FPS) sat left in the old wide box for a frame.
+        var size = ImGui.CalcTextSize(_flash) + 2 * HudPadding(ui);
+        ImGui.SetNextWindowSize(Vector2.Max(size, ImGui.GetStyle().WindowMinSize), ImGuiCond.Always);
         ImGui.SetNextWindowBgAlpha(0.7f);
         PushHudStyle(ui);
         if (ImGui.Begin("##dev-hud-flash", HudFlags))
@@ -153,8 +157,10 @@ internal static class DevHudOverlay
     {
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8 * ui, 6 * ui));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, HudPadding(ui));
     }
+
+    static Vector2 HudPadding(float ui) => new(8 * ui, 6 * ui);
 
     const ImGuiWindowFlags HudFlags =
         ImGuiWindowFlags.NoDecoration |
