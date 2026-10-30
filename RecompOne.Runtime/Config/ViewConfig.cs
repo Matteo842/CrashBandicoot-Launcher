@@ -437,6 +437,16 @@ public class ViewConfig
     }
 
     /// <summary>
+    /// Pity mask (#186): after 3 deaths in a row without a new checkpoint, Crash
+    /// respawns with an Aku Aku mask, like Crash 2 and 3. Off by default.
+    /// </summary>
+    public bool PityMask
+    {
+        get => GetBool("PityMask");
+        set => SetBool("PityMask", value);
+    }
+
+    /// <summary>
     /// Story intro on New Game (#171): New Game plays the intro cutscene (retail:
     /// attract demo only) before the map, like Crash 2 and 3. Start skips it. Off by
     /// default.

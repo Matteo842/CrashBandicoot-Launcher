@@ -420,6 +420,7 @@ public static partial class FramePacing
     {
         RestoreCardIo(m);
         FinishGpuUpdate(m);
+        UpdatePityMask(c, m);
         // Quick save / load (#130) only where the recompiled call chain is fixed.
         SaveStates.AtSafePoint(c, m);
     }

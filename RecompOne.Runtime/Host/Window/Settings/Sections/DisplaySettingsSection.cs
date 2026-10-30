@@ -100,6 +100,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Level end: one box drops for all missed boxes, like NTSC-J");
 
+        bool pityMask = ConfigManager.View.PityMask;
+        if (ImGui.Checkbox("Pity mask", ref pityMask))
+        {
+            ConfigManager.View.PityMask = pityMask;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("3 deaths in a row at one checkpoint: respawn with Aku Aku");
+
         bool intro = ConfigManager.View.IntroOnNewGame;
         if (ImGui.Checkbox("Story intro on New Game", ref intro))
         {

@@ -116,6 +116,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _boxCounter;
     ThemeCheck? _gemHints;
     ThemeCheck? _singleBoxDrop;
+    ThemeCheck? _pityMask;
     ThemeCheck? _introOnNewGame;
     ThemeCheck? _startPauseMenu;
     ThemeCheck? _cheatLives;
@@ -327,6 +328,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_boxCounter, state, "boxCounter");
         SetCheck(_gemHints, state, "gemHints");
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
+        SetCheck(_pityMask, state, "pityMask");
         SetCheck(_introOnNewGame, state, "introOnNewGame");
         SetCheck(_startPauseMenu, state, "startPauseMenu");
         SetCheck(_cheatLives, state, "infiniteLives");
@@ -1710,6 +1712,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 52;
         AddHint("At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original.");
 
+        _pityMask = MakeCheck("Pity mask");
+        _pityMask.Location = new Point(12, y);
+        page.Controls.Add(_pityMask);
+        y += 52;
+        AddHint("After 3 deaths in a row without reaching a new checkpoint, Crash respawns with an Aku Aku mask, and again after every later death there, like Crash 2 and 3. Not in boss fights or on the hog.");
+
         _introOnNewGame = MakeCheck("Story intro on New Game");
         _introOnNewGame.Location = new Point(12, y);
         page.Controls.Add(_introOnNewGame);
@@ -1744,6 +1752,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 boxCounter = _boxCounter?.Checked ?? false,
                 gemHints = _gemHints?.Checked ?? false,
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
+                pityMask = _pityMask?.Checked ?? false,
                 introOnNewGame = _introOnNewGame?.Checked ?? false,
                 startPauseMenu = _startPauseMenu?.Checked ?? true,
             });

@@ -293,6 +293,7 @@ sealed partial class LauncherWindow
         var boxCounter = Nav(new ThemeCheck("Box counter") { Checked = view.BoxCounter });
         var gemHints = Nav(new ThemeCheck("Gem hints") { Checked = view.GemHints });
         var singleBoxDrop = Nav(new ThemeCheck("Japanese box drop (one box)") { Checked = view.SingleBoxDrop });
+        var pityMask = Nav(new ThemeCheck("Pity mask") { Checked = view.PityMask });
         var introOnNewGame = Nav(new ThemeCheck("Story intro on New Game") { Checked = view.IntroOnNewGame });
 
         var strengthRow = Row(Label("Filter strength", 202), strength, 30);
@@ -361,6 +362,8 @@ sealed partial class LauncherWindow
                     Hint("On the map, a card shows what each level's gem needs: all boxes without dying, and which colored gem opens its gem path. In levels: a reminder at the start, which gem an inactive gem platform needs, and a notice when a death loses the gem."),
                     WithMargin(singleBoxDrop, new Thickness(0, 0, 0, 14)),
                     Hint("At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original."),
+                    WithMargin(pityMask, new Thickness(0, 0, 0, 14)),
+                    Hint("After 3 deaths in a row without reaching a new checkpoint, Crash respawns with an Aku Aku mask, and again after every later death there, like Crash 2 and 3. Not in boss fights or on the hog."),
                     WithMargin(introOnNewGame, new Thickness(0, 0, 0, 14)),
                     Hint("New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original.", 8),
                 },
@@ -401,6 +404,7 @@ sealed partial class LauncherWindow
             view.BoxCounter = boxCounter.Checked;
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
+            view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
             view.StartPauseMenu = startPauseMenu.Checked;
             ConfigManager.SaveGame();

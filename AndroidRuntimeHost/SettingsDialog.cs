@@ -123,6 +123,11 @@ static class SettingsDialog
             "At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original.",
             bodyFont));
 
+        var pityMask = AddSwitch(activity, card, "Pity mask", view.PityMask, bodyBold);
+        card.AddView(Hint(activity,
+            "After 3 deaths in a row without reaching a new checkpoint, Crash respawns with an Aku Aku mask, and again after every later death there, like Crash 2 and 3. Not in boss fights or on the hog.",
+            bodyFont));
+
         var introOnNewGame = AddSwitch(activity, card, "Story intro on New Game", view.IntroOnNewGame, bodyBold);
         card.AddView(Hint(activity,
             "New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original.",
@@ -189,6 +194,7 @@ static class SettingsDialog
             view.BoxCounter = boxCounter.Checked;
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
+            view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
 
             ConfigManager.SaveGame();

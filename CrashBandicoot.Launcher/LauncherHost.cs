@@ -229,6 +229,7 @@ public sealed class LauncherHost : Form
             boxCounter = ConfigManager.View.BoxCounter,
             gemHints = ConfigManager.View.GemHints,
             singleBoxDrop = ConfigManager.View.SingleBoxDrop,
+            pityMask = ConfigManager.View.PityMask,
             introOnNewGame = ConfigManager.View.IntroOnNewGame,
             startPauseMenu = ConfigManager.View.StartPauseMenu,
             infiniteLives = CheatConfig.InfiniteLives,
@@ -695,6 +696,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.GemHints = gh.GetBoolean();
         if (root.TryGetProperty("singleBoxDrop", out var sbd))
             ConfigManager.View.SingleBoxDrop = sbd.GetBoolean();
+        if (root.TryGetProperty("pityMask", out var pm))
+            ConfigManager.View.PityMask = pm.GetBoolean();
         if (root.TryGetProperty("introOnNewGame", out var ing))
             ConfigManager.View.IntroOnNewGame = ing.GetBoolean();
         if (root.TryGetProperty("startPauseMenu", out var spm))
