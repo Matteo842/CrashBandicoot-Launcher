@@ -13,6 +13,8 @@ public sealed class RamLogger
     uint _cycle;
 
     public static bool TrackReads;
+    /// <summary>Set once a heat map exists: RAM writes are recorded only from then on.</summary>
+    public static bool TrackWrites { get; private set; }
 
     public float DecayFrames = 90f;
     public Vector4 BackdropColor = new(0.25f, 0.15f, 0.15f, 1f);
@@ -29,6 +31,7 @@ public sealed class RamLogger
         int n = Width * Height;
         _writeTimestamps = new uint[n];
         _readTimestamps = new uint[n];
+        TrackWrites = true;
     }
 
     public uint Cycle => _cycle;

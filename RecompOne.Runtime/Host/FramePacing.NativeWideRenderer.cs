@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using RecompOne.Runtime.Catalogs;
 using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Memory;
@@ -195,9 +196,8 @@ public static partial class FramePacing
         }
         float dx = gpu.DrawOffsetX - _nativeWideDrawX;
         float dy = gpu.DrawOffsetY - _nativeWideDrawY;
-        for (int i = 0; i < _nativeWidePending.Count; i++)
+        foreach (ref readonly var triangle in CollectionsMarshal.AsSpan(_nativeWidePending))
         {
-            var triangle = _nativeWidePending[i];
             var a = triangle.A; var b = triangle.B; var c = triangle.C;
             a.X += dx; a.Y += dy;
             b.X += dx; b.Y += dy;
@@ -224,9 +224,8 @@ public static partial class FramePacing
             backend.SetDrawEnv(gpu.CurrentHleDrawEnv);
             float dx = gpu.DrawOffsetX - _nativeWideDrawX;
             float dy = gpu.DrawOffsetY - _nativeWideDrawY;
-            for (int i = 0; i < _nativeWideCorePending.Count; i++)
+            foreach (ref readonly var triangle in CollectionsMarshal.AsSpan(_nativeWideCorePending))
             {
-                var triangle = _nativeWideCorePending[i];
                 var a = triangle.A; var b = triangle.B; var c = triangle.C;
                 a.X += dx; a.Y += dy;
                 b.X += dx; b.Y += dy;
@@ -275,7 +274,7 @@ public static partial class FramePacing
 
     public static bool IsNativeWideWorldPrimitive(uint physicalAddress)
     {
-        foreach (var range in _nativeWideWorldRanges)
+        foreach (ref readonly var range in CollectionsMarshal.AsSpan(_nativeWideWorldRanges))
             if (physicalAddress >= range.Start && physicalAddress < range.End)
                 return true;
         return false;
@@ -599,42 +598,44 @@ public static partial class FramePacing
         if (NativeWideCanopyOf(m.ReadU32(Catalog.LevelIdAddr)) is { } canopy)
             AddNativeWideCanopy(m, canopy, worldCount, matrix, projection, screenX, screenY,
                 gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
-        _nativeWideTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        NativeWideSortFarFirst(_nativeWideTransparent);
         _nativeWideDrawX = gpu.DrawOffsetX;
         _nativeWideDrawY = gpu.DrawOffsetY;
         // Fills behind all scenery go first, so the backdrop (no depth) paints
         // over them where it shows, e.g. through The Lab's windows.
-        _nativeWideUnderBackdrop.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        NativeWideSortFarFirst(_nativeWideUnderBackdrop);
         _nativeWidePending.AddRange(_nativeWideHaze);
         _nativeWidePending.AddRange(_nativeWideUnderBackdrop);
-        for (int i = 0; i < _nativeWideOpaque.Count; i++)
+        // Spans, not the list indexer: each indexer read copied a whole
+        // triangle (~90 bytes), a few percent of the game thread on phones.
+        var opaque = CollectionsMarshal.AsSpan(_nativeWideOpaque);
+        var transparent = CollectionsMarshal.AsSpan(_nativeWideTransparent);
+        foreach (ref readonly var t in opaque)
         {
-            var t = _nativeWideOpaque[i];
             if (t.Flags.WideMode == WidePrimitiveMode.BackdropSides) _nativeWidePending.Add(t);
             else if (t.Flags.WideMode == WidePrimitiveMode.WorldExtensionSides) _nativeWideExtensions.Add(t);
         }
-        for (int i = 0; i < _nativeWideTransparent.Count; i++)
+        foreach (ref readonly var t in transparent)
         {
-            var t = _nativeWideTransparent[i];
             if (t.Flags.WideMode == WidePrimitiveMode.BackdropSides) _nativeWidePending.Add(t);
             else if (t.Flags.WideMode == WidePrimitiveMode.WorldExtensionSides) _nativeWideExtensions.Add(t);
         }
-        _nativeWideExtensions.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        NativeWideSortFarFirst(_nativeWideExtensions);
         _nativeWidePending.AddRange(_nativeWideExtensions);
-        for (int i = 0; i < _nativeWideOpaque.Count; i++)
-            if (_nativeWideOpaque[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
-                _nativeWidePending.Add(_nativeWideOpaque[i]);
-        for (int i = 0; i < _nativeWideTransparent.Count; i++)
-            if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldSides)
-                _nativeWidePending.Add(_nativeWideTransparent[i]);
+        foreach (ref readonly var t in opaque)
+            if (t.Flags.WideMode == WidePrimitiveMode.WorldSides)
+                _nativeWidePending.Add(t);
+        foreach (ref readonly var t in transparent)
+            if (t.Flags.WideMode == WidePrimitiveMode.WorldSides)
+                _nativeWidePending.Add(t);
         // Wide Editor triangles last, over the scenery they were drawn on.
-        for (int i = 0; i < _nativeWideOpaque.Count; i++)
-            if (_nativeWideOpaque[i].Flags.WideMode == WidePrimitiveMode.WorldUserSides)
-                _nativeWidePending.Add(_nativeWideOpaque[i]);
-        for (int i = 0; i < _nativeWideTransparent.Count; i++)
-            if (_nativeWideTransparent[i].Flags.WideMode == WidePrimitiveMode.WorldUserSides)
-                _nativeWidePending.Add(_nativeWideTransparent[i]);
-        _nativeWideCoreTransparent.Sort(static (a, b) => b.Depth.CompareTo(a.Depth));
+        foreach (ref readonly var t in opaque)
+            if (t.Flags.WideMode == WidePrimitiveMode.WorldUserSides)
+                _nativeWidePending.Add(t);
+        foreach (ref readonly var t in transparent)
+            if (t.Flags.WideMode == WidePrimitiveMode.WorldUserSides)
+                _nativeWidePending.Add(t);
+        NativeWideSortFarFirst(_nativeWideCoreTransparent);
         _nativeWideCorePending.AddRange(_nativeWideCoreOpaque);
         _nativeWideCorePending.AddRange(_nativeWideCoreTransparent);
         _nativeWideView = new NativeWideView(projection, screenX, screenY, gpu.DrawOffsetX, gpu.DrawOffsetY,
@@ -846,6 +847,9 @@ public static partial class FramePacing
         }
     }
 
+    // SkipLocalsInit: the stackalloc vertex buffers are written before they
+    // are read; zeroing them was a memset per triangle.
+    [SkipLocalsInit]
     static int AddNativeWideClippedPolygon(
         IMemory m,
         NativeWideWorld world,
@@ -890,6 +894,7 @@ public static partial class FramePacing
             viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight, flags, noCull, opaque, transparent);
     }
 
+    [SkipLocalsInit]
     static int AddNativeWideClippedTriangle(
         ReadOnlySpan<NativeWideClipVertex> input, int projection, int screenX, int screenY,
         int drawX, int drawY, float viewCenterX, float viewCenterY, float coreHalf, float wideHalf,
@@ -987,6 +992,7 @@ public static partial class FramePacing
         return 1;
     }
 
+    [SkipLocalsInit]
     static int EmitNativeWideBand(
         in HleVertex a, in HleVertex b, in HleVertex c,
         float x0, float x1, float y0, float y1, in PrimFlags flags,
@@ -1558,8 +1564,44 @@ public static partial class FramePacing
 
     static void NativeWideMoveRange(List<NativeWideTriangle> from, int start, List<NativeWideTriangle> to)
     {
-        for (int i = start; i < from.Count; i++) to.Add(from[i]);
+        to.AddRange(CollectionsMarshal.AsSpan(from)[start..]);
         from.RemoveRange(start, from.Count - start);
+    }
+
+    static float[] _nativeWideSortKeys = new float[256];
+    static int[] _nativeWideSortOrder = new int[256];
+    static NativeWideTriangle[] _nativeWideSortScratch = new NativeWideTriangle[256];
+    static readonly Comparer<float> NativeWideFarFirst = Comparer<float>.Create(static (a, b) => b.CompareTo(a));
+
+    /// <summary>
+    /// Same order as <c>list.Sort((a, b) => b.Depth.CompareTo(a.Depth))</c>, ties
+    /// included (the keyed overload runs the same introsort), but the sort moves
+    /// depths and indices instead of whole triangles; each triangle moves once.
+    /// </summary>
+    static void NativeWideSortFarFirst(List<NativeWideTriangle> list)
+    {
+        int n = list.Count;
+        if (n < 2) return;
+        if (_nativeWideSortKeys.Length < n)
+        {
+            int size = Math.Max(n, _nativeWideSortKeys.Length * 2);
+            _nativeWideSortKeys = new float[size];
+            _nativeWideSortOrder = new int[size];
+            _nativeWideSortScratch = new NativeWideTriangle[size];
+        }
+        var span = CollectionsMarshal.AsSpan(list);
+        var keys = _nativeWideSortKeys;
+        var order = _nativeWideSortOrder;
+        for (int i = 0; i < n; i++)
+        {
+            keys[i] = span[i].Depth;
+            order[i] = i;
+        }
+        Array.Sort(keys, order, 0, n, NativeWideFarFirst);
+        var scratch = _nativeWideSortScratch.AsSpan(0, n);
+        span.CopyTo(scratch);
+        for (int i = 0; i < n; i++)
+            span[i] = scratch[order[i]];
     }
 
     static bool NativeWideLevelSupported(uint level) => level is not (25 or 45 or 56 or 57);

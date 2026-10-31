@@ -69,7 +69,7 @@ public static partial class FramePacing
 
     public static bool IsNativeWideCoreDepthPrimitive(uint physicalAddress)
     {
-        foreach (var range in _nativeWideCoreDepthRanges)
+        foreach (ref readonly var range in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_nativeWideCoreDepthRanges))
             if (physicalAddress >= range.Start && physicalAddress < range.End)
                 return true;
         return false;

@@ -13,6 +13,8 @@ public static class Dispatcher
     static readonly List<string> _active = [];
     static readonly Dictionary<uint, Action<CpuContext, IMemory>> _funcMap = [];
     private static IOverlay? _pending;
+    /// <summary>True while an overlay waits for its first write (checked on every RAM write).</summary>
+    internal static bool HasPending;
 
     /// <summary>
     /// Optional filter around <see cref="Call"/>. Pre returning false skips the target.
@@ -50,6 +52,7 @@ public static class Dispatcher
         }
 
         _pending = overlay;
+        HasPending = true;
     }
 
     public static void NotifyWrite(uint phys)
@@ -59,9 +62,14 @@ public static class Dispatcher
         uint start = p.Base & 0x1FFFFFFFu;
         if (phys < start || phys >= start + 0x800u) return;
         _pending = null;
+        HasPending = false;
         Load(p.Name);
     }
-    public static void ClearPending() => _pending = null;
+    public static void ClearPending()
+    {
+        _pending = null;
+        HasPending = false;
+    }
 
     public static void Load(string name)
     {

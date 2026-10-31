@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Dispatch;
@@ -81,22 +80,32 @@ public sealed class PSMemory : IMemory
         _hwregs[o + 3] = (byte)(v >> 24);
     }
 
+    // Every RAM access passes here: the checks stay inline (Mono does not
+    // inline the logging calls), the logging itself runs only when the RAM
+    // map / memory editor or a pending overlay needs it.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void TrackWrite(uint phys, int size)
     {
-        if (phys < MemoryMap.RamWindow)
-        {
-            uint off = phys & _ramMask;
-            Runtime.RamLog.RecordWrite(off, size);
-            Dispatcher.NotifyWrite(off);
-        }
-
+        if ((RamLogger.TrackWrites || Dispatcher.HasPending) && phys < MemoryMap.RamWindow)
+            RecordWrite(phys & _ramMask, size);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecordWrite(uint off, int size)
+    {
+        Runtime.RamLog.RecordWrite(off, size);
+        Dispatcher.NotifyWrite(off);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void TrackRead(uint phys, int size)
     {
         if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
-            Runtime.RamLog.RecordRead(phys & _ramMask, size);
+            RecordRead(phys & _ramMask, size);
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecordRead(uint off, int size) => Runtime.RamLog.RecordRead(off, size);
 
     // Crash SCUS-94900: .sbss global pointer. Geom jump-table stubs temporarily load
     // $gp with AND masks (0x00FFFFFF / 0x0000FFFF); a recompiler `return` instead of
@@ -112,14 +121,18 @@ public sealed class PSMemory : IMemory
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void CountAccess()
     {
-        if (--_memYield <= 0)
-        {
-            _memYield = 65536;
-            Sdk.LibEtc.MaybeCatchUpVBlank();
-        }
+        if (--_memYield <= 0) MemYield();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MemYield()
+    {
+        _memYield = 65536;
+        Sdk.LibEtc.MaybeCatchUpVBlank();
     }
 
     /// <summary>Offset into main RAM if <paramref name="phys"/> is RAM and the access fits.</summary>
+    /// <remarks>The RAM fast paths read and write unaligned words in place: the PS1 and every host are little-endian.</remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryRamOffset(uint phys, uint size, out uint off)
     {
@@ -259,7 +272,7 @@ public sealed class PSMemory : IMemory
         if (TryRamOffset(phys, 2, out uint off))
         {
             CountAccess();
-            return BinaryPrimitives.ReadUInt16LittleEndian(_ram.AsSpan((int)off));
+            return Unsafe.ReadUnaligned<ushort>(ref _ram[off]);
         }
         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
         if (IsSpu(phys)) return _spu.ReadReg16(phys);
@@ -275,7 +288,7 @@ public sealed class PSMemory : IMemory
         if (TryRamOffset(phys, 4, out uint off))
         {
             CountAccess();
-            return BinaryPrimitives.ReadUInt32LittleEndian(_ram.AsSpan((int)off));
+            return Unsafe.ReadUnaligned<uint>(ref _ram[off]);
         }
         if (phys == 0x1F801810u) return _gpu.ReadData();
         if (phys == 0x1F801814u) return _gpu.ReadStat();
@@ -310,7 +323,7 @@ public sealed class PSMemory : IMemory
         if (TryRamOffset(phys, 2, out uint off))
         {
             CountAccess();
-            BinaryPrimitives.WriteUInt16LittleEndian(_ram.AsSpan((int)off), value);
+            Unsafe.WriteUnaligned(ref _ram[off], value);
             return;
         }
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
@@ -328,7 +341,7 @@ public sealed class PSMemory : IMemory
         if (TryRamOffset(phys, 4, out uint off))
         {
             CountAccess();
-            BinaryPrimitives.WriteUInt32LittleEndian(_ram.AsSpan((int)off), value);
+            Unsafe.WriteUnaligned(ref _ram[off], value);
             return;
         }
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
