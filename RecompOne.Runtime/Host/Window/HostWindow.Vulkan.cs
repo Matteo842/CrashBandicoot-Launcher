@@ -1,5 +1,6 @@
 using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
+using Silk.NET.Input;
 using Silk.NET.Windowing;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hardware;
@@ -104,13 +105,41 @@ internal static partial class HostWindow
         }
     }
 
+    /// <summary>
+    /// ImGui on the Vulkan window (fonts, pipeline, first swapchain). On failure
+    /// everything Vulkan is torn down so the caller can open the OpenGL window.
+    /// </summary>
+    static bool TryLoadVulkanUi()
+    {
+        try
+        {
+            // Developer switch to test the OpenGL fallback: CRASH_VK_FAIL=imgui.
+            if (Environment.GetEnvironmentVariable("CRASH_VK_FAIL") == "imgui")
+                throw new InvalidOperationException("forced by CRASH_VK_FAIL");
+            _input = _window!.CreateInput();
+            _imguiVk = new VkImGuiController(_vkBackend!, _vkSwapchain!, _window!, new ImGuiInputContext(_input), ConfigureImGui);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"[Host] Vulkan ImGui failed ({e.GetType().Name}: {e.Message}); falling back to OpenGL");
+            try { _imguiVk?.Dispose(); } catch { /* half-built controller */ }
+            _imguiVk = null;
+            try { _input?.Dispose(); } catch { /* ignore */ }
+            _input = null;
+            DisposeVulkan();
+            try { _window?.Dispose(); } catch { /* ignore */ }
+            _window = null;
+            return false;
+        }
+    }
+
     static void LoadVulkanRenderer()
     {
         int internalRes = ConfigManager.View.InternalResolution;
         Hle.GpuHle.Active = true;
         Hle.GpuHle.Backend = _vkBackend;
         ApplyHleSettings(internalRes);
-        _imguiVk = new VkImGuiController(_vkBackend!, _vkSwapchain!, _window!, new ImGuiInputContext(_input!), ConfigureImGui);
     }
 
     /// <summary>Frame on the Vulkan window: same steps as the OpenGL OnRender.</summary>

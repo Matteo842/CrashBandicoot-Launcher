@@ -281,7 +281,7 @@ sealed partial class LauncherWindow
         var dejitter = Nav(new ThemeCheck("Dejitter") { Checked = view.Dejitter });
         var hiResDither = Nav(new ThemeCheck("High-res dither") { Checked = !view.ScaledDither });
         var crtFilter = Nav(new ThemeCheck("CRT filter (MattiasCRT)") { Checked = view.CrtFilter });
-        var renderer = Nav(MakeCombo([(0, "Auto (recommended)"), (1, "OpenGL 3.3"), (2, "OpenGL ES 3"), (3, "Vulkan (beta)")],
+        var renderer = Nav(MakeCombo([(0, "Auto (recommended)"), (3, "Vulkan"), (4, "OpenGL"), (1, "OpenGL 3.3"), (2, "OpenGL ES 3")],
             view.GraphicsApi));
 
         var vol = Nav(new ThemeSlider { Value = (int)Math.Round(game.MasterVolume * 100) });

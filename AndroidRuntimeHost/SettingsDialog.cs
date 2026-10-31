@@ -68,9 +68,9 @@ static class SettingsDialog
         card.AddView(Hint(activity,
             "Applies on the next game start. Use 8x on 4K displays.", bodyFont));
 
-        var vulkanRenderer = AddSwitch(activity, card, "Vulkan renderer (beta)", view.VulkanRenderer, bodyBold);
+        var vulkanRenderer = AddSwitch(activity, card, "Vulkan renderer", view.VulkanRenderer, bodyBold);
         card.AddView(Hint(activity,
-            "Draws the game with Vulkan instead of OpenGL ES: less driver work per frame and no shader stutter after the first run. Applies on the next game start. If the phone cannot run it, the game falls back to OpenGL ES. The CRT filter is not available with Vulkan yet.",
+            "Draws the game with Vulkan instead of OpenGL ES: less driver work per frame and no shader stutter after the first run. Helps most on phones with weak OpenGL ES drivers. Applies on the next game start. If the phone cannot run it, the game falls back to OpenGL ES.",
             bodyFont));
 
         var filter = AddChoice(activity, card, "Texture filter",
@@ -154,7 +154,7 @@ static class SettingsDialog
                 BottomMargin = Dp(activity, 2),
             });
             card.AddView(Hint(activity,
-                "Driver test and synthetic benchmark. Does not use the disc.", bodyFont));
+                "OpenGL ES driver test and synthetic benchmark. Does not use the disc. The JSON report also records the last game session, with Vulkan or OpenGL ES.", bodyFont));
         }
 
         var scroll = new ScrollView(activity)

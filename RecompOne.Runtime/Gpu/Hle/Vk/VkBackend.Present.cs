@@ -12,6 +12,8 @@ public sealed unsafe partial class VkBackend
     bool _presentRgb24;
     int _presentNativeH = 240;
     float _presentAspect = GpuHle.BaseAspect;
+    int _presentFbW, _presentFbH;
+    VkTex? _lastCrtOut;
 
     public void Present(in HleDispEnv disp) => PresentDisplay(disp.X, disp.Y, disp.W, disp.H, disp.Rgb24);
 
@@ -97,6 +99,8 @@ public sealed unsafe partial class VkBackend
             }
             if ((long)visibleW * visibleH < (long)fbW * fbH) { fbW = visibleW; fbH = visibleH; }
         }
+        _presentFbW = fbW;
+        _presentFbH = fbH;
 
         if (_frameFlushes > 0)
         {
@@ -122,25 +126,49 @@ public sealed unsafe partial class VkBackend
     {
         if (!TryAcquire(swapchain, out uint index)) return false;
 
+        int sw = swapchain.Width, sh = swapchain.Height;
+        var fitted = DisplayLayout.Fit(sw, sh, _presentAspect, _presentNativeH, GpuHle.IntegerScale);
+        int tw = Math.Clamp((int)MathF.Round(fitted.Width), 1, sw);
+        int th = Math.Clamp((int)MathF.Round(fitted.Height), 1, sh);
+
+        // CRT (Android): present image at the size GL's present texture has,
+        // the filter at exact screen pixels, then a 1:1 copy into the window.
+        VkTex? crt = null;
+        if (GpuHle.CrtFilter && RenderPresentImage(Math.Max(1, _presentFbW), Math.Max(1, _presentFbH)))
+            crt = RenderCrt(tw, th);
+        if (crt != null && !ReferenceEquals(crt, _lastCrtOut))
+        {
+            // The CRT output was reallocated: its old view may not be reused by a cached set.
+            if (_lastCrtOut != null) ForgetSets(_lastCrtOut);
+            _lastCrtOut = crt;
+        }
+
         EnsurePresentPipelines(swapchain.RenderPass);
-        var source = _presentSrc ?? _vram;
+        VkTex source;
+        PresentPush push;
+        bool rgb24 = _presentRgb24;
+        if (crt != null)
+        {
+            source = crt;
+            push = new PresentPush { SizeX = tw, SizeY = th, TexSizeX = tw, TexSizeY = th, Mode = 1 };
+            rgb24 = false;
+        }
+        else
+        {
+            source = _presentSrc ?? _vram;
+            push = _presentPush;
+        }
         EnsureLayout(source, ImageLayout.ShaderReadOnlyOptimal);
         var set = SetFor(source, source, present: true);
 
         var cb = Cb;
-        int sw = swapchain.Width, sh = swapchain.Height;
         BeginSwapchainPass(swapchain, index, new ClearColorValue(0f, 0f, 0f, 1f));
-
-        var fitted = DisplayLayout.Fit(sw, sh, _presentAspect, _presentNativeH, GpuHle.IntegerScale);
-        int tw = Math.Clamp((int)MathF.Round(fitted.Width), 1, sw);
-        int th = Math.Clamp((int)MathF.Round(fitted.Height), 1, sh);
         var viewport = new Viewport((sw - tw) / 2, (sh - th) / 2, tw, th, 0f, 1f);
         var scissor = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)sw, (uint)sh));
         _vk.CmdSetViewport(cb, 0, 1, &viewport);
         _vk.CmdSetScissor(cb, 0, 1, &scissor);
-        _vk.CmdBindPipeline(cb, PipelineBindPoint.Graphics, _presentRgb24 ? _present24Pipe : _presentPipe);
+        _vk.CmdBindPipeline(cb, PipelineBindPoint.Graphics, rgb24 ? _present24Pipe : _presentPipe);
         _vk.CmdBindDescriptorSets(cb, PipelineBindPoint.Graphics, _presentLayout, 0, 1, &set, 0, null);
-        var push = _presentPush;
         _vk.CmdPushConstants(cb, _presentLayout, ShaderStageFlags.FragmentBit, 0, (uint)sizeof(PresentPush), &push);
         _vk.CmdDraw(cb, 3, 1, 0, 0);
         _vk.CmdEndRenderPass(cb);

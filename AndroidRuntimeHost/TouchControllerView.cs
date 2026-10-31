@@ -94,10 +94,15 @@ sealed class TouchControllerView : View
         LayoutControls(w, h);
     }
 
+    // Math.Clamp throws when min > max: a portrait relayout (Home screen,
+    // split view) is too narrow for the landscape margins. Centre instead.
+    static float Fit(float value, float min, float max)
+        => max < min ? (min + max) * 0.5f : Math.Clamp(value, min, max);
+
     void LayoutControls(float width, float height)
     {
         var density = Resources?.DisplayMetrics?.Density ?? 1f;
-        _radius = Math.Clamp(height * 0.085f, 28f * density, 44f * density) * _settings.Scale;
+        _radius = Fit(height * 0.085f, 28f * density, 44f * density) * _settings.Scale;
         var margin = Math.Max(10f * density, height * 0.022f);
         var maximumVerticalStep = Math.Max(_radius,
             height * 0.5f - margin - _radius);
@@ -106,14 +111,14 @@ sealed class TouchControllerView : View
 
         _joystickTravelRadius = Math.Min(_radius * 2.0f, height * 0.32f);
         var joystickReach = _joystickTravelRadius + _radius * 0.58f;
-        _dpadX = Math.Clamp(width * _settings.DpadX,
+        _dpadX = Fit(width * _settings.DpadX,
             margin + joystickReach, width * 0.48f - joystickReach);
-        _dpadY = Math.Clamp(height * _settings.DpadY,
+        _dpadY = Fit(height * _settings.DpadY,
             margin + joystickReach, height - margin - joystickReach);
 
-        _faceX = Math.Clamp(width * _settings.FaceX,
+        _faceX = Fit(width * _settings.FaceX,
             width * 0.52f + _radius, width - margin - groupReach);
-        _faceY = Math.Clamp(height * _settings.FaceY,
+        _faceY = Fit(height * _settings.FaceY,
             margin + groupReach, height - margin - groupReach);
         SetCircle(_triangle, _faceX, _faceY - _controlStep);
         SetCircle(_circle, _faceX + _controlStep, _faceY);
@@ -124,7 +129,7 @@ sealed class TouchControllerView : View
         var shoulderHeight = _radius * 0.72f;
         var shoulderGap = _radius * 0.22f;
         // Stay below Android's status-bar icons on devices with camera cut-outs.
-        var shoulderTop = Math.Clamp(
+        var shoulderTop = Fit(
             height * _settings.ShouldersY - shoulderHeight * 0.5f,
             34f * density,
             height - margin - shoulderHeight);
@@ -139,10 +144,10 @@ sealed class TouchControllerView : View
         var systemWidth = _radius * 1.72f;
         var systemHeight = _radius * 0.62f;
         var systemGap = _radius * 0.28f;
-        _systemX = Math.Clamp(width * _settings.SystemX,
+        _systemX = Fit(width * _settings.SystemX,
             systemWidth + systemGap + margin,
             width - systemWidth - systemGap - margin);
-        _systemY = Math.Clamp(height * _settings.SystemY,
+        _systemY = Fit(height * _settings.SystemY,
             systemHeight * 0.5f + margin,
             height - systemHeight * 0.5f - margin);
         var systemTop = _systemY - systemHeight * 0.5f;

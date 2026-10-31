@@ -24,7 +24,10 @@ sealed class AndroidGlesInfo
     nint TextureBarrierAddress { get; init; }
     nint ShadingRateAddress { get; init; }
 
-    public string FramebufferFetchLabel => FramebufferFetchPath switch
+    /// <summary>Set for the Vulkan renderer, which has no framebuffer-fetch path.</summary>
+    public string? PathLabel { get; init; }
+
+    public string FramebufferFetchLabel => PathLabel ?? FramebufferFetchPath switch
     {
         GlesFramebufferFetchPath.Ext => "EXT coherent",
         GlesFramebufferFetchPath.Arm => "ARM coherent",
@@ -75,6 +78,19 @@ sealed class AndroidGlesInfo
             ShadingRateAddress = shadingRateAddress,
         };
     }
+
+    /// <summary>Driver snapshot for the diagnostics report when the game runs on Vulkan.</summary>
+    public static AndroidGlesInfo ForVulkan(string deviceName, uint vendorId, string apiVersion, string driverVersion) => new()
+    {
+        Vendor = $"Vulkan vendor 0x{vendorId:X4}",
+        Renderer = deviceName,
+        Version = $"Vulkan {apiVersion}, driver {driverVersion}",
+        ShadingLanguageVersion = "SPIR-V",
+        Extensions = [],
+        FramebufferFetchPath = GlesFramebufferFetchPath.None,
+        PathLabel = "vulkan dual-source",
+        TextureBarrierFunction = "vulkan copies",
+    };
 
     public (bool textureBarrier, bool coarseShading) ConfigureBackend(GlBackend backend, int scale)
     {

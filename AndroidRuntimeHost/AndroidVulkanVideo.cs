@@ -38,6 +38,8 @@ sealed unsafe class AndroidVulkanVideo : IAndroidVideo
     public string Name => "Vulkan";
     public string DeviceName => _gpu?.DeviceName ?? "?";
     public string ApiVersion => _gpu?.ApiVersionText ?? "?";
+    public string DriverVersion => _gpu?.DriverVersionText ?? "?";
+    public uint VendorId => _gpu?.VendorId ?? 0;
     public string PresentModeLabel => _swapchain?.PresentMode.ToString() ?? "?";
     public int SurfaceWidth => _swapchain is { Width: > 0 } s ? s.Width : _expectedWidth;
     public int SurfaceHeight => _swapchain is { Height: > 0 } s ? s.Height : _expectedHeight;
@@ -63,6 +65,13 @@ sealed unsafe class AndroidVulkanVideo : IAndroidVideo
 
     void Init(Surface surface, string pipelineCachePath)
     {
+        // Only test APKs built with -p:VkValidationLayer carry the layer.
+        var nativeDir = Android.App.Application.Context.ApplicationInfo?.NativeLibraryDir;
+        if (nativeDir != null && File.Exists(Path.Combine(nativeDir, "libVkLayer_khronos_validation.so")))
+        {
+            VkGpu.ValidationRequested = true;
+            VkGpu.ValidationLog = message => Android.Util.Log.Warn("CrashVk", message);
+        }
         _gpu = VkGpu.CreateInstance([KhrSurface.ExtensionName, KhrAndroidSurface.ExtensionName], "Crash Bandicoot");
         if (!_gpu.Vk.TryGetInstanceExtension(_gpu.Instance, out KhrAndroidSurface khrAndroid))
             throw new InvalidOperationException("VK_KHR_android_surface is not available.");

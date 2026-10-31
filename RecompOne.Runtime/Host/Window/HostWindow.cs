@@ -110,8 +110,10 @@ internal static partial class HostWindow
                 WindowBorder = embed ? WindowBorder.Hidden : WindowBorder.Resizable,
                 WindowState = !embed && ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
             };
-            // Vulkan (opt-in Renderer setting) falls back to the OpenGL chain on any failure.
-            if (ConfigManager.View.GraphicsApi != ViewConfig.GraphicsApiVulkan || !TryCreateVulkanWindow(options))
+            // Vulkan (Auto on Windows, or chosen) falls back to the OpenGL chain on any failure.
+            // ImGui is created here too, so a failure there still reaches the fallback.
+            if (!ConfigManager.View.DesktopWantsVulkan
+                || !TryCreateVulkanWindow(options) || !TryLoadVulkanUi())
                 CreateGlWindow(options);
             LogWindowEvents(_window!);
             _window!.Render += OnRender;
@@ -744,7 +746,8 @@ internal static partial class HostWindow
 
     static void OnLoad()
     {
-        _input = _window!.CreateInput();
+        // The Vulkan path already opened input for its ImGui controller.
+        _input ??= _window!.CreateInput();
         InputManager.Initialize(_input);
 
         if (UsingVulkan) LoadVulkanRenderer();

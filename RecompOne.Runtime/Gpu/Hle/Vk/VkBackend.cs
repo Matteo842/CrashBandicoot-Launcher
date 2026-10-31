@@ -639,18 +639,21 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
         }
     }
 
+    // Present pipelines per render pass: the swapchain pass and the owned
+    // texture pass (desktop present image, Android CRT) alternate every frame.
+    readonly Dictionary<ulong, (Pipeline normal, Pipeline rgb24)> _presentPipes = [];
+
     void EnsurePresentPipelines(RenderPass pass)
     {
         if (_presentPipesPass.Handle == pass.Handle && _presentPipe.Handle != 0) return;
-        if (_presentPipe.Handle != 0)
+        if (!_presentPipes.TryGetValue(pass.Handle, out var pipes))
         {
-            var old0 = _presentPipe; var old1 = _present24Pipe;
-            Defer(() => { _vk.DestroyPipeline(_dev, old0, null); _vk.DestroyPipeline(_dev, old1, null); });
+            pipes = (CreatePresentPipeline(pass, _presentFs), CreatePresentPipeline(pass, _present24Fs));
+            _presentPipes[pass.Handle] = pipes;
+            SavePipelineCache();
         }
-        _presentPipe = CreatePresentPipeline(pass, _presentFs);
-        _present24Pipe = CreatePresentPipeline(pass, _present24Fs);
+        (_presentPipe, _present24Pipe) = pipes;
         _presentPipesPass = pass;
-        SavePipelineCache();
     }
 
     // ------------------------------------------------------------ submission
@@ -978,8 +981,12 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
         if (_vramFb.Handle != 0) _vk.DestroyFramebuffer(_dev, _vramFb, null);
         foreach (var p in _vramPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
         foreach (var p in _rtPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
-        if (_presentPipe.Handle != 0) _vk.DestroyPipeline(_dev, _presentPipe, null);
-        if (_present24Pipe.Handle != 0) _vk.DestroyPipeline(_dev, _present24Pipe, null);
+        foreach (var (normal, rgb24) in _presentPipes.Values)
+        {
+            _vk.DestroyPipeline(_dev, normal, null);
+            _vk.DestroyPipeline(_dev, rgb24, null);
+        }
+        _presentPipes.Clear();
         foreach (var m in new[] { _primVs, _primFs, _fullVs, _presentFs, _present24Fs })
             if (m.Handle != 0) _vk.DestroyShaderModule(_dev, m, null);
         if (_cache.Handle != 0) _vk.DestroyPipelineCache(_dev, _cache, null);

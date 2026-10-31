@@ -30,6 +30,28 @@ public sealed unsafe class VkGpu : IDisposable
 
     VkGpu(Vk vk) => Vk = vk;
 
+    const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
+    const string DebugUtils = "VK_EXT_debug_utils";
+
+    /// <summary>
+    /// Developer switch: enable the Khronos validation layer when it is
+    /// installed (desktop: env CRASH_VK_VALIDATION=1; Android: test APK with the
+    /// layer packed in). Never on in normal play.
+    /// </summary>
+    public static bool ValidationRequested { get; set; } =
+        Environment.GetEnvironmentVariable("CRASH_VK_VALIDATION") == "1";
+
+    /// <summary>Where validation messages go (desktop: console/session log; Android: logcat).</summary>
+    public static Action<string> ValidationLog { get; set; } = message => Console.WriteLine(message);
+
+    /// <summary>Validation messages seen so far (errors and warnings).</summary>
+    public static int ValidationMessages => _validationMessages;
+    static int _validationMessages;
+    static readonly Dictionary<int, int> _validationSeen = [];
+
+    public bool ValidationActive { get; private set; }
+    DebugUtilsMessengerEXT _messenger;
+
     /// <summary>
     /// Load the Vulkan loader and create an instance with the given surface
     /// extensions (VK_KHR_surface plus the platform one). Throws when the
@@ -39,8 +61,22 @@ public sealed unsafe class VkGpu : IDisposable
     {
         var vk = Vk.GetApi();
         var gpu = new VkGpu(vk);
+        var extList = extensions.ToList();
+        var layers = new List<string>();
+        if (ValidationRequested)
+        {
+            if (HasInstanceLayer(vk, ValidationLayer))
+            {
+                layers.Add(ValidationLayer);
+                if (HasInstanceExtension(vk, DebugUtils) || HasInstanceExtension(vk, DebugUtils, ValidationLayer))
+                    extList.Add(DebugUtils);
+                gpu.ValidationActive = true;
+            }
+            else ValidationLog("[VkValidation] requested, but VK_LAYER_KHRONOS_validation is not installed");
+        }
         nint name = SilkMarshal.StringToPtr(appName);
-        nint exts = SilkMarshal.StringArrayToPtr(extensions.ToArray());
+        nint exts = SilkMarshal.StringArrayToPtr(extList.ToArray());
+        nint layerNames = layers.Count > 0 ? SilkMarshal.StringArrayToPtr(layers.ToArray()) : 0;
         try
         {
             var app = new ApplicationInfo
@@ -56,8 +92,10 @@ public sealed unsafe class VkGpu : IDisposable
             {
                 SType = StructureType.InstanceCreateInfo,
                 PApplicationInfo = &app,
-                EnabledExtensionCount = (uint)extensions.Count,
+                EnabledExtensionCount = (uint)extList.Count,
                 PpEnabledExtensionNames = (byte**)exts,
+                EnabledLayerCount = (uint)layers.Count,
+                PpEnabledLayerNames = (byte**)layerNames,
             };
             Instance instance;
             Check(vk.CreateInstance(&info, null, &instance), "vkCreateInstance");
@@ -65,14 +103,86 @@ public sealed unsafe class VkGpu : IDisposable
         }
         finally
         {
+            if (layerNames != 0) SilkMarshal.Free(layerNames);
             SilkMarshal.Free(exts);
             SilkMarshal.Free(name);
         }
+        if (extList.Contains(DebugUtils)) gpu.CreateMessenger();
+        if (gpu.ValidationActive) ValidationLog("[VkValidation] Khronos validation layer active");
 
         if (!vk.TryGetInstanceExtension(gpu.Instance, out KhrSurface surface))
             throw new InvalidOperationException("VK_KHR_surface is not available.");
         gpu.KhrSurface = surface;
         return gpu;
+    }
+
+    static bool HasInstanceLayer(Vk vk, string name)
+    {
+        uint count = 0;
+        vk.EnumerateInstanceLayerProperties(&count, null);
+        var props = new LayerProperties[count];
+        fixed (LayerProperties* p = props)
+            vk.EnumerateInstanceLayerProperties(&count, p);
+        foreach (var prop in props)
+            if (SilkMarshal.PtrToString((nint)prop.LayerName) == name)
+                return true;
+        return false;
+    }
+
+    static bool HasInstanceExtension(Vk vk, string name, string? layer = null)
+    {
+        uint count = 0;
+        vk.EnumerateInstanceExtensionProperties(layer, &count, null);
+        var props = new ExtensionProperties[count];
+        fixed (ExtensionProperties* p = props)
+            vk.EnumerateInstanceExtensionProperties(layer, &count, p);
+        foreach (var prop in props)
+            if (SilkMarshal.PtrToString((nint)prop.ExtensionName) == name)
+                return true;
+        return false;
+    }
+
+    void CreateMessenger()
+    {
+        var create = (delegate* unmanaged[Cdecl]<Instance, DebugUtilsMessengerCreateInfoEXT*, AllocationCallbacks*, DebugUtilsMessengerEXT*, Result>)
+            (nint)Vk.GetInstanceProcAddr(Instance, "vkCreateDebugUtilsMessengerEXT").Handle;
+        if (create == null) return;
+        var info = new DebugUtilsMessengerCreateInfoEXT
+        {
+            SType = StructureType.DebugUtilsMessengerCreateInfoExt,
+            MessageSeverity = DebugUtilsMessageSeverityFlagsEXT.WarningBitExt | DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt,
+            MessageType = DebugUtilsMessageTypeFlagsEXT.GeneralBitExt | DebugUtilsMessageTypeFlagsEXT.ValidationBitExt |
+                          DebugUtilsMessageTypeFlagsEXT.PerformanceBitExt,
+            PfnUserCallback = (delegate* unmanaged[Cdecl]<DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCallbackDataEXT*, void*, Bool32>)&OnValidationMessage,
+        };
+        DebugUtilsMessengerEXT messenger;
+        if (create(Instance, &info, null, &messenger) == Result.Success)
+            _messenger = messenger;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    static Bool32 OnValidationMessage(DebugUtilsMessageSeverityFlagsEXT severity, DebugUtilsMessageTypeFlagsEXT type,
+        DebugUtilsMessengerCallbackDataEXT* data, void* user)
+    {
+        try
+        {
+            Interlocked.Increment(ref _validationMessages);
+            int id = data->MessageIdNumber;
+            int seen;
+            lock (_validationSeen)
+            {
+                _validationSeen.TryGetValue(id, out seen);
+                _validationSeen[id] = seen + 1;
+            }
+            // Each distinct message a few times only: per-draw errors would flood the log.
+            if (seen < 3)
+            {
+                string level = (severity & DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt) != 0 ? "ERROR" : "WARN";
+                ValidationLog($"[VkValidation] {level} {SilkMarshal.PtrToString((nint)data->PMessage)}");
+            }
+        }
+        catch { /* never throw into the driver */ }
+        return false;
     }
 
     /// <summary>Pick a GPU that can draw and present to <paramref name="surface"/>, then create the device.</summary>
@@ -230,6 +340,13 @@ public sealed unsafe class VkGpu : IDisposable
             Vk.DeviceWaitIdle(Device);
             Vk.DestroyDevice(Device, null);
             Device = default;
+        }
+        if (_messenger.Handle != 0)
+        {
+            var destroy = (delegate* unmanaged[Cdecl]<Instance, DebugUtilsMessengerEXT, AllocationCallbacks*, void>)
+                (nint)Vk.GetInstanceProcAddr(Instance, "vkDestroyDebugUtilsMessengerEXT").Handle;
+            if (destroy != null) destroy(Instance, _messenger, null);
+            _messenger = default;
         }
         if (Instance.Handle != 0)
         {

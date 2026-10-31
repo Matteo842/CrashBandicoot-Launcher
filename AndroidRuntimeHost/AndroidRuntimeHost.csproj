@@ -45,6 +45,12 @@
     <PackageReference Include="Silk.NET.Windowing.Sdl" Version="2.22.0" ExcludeAssets="build;buildTransitive;native" />
   </ItemGroup>
 
+  <!-- Test builds only: -p:VkValidationLayer=<path to arm64 libVkLayer_khronos_validation.so>
+       packs the Khronos validation layer; AndroidVulkanVideo then enables it. -->
+  <ItemGroup Condition="'$(VkValidationLayer)' != ''">
+    <AndroidNativeLibrary Include="$(VkValidationLayer)" Abi="arm64-v8a" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Include="..\CrashBandicoot.Launcher\Recomp\DiscValidator.cs" Link="Shared\DiscValidator.cs" />
     <Compile Include="..\CrashBandicoot.Launcher\Recomp\GameCompiler.cs" Link="Shared\GameCompiler.cs" />

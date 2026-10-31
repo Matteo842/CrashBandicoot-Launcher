@@ -649,6 +649,10 @@ public sealed class MainActivity : Activity
                 if (vulkan != null)
                 {
                     video = vulkan;
+                    diagnostics = new GameGpuDiagnosticsSession(
+                        this,
+                        AndroidGlesInfo.ForVulkan(vulkan.DeviceName, vulkan.VendorId, vulkan.ApiVersion, vulkan.DriverVersion),
+                        ConfigManager.View.InternalResolution, textureBarrier: false, coarseShading: false);
                 }
                 else
                 {

@@ -114,11 +114,12 @@ LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot-Linux --run /path/to/game.cue
 |---|---|---|---|
 | **System** | Windows 10 or 11 | glibc 2.34 or later: Ubuntu 22.04+, Debian 12+, Fedora 35+, RHEL / AlmaLinux / Rocky Linux 9+ | Android 8.0 (API 26) or later |
 | **CPU** | 64-bit x86 (`x64`) or 64-bit ARM (`arm64`) | 64-bit x86 (`x86-64`) or 64-bit ARM (`arm64`) | 64-bit ARM (`arm64-v8a`) |
-| **Graphics** | OpenGL 4.3 (or 3.3) | OpenGL 4.3 (or 3.3, or OpenGL ES 3.0) | OpenGL ES 3.2 |
+| **Graphics** | Vulkan 1.0, or OpenGL 4.3 (or 3.3) | OpenGL 4.3 (or 3.3, or OpenGL ES 3.0), or Vulkan 1.0 | OpenGL ES 3.2, or Vulkan 1.0 |
 | **Also needed** | Visual C++ Redistributable 2015–2022 ([x64](https://aka.ms/vs/17/release/vc_redist.x64.exe), or [ARM64](https://aka.ms/vs/17/release/vc_redist.arm64.exe) for the arm64 build) | X11 or XWayland | Nothing |
 
 - **No 32-bit builds** on any platform.
-- **OpenGL 4.3** works on most PC GPUs from 2012 on, for example NVIDIA GeForce 400 series, AMD Radeon HD 7000 series, Intel HD Graphics 4600 or newer. The game doesn't use Direct3D or Vulkan. If the game window doesn't open, update your GPU driver first.
+- **Vulkan** is the default renderer on Windows (Settings › Graphics › Renderer › Auto). It needs a Vulkan 1.0 driver with dual-source blending: NVIDIA GeForce 600 series, AMD Radeon HD 7000 series, Intel HD Graphics 500 (Skylake) or newer. Without it, or if Vulkan fails to start, the game opens with OpenGL on its own. On Linux, Auto still uses OpenGL; pick Vulkan in the Renderer list to use it. On Android, Vulkan is a switch in Settings (off by default).
+- **OpenGL 4.3** works on most PC GPUs from 2012 on, for example NVIDIA GeForce 400 series, AMD Radeon HD 7000 series, Intel HD Graphics 4600 or newer. Renderer › **OpenGL** skips Vulkan. If the game window doesn't open, update your GPU driver first.
 - **Older GPUs:** without OpenGL 4.3 the game falls back on its own to OpenGL 3.3 (for example Intel HD Graphics on Atom/Celeron chips), then to OpenGL ES 3.0 or newer. Settings › Graphics › **Renderer** picks one of them first. OpenGL ES also needs framebuffer fetch or `GL_EXT_blend_func_extended`; Mesa drivers have them.
 - **Visual C++ Redistributable (Windows):** most PCs already have it, because many games install it. Without it, the game can't open its window or play sound.
 - **Windows on ARM (Snapdragon X):** use `CrashBandicoot-arm64.exe`, which runs natively; `CrashBandicoot.exe` also starts there, but only through Windows' x64 emulation. OpenGL on these PCs comes from Microsoft's *OpenCL, OpenGL, and Vulkan Compatibility Pack* (Microsoft Store): install or update it if the game window doesn't open or draws wrongly. This build gets less testing than the x64 one.

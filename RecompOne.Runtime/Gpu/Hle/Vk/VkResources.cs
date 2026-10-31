@@ -50,6 +50,11 @@ internal sealed unsafe class VkTex
         tex.Memory = memory;
         VkGpu.Check(vk.BindImageMemory(gpu.Device, image, memory, 0), "vkBindImageMemory");
 
+        // Transfer-only images (staging, copy scratch) may not have a view.
+        const ImageUsageFlags viewUsage = ImageUsageFlags.SampledBit | ImageUsageFlags.StorageBit |
+            ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.DepthStencilAttachmentBit | ImageUsageFlags.InputAttachmentBit;
+        if ((usage & viewUsage) == 0) return tex;
+
         var viewInfo = new ImageViewCreateInfo
         {
             SType = StructureType.ImageViewCreateInfo,
