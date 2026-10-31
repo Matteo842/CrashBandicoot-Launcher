@@ -1070,8 +1070,8 @@ public static partial class FramePacing
         R = (byte)Math.Clamp((int)(a.R + (b.R - a.R) * t + 0.5f), 0, 255),
         G = (byte)Math.Clamp((int)(a.G + (b.G - a.G) * t + 0.5f), 0, 255),
         B = (byte)Math.Clamp((int)(a.B + (b.B - a.B) * t + 0.5f), 0, 255),
-        U = (short)MathF.Round(a.U + (b.U - a.U) * t),
-        V = (short)MathF.Round(a.V + (b.V - a.V) * t),
+        U = (short)NativeWideRound(a.U + (b.U - a.U) * t),
+        V = (short)NativeWideRound(a.V + (b.V - a.V) * t),
         HasGteZ = a.HasGteZ && b.HasGteZ,
     };
 
@@ -1395,12 +1395,28 @@ public static partial class FramePacing
             Y = NativeWideProjectAxis(vertex.Y, vertex.Z, projection, drawY + screenY),
             Z = sz,
             HasGteZ = true,
-            R = (byte)Math.Clamp((int)MathF.Round(vertex.R), 0, 255),
-            G = (byte)Math.Clamp((int)MathF.Round(vertex.G), 0, 255),
-            B = (byte)Math.Clamp((int)MathF.Round(vertex.B), 0, 255),
-            U = (short)MathF.Round(vertex.U),
-            V = (short)MathF.Round(vertex.V),
+            R = (byte)Math.Clamp(NativeWideRound(vertex.R), 0, 255),
+            G = (byte)Math.Clamp(NativeWideRound(vertex.G), 0, 255),
+            B = (byte)Math.Clamp(NativeWideRound(vertex.B), 0, 255),
+            U = (short)NativeWideRound(vertex.U),
+            V = (short)NativeWideRound(vertex.V),
         };
+    }
+
+    /// <summary>
+    /// <c>(int)MathF.Round(v)</c> (halves to even), without Mono's slow MathF.Round:
+    /// five calls per side-band vertex were ~3% of the phone's game thread.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static int NativeWideRound(float v)
+    {
+        // Beyond 2^23 every float is already whole (also NaN / infinity).
+        if (!(MathF.Abs(v) < 8388608f)) return (int)v;
+        int t = (int)v;
+        float d = v - t;
+        if (d > 0.5f || d == 0.5f && (t & 1) != 0) return t + 1;
+        if (d < -0.5f || d == -0.5f && (t & 1) != 0) return t - 1;
+        return t;
     }
 
     static bool TryNativeWideMaterial(
