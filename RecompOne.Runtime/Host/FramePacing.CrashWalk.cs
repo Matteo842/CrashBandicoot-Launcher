@@ -64,4 +64,23 @@ public static partial class FramePacing
         int c = (int)Math.Round(Math.Clamp(corr, -cap, cap));
         if (c != 0) m.WriteU32(addr, (uint)(from + kept + c));
     }
+
+    /// <summary>WillC <c>stateflag</c> bit of Willy_Slip / Willy_Stuck (0x2005) and Bounce (0x2408, AIR).</summary>
+    const uint FlagStateSlip = 0x2000u;
+
+    /// <summary>
+    /// #198 Slippery Climb steps. CasOC <c>Step_Array_Active</c> sends Event32
+    /// → Willy_Slip: CODE <c>speed = 6m</c>, <c>troty</c>, clears DPAD_CONTROL,
+    /// <c>setvel()</c> once (Willy_Stuck: <c>SetVel(0,0,0)</c>). Physics never
+    /// rebuilds that velocity, so dt/34 of the SET stayed forever: half the
+    /// slide at 60 FPS, and from a full-speed walk up the steps (also 6m) the
+    /// mix was about zero — Crash walked in place until the steps came back.
+    /// Grounded states with this bit are only those two (region-safe).
+    /// </summary>
+    static bool CrashCodeSetVelocity(IMemory m, uint o)
+    {
+        uint flags = m.ReadU32(o + ObjStateFlagsOff);
+        return (flags & FlagStateSlip) != 0 && (flags & FlagStateAir) == 0
+            && (m.ReadU32(o + ObjStatusBOff) & FlagDpadControl) == 0;
+    }
 }

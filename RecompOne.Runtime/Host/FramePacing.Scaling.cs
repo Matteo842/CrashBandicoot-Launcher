@@ -601,7 +601,16 @@ public static partial class FramePacing
                 m.WriteU32(o + ObjVelYOff, (uint)KeepCrashDelta(_ovy, vyTo, VelTeleport, ref _crashFracVY));
             m.WriteU32(o + ObjVelZOff, (uint)KeepCrashDelta(_ovz, (int)m.ReadU32(o + ObjVelZOff), VelTeleport, ref _crashFracVZ));
             int speedTo = (int)m.ReadU32(o + ObjSpeedOff);
-            if (_crashObj && speedTo <= 4 && speedTo >= -4)
+            bool codeVel = _crashObj && !_crashHog && CrashCodeSetVelocity(m, o);
+            if (codeVel)
+            {
+                // Slip / Stuck velocity is a CODE SET, not a per-tick step (#198).
+                _crashFracVX = 0;
+                _crashFracVZ = 0;
+                m.WriteU32(o + ObjVelXOff, (uint)walkVx);
+                m.WriteU32(o + ObjVelZOff, (uint)walkVz);
+            }
+            if (codeVel || (_crashObj && speedTo <= 4 && speedTo >= -4))
                 m.WriteU32(o + ObjSpeedOff, (uint)speedTo);
             else
                 m.WriteU32(o + ObjSpeedOff, (uint)KeepCrashDelta(_ospeed, speedTo, Teleport, ref _crashFracSp));
