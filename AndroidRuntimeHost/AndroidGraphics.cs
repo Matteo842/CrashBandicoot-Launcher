@@ -91,6 +91,7 @@ static class AndroidGraphics
         if (reset)
             FramePacing.OnFrameRateChanged();
         AndroidEglContext.Current?.SetPresentHz(hz);
+        AndroidVulkanVideo.Current?.SetPresentHz(hz);
         PresentHzChanged?.Invoke(hz);
         Android.Util.Log.Info("CrashGPU",
             $"FrameRate={rate} ForceOriginal={FramePacing.ForceOriginal} " +

@@ -1647,11 +1647,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         AddLabel("Renderer");
         _renderer = MakeCombo(new Point(controlX, y), [
-            (0, "Auto (recommended)"), (1, "OpenGL 3.3"), (2, "OpenGL ES 3"),
+            (0, "Auto (recommended)"), (1, "OpenGL 3.3"), (2, "OpenGL ES 3"), (3, "Vulkan (beta)"),
         ]);
         page.Controls.Add(_renderer);
         y += rowGap;
-        AddHint("Auto: OpenGL 4.3, or OpenGL 3.3 / ES 3 when the graphics driver lacks it. Change it only if the game does not start. Applies on next game start.");
+        AddHint("Auto: OpenGL 4.3, or OpenGL 3.3 / ES 3 when the graphics driver lacks it. Vulkan (beta) falls back to OpenGL if it fails. Applies on next game start.");
 
         // ── Audio ──
         BeginPage(2);

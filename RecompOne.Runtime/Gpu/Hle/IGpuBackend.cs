@@ -8,6 +8,14 @@ public interface IGpuBackend
     // false in headless or if gl init failed
     bool Ready { get; }
 
+    // stats of the last present that carried new geometry
+    long DrawnFrames { get; }
+    int LastFrameFlushes { get; }
+    int LastFrameWritebacks { get; }
+    int LastFrameVertices { get; }
+    int LastFrameCpuReads { get; }
+    string LastDiagnostic { get; }
+
     // submit
     void SetDrawEnv(in HleDrawEnv env);
     void BeginWideDepth(uint? clearColor);

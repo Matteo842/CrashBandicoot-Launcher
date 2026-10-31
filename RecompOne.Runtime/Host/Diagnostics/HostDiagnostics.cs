@@ -34,7 +34,7 @@ internal static class HostDiagnostics
         if (elapsed >= 500)
         {
             _fps = _frames * 1000.0 / elapsed;
-            long drawn = (GpuHle.Backend as GlBackend)?.DrawnFrames ?? 0;
+            long drawn = GpuHle.Backend?.DrawnFrames ?? 0;
             _drawnFps = (drawn - _lastDrawnFrames) * 1000.0 / elapsed;
             _lastDrawnFrames = drawn;
             _frames = 0;

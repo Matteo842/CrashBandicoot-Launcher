@@ -142,8 +142,8 @@ internal static class DevHudOverlay
         Row("swap", FrameTimer.Average(FrameTimer.Phase.Swap));
         Row("wait", FrameTimer.Average(FrameTimer.Phase.Wait));
         ImGui.Separator();
-        // Batches = GL draw submissions; cpu reads stall the game until the GPU catches up.
-        if (Hle.GpuHle.Backend is Hle.GlBackend gl)
+        // Batches = draw submissions; cpu reads stall the game until the GPU catches up.
+        if (Hle.GpuHle.Backend is { } gl)
         {
             ImGui.TextUnformatted(HostWindow.RendererName + (gl.Ready ? "" : "  (software)"));
             ImGui.TextUnformatted($"batches {gl.LastFrameFlushes}  verts {gl.LastFrameVertices}");

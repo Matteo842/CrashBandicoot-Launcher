@@ -1,8 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
 using Silk.NET.Input;
-using Silk.NET.Input.Extensions;
-using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
@@ -12,10 +10,9 @@ namespace RecompOne.Runtime.Host.Window;
 /// ImGui controller for an OpenGL ES 3.0+ game window (#167). Silk's desktop
 /// controller compiles GLSL 330 and calls glPolygonMode, which an ES context
 /// rejects, and its ES variant needs glDrawElementsBaseVertex (ES 3.2 only).
-/// Input handling is ported from Silk.NET's ImGuiController (MIT, .NET
-/// Foundation) so the menus behave the same on both paths.
+/// Input and frames come from <see cref="ImGuiControllerBase"/>.
 /// </summary>
-sealed class GlesImGuiController : IDisposable
+sealed class GlesImGuiController : ImGuiControllerBase
 {
     const string VertexSource = """
         #version 300 es
@@ -48,189 +45,18 @@ sealed class GlesImGuiController : IDisposable
         """;
 
     readonly GL _gl;
-    readonly IView _view;
-    readonly IInputContext _input;
-    readonly IKeyboard _keyboard;
-    readonly List<char> _pressedChars = [];
-    readonly IntPtr _context;
-    bool _frameBegun;
-    int _windowWidth, _windowHeight;
 
     uint _program, _vbo, _ebo, _vao, _fontTexture;
     int _locTexture, _locProjMtx;
 
     public GlesImGuiController(GL gl, IView view, IInputContext input, Action? onConfigureIO = null)
+        : base(view, input)
     {
         _gl = gl;
-        _view = view;
-        _input = input;
-        _windowWidth = view.Size.X;
-        _windowHeight = view.Size.Y;
-
-        _context = ImGui.CreateContext();
-        ImGui.SetCurrentContext(_context);
-        ImGui.StyleColorsDark();
-
-        onConfigureIO?.Invoke();
-        // Without glDrawElementsBaseVertex the vertex offset goes into the
-        // attribute pointers instead (see RenderDrawData).
-        ImGui.GetIO().BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-
-        CreateDeviceResources();
-        SetPerFrameData(1f / 60f);
-
-        ImGui.NewFrame();
-        _frameBegun = true;
-        _keyboard = _input.Keyboards[0];
-        _view.Resize += WindowResized;
-        _keyboard.KeyDown += OnKeyDown;
-        _keyboard.KeyUp += OnKeyUp;
-        _keyboard.KeyChar += OnKeyChar;
+        Start(onConfigureIO);
     }
 
-    public void Update(float deltaSeconds)
-    {
-        var oldContext = ImGui.GetCurrentContext();
-        if (oldContext != _context) ImGui.SetCurrentContext(_context);
-
-        if (_frameBegun) ImGui.Render();
-        SetPerFrameData(deltaSeconds);
-        UpdateInput();
-        _frameBegun = true;
-        ImGui.NewFrame();
-
-        if (oldContext != _context) ImGui.SetCurrentContext(oldContext);
-    }
-
-    public void Render()
-    {
-        if (!_frameBegun) return;
-        var oldContext = ImGui.GetCurrentContext();
-        if (oldContext != _context) ImGui.SetCurrentContext(_context);
-
-        _frameBegun = false;
-        ImGui.Render();
-        RenderDrawData(ImGui.GetDrawData());
-
-        if (oldContext != _context) ImGui.SetCurrentContext(oldContext);
-    }
-
-    void SetPerFrameData(float deltaSeconds)
-    {
-        var io = ImGui.GetIO();
-        io.DisplaySize = new Vector2(_windowWidth, _windowHeight);
-        // Float division: at a fractional Wayland scale (175%) int division gave 1 and
-        // ImGui drew into the bottom-left corner of the framebuffer (#187).
-        if (_windowWidth > 0 && _windowHeight > 0)
-            io.DisplayFramebufferScale = new Vector2((float)_view.FramebufferSize.X / _windowWidth,
-                (float)_view.FramebufferSize.Y / _windowHeight);
-        io.DeltaTime = deltaSeconds;
-    }
-
-    void UpdateInput()
-    {
-        var io = ImGui.GetIO();
-        using var mouse = _input.Mice[0].CaptureState();
-        io.MouseDown[0] = mouse.IsButtonPressed(MouseButton.Left);
-        io.MouseDown[1] = mouse.IsButtonPressed(MouseButton.Right);
-        io.MouseDown[2] = mouse.IsButtonPressed(MouseButton.Middle);
-        io.MousePos = new Vector2((int)mouse.Position.X, (int)mouse.Position.Y);
-        var wheel = mouse.GetScrollWheels()[0];
-        io.MouseWheel = wheel.Y;
-        io.MouseWheelH = wheel.X;
-
-        foreach (var c in _pressedChars)
-            io.AddInputCharacter(c);
-        _pressedChars.Clear();
-
-        io.KeyCtrl = _keyboard.IsKeyPressed(Key.ControlLeft) || _keyboard.IsKeyPressed(Key.ControlRight);
-        io.KeyAlt = _keyboard.IsKeyPressed(Key.AltLeft) || _keyboard.IsKeyPressed(Key.AltRight);
-        io.KeyShift = _keyboard.IsKeyPressed(Key.ShiftLeft) || _keyboard.IsKeyPressed(Key.ShiftRight);
-        io.KeySuper = _keyboard.IsKeyPressed(Key.SuperLeft) || _keyboard.IsKeyPressed(Key.SuperRight);
-    }
-
-    void WindowResized(Vector2D<int> size)
-    {
-        _windowWidth = size.X;
-        _windowHeight = size.Y;
-    }
-
-    void OnKeyChar(IKeyboard keyboard, char c) => _pressedChars.Add(c);
-
-    static void OnKeyDown(IKeyboard keyboard, Key key, int scancode) => OnKeyEvent(key, scancode, true);
-
-    static void OnKeyUp(IKeyboard keyboard, Key key, int scancode) => OnKeyEvent(key, scancode, false);
-
-    static void OnKeyEvent(Key key, int scancode, bool down)
-    {
-        var imGuiKey = TranslateKey(key);
-        if (imGuiKey == ImGuiKey.None) return;
-        var io = ImGui.GetIO();
-        io.AddKeyEvent(imGuiKey, down);
-        io.SetKeyEventNativeData(imGuiKey, (int)key, scancode);
-    }
-
-    /// <summary>Same table as Silk's controller; unknown keys map to None instead of throwing.</summary>
-    static ImGuiKey TranslateKey(Key key)
-    {
-        if (key is >= Key.A and <= Key.Z) return ImGuiKey.A + (key - Key.A);
-        if (key is >= Key.Number0 and <= Key.Number9) return ImGuiKey._0 + (key - Key.Number0);
-        if (key is >= Key.Keypad0 and <= Key.Keypad9) return ImGuiKey.Keypad0 + (key - Key.Keypad0);
-        if (key is >= Key.F1 and <= Key.F24) return ImGuiKey.F1 + (key - Key.F1);
-        return key switch
-        {
-            Key.Tab => ImGuiKey.Tab,
-            Key.Left => ImGuiKey.LeftArrow,
-            Key.Right => ImGuiKey.RightArrow,
-            Key.Up => ImGuiKey.UpArrow,
-            Key.Down => ImGuiKey.DownArrow,
-            Key.PageUp => ImGuiKey.PageUp,
-            Key.PageDown => ImGuiKey.PageDown,
-            Key.Home => ImGuiKey.Home,
-            Key.End => ImGuiKey.End,
-            Key.Insert => ImGuiKey.Insert,
-            Key.Delete => ImGuiKey.Delete,
-            Key.Backspace => ImGuiKey.Backspace,
-            Key.Space => ImGuiKey.Space,
-            Key.Enter => ImGuiKey.Enter,
-            Key.Escape => ImGuiKey.Escape,
-            Key.Apostrophe => ImGuiKey.Apostrophe,
-            Key.Comma => ImGuiKey.Comma,
-            Key.Minus => ImGuiKey.Minus,
-            Key.Period => ImGuiKey.Period,
-            Key.Slash => ImGuiKey.Slash,
-            Key.Semicolon => ImGuiKey.Semicolon,
-            Key.Equal => ImGuiKey.Equal,
-            Key.LeftBracket => ImGuiKey.LeftBracket,
-            Key.BackSlash => ImGuiKey.Backslash,
-            Key.RightBracket => ImGuiKey.RightBracket,
-            Key.GraveAccent => ImGuiKey.GraveAccent,
-            Key.CapsLock => ImGuiKey.CapsLock,
-            Key.ScrollLock => ImGuiKey.ScrollLock,
-            Key.NumLock => ImGuiKey.NumLock,
-            Key.PrintScreen => ImGuiKey.PrintScreen,
-            Key.Pause => ImGuiKey.Pause,
-            Key.KeypadDecimal => ImGuiKey.KeypadDecimal,
-            Key.KeypadDivide => ImGuiKey.KeypadDivide,
-            Key.KeypadMultiply => ImGuiKey.KeypadMultiply,
-            Key.KeypadSubtract => ImGuiKey.KeypadSubtract,
-            Key.KeypadAdd => ImGuiKey.KeypadAdd,
-            Key.KeypadEnter => ImGuiKey.KeypadEnter,
-            Key.KeypadEqual => ImGuiKey.KeypadEqual,
-            Key.ShiftLeft => ImGuiKey.LeftShift,
-            Key.ControlLeft => ImGuiKey.LeftCtrl,
-            Key.AltLeft => ImGuiKey.LeftAlt,
-            Key.SuperLeft => ImGuiKey.LeftSuper,
-            Key.ShiftRight => ImGuiKey.RightShift,
-            Key.ControlRight => ImGuiKey.RightCtrl,
-            Key.AltRight => ImGuiKey.RightAlt,
-            Key.SuperRight => ImGuiKey.RightSuper,
-            Key.Menu => ImGuiKey.Menu,
-            _ => ImGuiKey.None,
-        };
-    }
-
-    unsafe void CreateDeviceResources()
+    protected override unsafe void CreateDeviceResources()
     {
         _program = BuildProgram();
         _locTexture = _gl.GetUniformLocation(_program, "Texture");
@@ -292,7 +118,7 @@ sealed class GlesImGuiController : IDisposable
         _gl.VertexAttribPointer(2, 4, VertexAttribPointerType.UnsignedByte, true, stride, (void*)(vertexOffset + 16));
     }
 
-    unsafe void RenderDrawData(ImDrawDataPtr drawData)
+    protected override unsafe void RenderDrawData(ImDrawDataPtr drawData)
     {
         int framebufferWidth = (int)(drawData.DisplaySize.X * drawData.FramebufferScale.X);
         int framebufferHeight = (int)(drawData.DisplaySize.Y * drawData.FramebufferScale.Y);
@@ -411,17 +237,12 @@ sealed class GlesImGuiController : IDisposable
         else _gl.Disable(cap);
     }
 
-    public void Dispose()
+    protected override void DisposeDeviceResources()
     {
-        _view.Resize -= WindowResized;
-        _keyboard.KeyDown -= OnKeyDown;
-        _keyboard.KeyUp -= OnKeyUp;
-        _keyboard.KeyChar -= OnKeyChar;
         _gl.DeleteBuffer(_vbo);
         _gl.DeleteBuffer(_ebo);
         _gl.DeleteVertexArray(_vao);
         _gl.DeleteTexture(_fontTexture);
         _gl.DeleteProgram(_program);
-        ImGui.DestroyContext(_context);
     }
 }

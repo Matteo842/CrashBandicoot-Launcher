@@ -19,7 +19,7 @@ public sealed class GameSessionEndedException : Exception
     public GameSessionEndedException() : base("Game session ended.") { }
 }
 
-internal static class HostWindow
+internal static partial class HostWindow
 {
     const int GwlStyle = -16;
     const int WsChild = 0x40000000;
@@ -42,8 +42,8 @@ internal static class HostWindow
     /// <summary>Replaces <see cref="_imgui"/> on an OpenGL ES context (#167).</summary>
     static GlesImGuiController? _imguiEs;
 
-    /// <summary>"OpenGL 4.3 Core", "OpenGL ES 3.1", … for the dev HUD and bug reports.</summary>
-    internal static string RendererName => _window == null ? "none" : _context.Name;
+    /// <summary>"OpenGL 4.3 Core", "OpenGL ES 3.1", "Vulkan 1.3.280 (GPU)", … for the dev HUD and bug reports.</summary>
+    internal static string RendererName => _window == null ? "none" : UsingVulkan ? VulkanName : _context.Name;
     static Gpu? _gpu;
 
     static uint _displayTex;
@@ -110,14 +110,16 @@ internal static class HostWindow
                 WindowBorder = embed ? WindowBorder.Hidden : WindowBorder.Resizable,
                 WindowState = !embed && ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
             };
-            CreateGlWindow(options);
+            // Vulkan (opt-in Renderer setting) falls back to the OpenGL chain on any failure.
+            if (ConfigManager.View.GraphicsApi != ViewConfig.GraphicsApiVulkan || !TryCreateVulkanWindow(options))
+                CreateGlWindow(options);
             LogWindowEvents(_window!);
             _window!.Render += OnRender;
             _window.Closing += OnClosing;
             // Silk raises Load inside Initialize; OnLoad runs here instead so a context
             // that fails to open never leaves half-registered panels behind.
             OnLoad();
-            Console.WriteLine("[Host] OpenGL window ready");
+            Console.WriteLine($"[Host] {RendererName} window ready");
 
             // GLFW defaults to a generic icon — use the exe/ApplicationIcon instead (Windows).
             if (OperatingSystem.IsWindows()
@@ -312,6 +314,7 @@ internal static class HostWindow
         _glBackend = null;
         _displayTex = _vramTex = _ramTex = 0;
         _discPicker = null;
+        ResetVulkanState();
         _embedded = false;
         _embedChild = 0;
         _chromeFsActive = false;
@@ -638,6 +641,12 @@ internal static class HostWindow
             _ => 60,
         };
         FramePacing.OnFrameRateChanged();
+        if (_vkSwapchain != null)
+        {
+            // No GL swap interval on a Vulkan window: FIFO vs MAILBOX/IMMEDIATE.
+            _vkSwapchain.VSync = view.VSync;
+            return;
+        }
         if (_window == null) return;
         try { _window.VSync = view.VSync; }
         catch { /* some backends reject runtime changes */ }
@@ -738,44 +747,8 @@ internal static class HostWindow
         _input = _window!.CreateInput();
         InputManager.Initialize(_input);
 
-        _gl = GL.GetApi(_window);
-        _gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
-
-        var fb = _window!.FramebufferSize;
-        _gl.Viewport(0, 0, (uint)fb.X, (uint)fb.Y);
-        _window.FramebufferResize += size => _gl?.Viewport(0, 0, (uint)size.X, (uint)size.Y);
-        _displayTex = CreateTexture(_gl);
-        _vramTex= CreateTexture(_gl);
-        _ramTex = CreateTexture(_gl);
-
-        int internalRes = ConfigManager.View.InternalResolution;
-        Hle.GlVram.Scale = internalRes;
-        var driver = GlDriverInfo.Capture(_gl, _context.Es, name => _window!.GLContext!.GetProcAddress(name));
-        Console.WriteLine($"[Host] renderer {_context.Name}: {driver.Summary}");
-        _glBackend = new Hle.GlBackend(_gl);
-        driver.Configure(_glBackend);
-        _glBackend.InitGl(_context.Es, driver.FramebufferFetch, driver.GlslEsVersion);
-        if (!_glBackend.Ready)
-            Console.Error.WriteLine(driver.HleBlendSupported
-                ? $"[Host] GPU renderer failed ({_glBackend.LastDiagnostic}); using the software renderer"
-                : "[Host] driver has no framebuffer fetch or dual-source blending; using the software renderer");
-        Hle.GpuHle.Active = _glBackend.Ready;
-        Hle.GpuHle.Backend = _glBackend;
-        Hle.GpuHle.NativeResolution = internalRes <= 1;
-        Hle.GpuHle.TextureFilter = ConfigManager.View.TextureFilter;
-        Hle.GpuHle.TextureFilterStrength = ConfigManager.View.TextureFilterStrength;
-        Hle.GpuHle.Dedither = ConfigManager.View.Dedither;
-        Hle.GpuHle.ScaledDither = ConfigManager.View.ScaledDither;
-        Hle.GpuHle.Dejitter = ConfigManager.View.Dejitter;
-        Hle.GpuHle.PresentNearest = ConfigManager.View.PresentNearest;
-        Hle.GpuHle.CrtFilter = ConfigManager.View.CrtFilter;
-        ApplyWidescreen(ConfigManager.View.Widescreen);
-        ApplyVSync(ConfigManager.View.VSync);
-
-        if (_context.Es)
-            _imguiEs = new GlesImGuiController(_gl, _window, new ImGuiInputContext(_input), ConfigureImGui);
-        else
-            _imgui = new ImGuiController(_gl, _window, new ImGuiInputContext(_input), null, ConfigureImGui);
+        if (UsingVulkan) LoadVulkanRenderer();
+        else LoadGlRenderer();
 
         PanelManager.Register(new OutputPanel());
         PanelManager.Register(new VramViewerPanel());
@@ -813,6 +786,54 @@ internal static class HostWindow
         var cdPath = ConfigManager.Game.CdPath;
         if (string.IsNullOrWhiteSpace(cdPath) || !File.Exists(cdPath))
             _discPicker.Show();
+    }
+
+    static void LoadGlRenderer()
+    {
+        _gl = GL.GetApi(_window);
+        _gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
+
+        var fb = _window!.FramebufferSize;
+        _gl.Viewport(0, 0, (uint)fb.X, (uint)fb.Y);
+        _window.FramebufferResize += size => _gl?.Viewport(0, 0, (uint)size.X, (uint)size.Y);
+        _displayTex = CreateTexture(_gl);
+        _vramTex= CreateTexture(_gl);
+        _ramTex = CreateTexture(_gl);
+
+        int internalRes = ConfigManager.View.InternalResolution;
+        Hle.GlVram.Scale = internalRes;
+        var driver = GlDriverInfo.Capture(_gl, _context.Es, name => _window!.GLContext!.GetProcAddress(name));
+        Console.WriteLine($"[Host] renderer {_context.Name}: {driver.Summary}");
+        _glBackend = new Hle.GlBackend(_gl);
+        driver.Configure(_glBackend);
+        _glBackend.InitGl(_context.Es, driver.FramebufferFetch, driver.GlslEsVersion);
+        if (!_glBackend.Ready)
+            Console.Error.WriteLine(driver.HleBlendSupported
+                ? $"[Host] GPU renderer failed ({_glBackend.LastDiagnostic}); using the software renderer"
+                : "[Host] driver has no framebuffer fetch or dual-source blending; using the software renderer");
+        Hle.GpuHle.Active = _glBackend.Ready;
+        Hle.GpuHle.Backend = _glBackend;
+        ApplyHleSettings(internalRes);
+
+        if (_context.Es)
+            _imguiEs = new GlesImGuiController(_gl, _window, new ImGuiInputContext(_input!), ConfigureImGui);
+        else
+            _imgui = new ImGuiController(_gl, _window, new ImGuiInputContext(_input!), null, ConfigureImGui);
+    }
+
+    /// <summary>Renderer options shared by the OpenGL and Vulkan backends.</summary>
+    static void ApplyHleSettings(int internalRes)
+    {
+        Hle.GpuHle.NativeResolution = internalRes <= 1;
+        Hle.GpuHle.TextureFilter = ConfigManager.View.TextureFilter;
+        Hle.GpuHle.TextureFilterStrength = ConfigManager.View.TextureFilterStrength;
+        Hle.GpuHle.Dedither = ConfigManager.View.Dedither;
+        Hle.GpuHle.ScaledDither = ConfigManager.View.ScaledDither;
+        Hle.GpuHle.Dejitter = ConfigManager.View.Dejitter;
+        Hle.GpuHle.PresentNearest = ConfigManager.View.PresentNearest;
+        Hle.GpuHle.CrtFilter = ConfigManager.View.CrtFilter;
+        ApplyWidescreen(ConfigManager.View.Widescreen);
+        ApplyVSync(ConfigManager.View.VSync);
     }
 
     static void ConfigureImGui()
@@ -856,6 +877,11 @@ internal static class HostWindow
 
     static void OnRender(double dt)
     {
+        if (UsingVulkan)
+        {
+            OnRenderVulkan(dt);
+            return;
+        }
         Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Events);
         var gl = _gl!;
         // Pad input for the pause menu is queued before ImGui's NewFrame.
@@ -875,13 +901,7 @@ internal static class HostWindow
         gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
         gl.Clear(ClearBufferMask.ColorBufferBit);
 
-        Diagnostics.HostDiagnostics.TickFrame();
-        Runtime.RamLog.Tick();
-        bool ramMapOpen = PanelManager.Get<RamMapPanel>()?.IsOpen == true;
-        bool memEditOpen = PanelManager.Get<MemoryEditorPanel>()?.IsOpen == true;
-        if (ramMapOpen || memEditOpen)
-            Runtime.RamLog.EnsureAllocated();
-        Memory.RamLogger.TrackReads = ramMapOpen || memEditOpen;
+        bool ramMapOpen = TickDebugViews();
 
         var gpu = _gpu;
         if (gpu != null)
@@ -923,6 +943,30 @@ internal static class HostWindow
         }
         Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Render);
 
+        DrawUi();
+        gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
+        if (_imguiEs != null) _imguiEs.Render();
+        else _imgui!.Render();
+        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Ui);
+    }
+
+    /// <summary>Frame diagnostics and RAM logging for the debug panels. True when the RAM map is open.</summary>
+    static bool TickDebugViews()
+    {
+        Diagnostics.HostDiagnostics.TickFrame();
+        Runtime.RamLog.Tick();
+        bool ramMapOpen = PanelManager.Get<RamMapPanel>()?.IsOpen == true;
+        bool memEditOpen = PanelManager.Get<MemoryEditorPanel>()?.IsOpen == true;
+        if (ramMapOpen || memEditOpen)
+            Runtime.RamLog.EnsureAllocated();
+        Memory.RamLogger.TrackReads = ramMapOpen || memEditOpen;
+        return ramMapOpen;
+    }
+
+    /// <summary>Every ImGui window of the frame: menus, panels, popups and HUD overlays.</summary>
+    static void DrawUi()
+    {
         if (!ConfigManager.View.HideTopBar)
             MainMenuBar.Draw();
 
@@ -935,11 +979,6 @@ internal static class HostWindow
         BoxCounterOverlay.Draw();
         GemHintsOverlay.Draw();
         DevHudOverlay.Draw();
-        gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-        gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
-        if (_imguiEs != null) _imguiEs.Render();
-        else _imgui!.Render();
-        Diagnostics.FrameTimer.Mark(Diagnostics.FrameTimer.Phase.Ui);
     }
 
     static void DrawDockspace()
@@ -994,6 +1033,8 @@ internal static class HostWindow
         _glBackend?.Dispose();
         _imgui?.Dispose();
         _imguiEs?.Dispose();
+        _imguiVk?.Dispose();
+        _imguiVk = null;
         // ImGuiController.Dispose only frees renderer resources; the input context
         // owns the keyboard callbacks and must be disposed to unsubscribe them.
         _input?.Dispose();
@@ -1001,6 +1042,8 @@ internal static class HostWindow
         _gl?.DeleteTexture(_displayTex);
         _gl?.DeleteTexture(_vramTex);
         _gl?.DeleteTexture(_ramTex);
+        // After ImGui: its textures and pipeline belong to the Vulkan device.
+        DisposeVulkan();
     }
 
     static uint CreateTexture(GL gl)

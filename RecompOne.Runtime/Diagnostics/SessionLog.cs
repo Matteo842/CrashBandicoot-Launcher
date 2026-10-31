@@ -126,6 +126,7 @@ public static class SessionLog
             line.StartsWith("[MARKER", StringComparison.Ordinal) ||
             line.StartsWith("[Dispatcher]", StringComparison.Ordinal) ||
             line.StartsWith("[GlBackend]", StringComparison.Ordinal) ||
+            line.StartsWith("[VkBackend]", StringComparison.Ordinal) ||
             line.StartsWith("[Host]", StringComparison.Ordinal) ||
             line.StartsWith("[Event]", StringComparison.Ordinal) ||
             line.StartsWith("[Mods]", StringComparison.Ordinal) ||

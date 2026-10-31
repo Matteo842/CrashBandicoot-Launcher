@@ -11,10 +11,10 @@ sealed class AndroidPlatformHost(
     Activity activity,
     TextView status,
     ProgressBar progress,
-    AndroidEglContext egl,
-    GlBackend backend,
-    GameGpuDiagnosticsSession diagnostics) : IRuntimePlatformHost
+    IAndroidVideo video,
+    GameGpuDiagnosticsSession? diagnostics) : IRuntimePlatformHost
 {
+    readonly IGpuBackend backend = video.Backend;
     readonly AndroidAudioOutput _audio = new();
     bool _firstFrame = true;
     long _fpsWindow = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -57,7 +57,7 @@ sealed class AndroidPlatformHost(
         _audio.ResumeOutput();
         RecompOne.Runtime.Host.FrameClock.ResumeTiming();
     }
-    public void NotifySurfaceSize(int width, int height) => egl.SetExpectedSize(width, height);
+    public void NotifySurfaceSize(int width, int height) => video.SetExpectedSize(width, height);
 
     public void Present(Gpu? gpu)
     {
@@ -77,8 +77,8 @@ sealed class AndroidPlatformHost(
 
         // Queried per frame: the EGL window surface can be recreated with a
         // new size after the TextureView is relaid out (immersive mode, …).
-        var surfaceWidth = egl.SurfaceWidth;
-        var surfaceHeight = egl.SurfaceHeight;
+        var surfaceWidth = video.SurfaceWidth;
+        var surfaceHeight = video.SurfaceHeight;
         var phaseStart = System.Diagnostics.Stopwatch.GetTimestamp();
         var frameIntervalMilliseconds = _lastPresentTimestamp == 0
             ? 0
@@ -87,14 +87,14 @@ sealed class AndroidPlatformHost(
         if (frameIntervalMilliseconds > 200)
             Android.Util.Log.Warn("CrashGPU",
                 $"frame hitch {frameIntervalMilliseconds:F0} ms, wideCpu {RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs:F1} ms");
-        var presented = backend.PresentDisplay(
+        var presented = video.Prepare(
             gpu.DisplayX, gpu.DisplayY, nativeWidth, nativeHeight, gpu.Display24Bit,
             surfaceWidth, surfaceHeight);
         AndroidVramCapture.CaptureFromGlThread(backend);
         var prepared = System.Diagnostics.Stopwatch.GetTimestamp();
-        backend.PresentToDefaultFramebuffer(surfaceWidth, surfaceHeight, presented.aspect);
+        video.Composite(surfaceWidth, surfaceHeight, presented.aspect);
         var composited = System.Diagnostics.Stopwatch.GetTimestamp();
-        egl.SwapBuffers();
+        video.Swap();
         var swapped = System.Diagnostics.Stopwatch.GetTimestamp();
 
         double ticksToMilliseconds = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
@@ -104,7 +104,7 @@ sealed class AndroidPlatformHost(
         _flushes += backend.LastFrameFlushes;
         _writebacks += backend.LastFrameWritebacks;
         _vertices += backend.LastFrameVertices;
-        diagnostics.RecordFrame(
+        diagnostics?.RecordFrame(
             frameIntervalMilliseconds,
             (prepared - phaseStart) * ticksToMilliseconds,
             (composited - prepared) * ticksToMilliseconds,
@@ -127,7 +127,7 @@ sealed class AndroidPlatformHost(
                                                $"(peak {RecompOne.Runtime.Host.FramePacing.ConsumeNativeWideCpuPeakMs():F1}), " +
                                                $"scale {GlVram.Scale}x, " +
                                                $"batches {_flushes / (double)frames:F1}, writes {_writebacks / (double)frames:F1}, " +
-                                               $"verts {_vertices / (double)frames:F0}, GL {backend.LastDiagnostic}");
+                                               $"verts {_vertices / (double)frames:F0}, {video.Name} {backend.LastDiagnostic}");
             _fpsFrames = 0;
             _fpsWindow = now;
             _prepareMilliseconds = 0;
@@ -142,7 +142,7 @@ sealed class AndroidPlatformHost(
         _firstFrame = false;
         activity.RunOnUiThread(() =>
         {
-            status.Text = $"Game running • {presented.w}×{presented.h} ({GlVram.Scale}x native)";
+            status.Text = $"Game running • {presented.w}×{presented.h} ({GlVram.Scale}x native, {video.Name})";
             status.Visibility = Android.Views.ViewStates.Gone;
             progress.Visibility = Android.Views.ViewStates.Gone;
         });

@@ -68,6 +68,11 @@ static class SettingsDialog
         card.AddView(Hint(activity,
             "Applies on the next game start. Use 8x on 4K displays.", bodyFont));
 
+        var vulkanRenderer = AddSwitch(activity, card, "Vulkan renderer (beta)", view.VulkanRenderer, bodyBold);
+        card.AddView(Hint(activity,
+            "Draws the game with Vulkan instead of OpenGL ES: less driver work per frame and no shader stutter after the first run. Applies on the next game start. If the phone cannot run it, the game falls back to OpenGL ES. The CRT filter is not available with Vulkan yet.",
+            bodyFont));
+
         var filter = AddChoice(activity, card, "Texture filter",
             FilterLabels, Math.Clamp(view.TextureFilter, 0, FilterLabels.Length - 1), bodyFont, bodyBold);
         var filterStrength = AddSlider(activity, card, "Filter strength", 0, 100,
@@ -189,6 +194,7 @@ static class SettingsDialog
             view.ScaledDither = !hiResDither.Checked;
             view.Dejitter = dejitter.Checked;
             view.CrtFilter = crtFilter.Checked;
+            view.VulkanRenderer = vulkanRenderer.Checked;
             view.SaveLives = saveLives.Checked;
             view.AnalogMovement = analogMovement.Checked;
             view.BoxCounter = boxCounter.Checked;

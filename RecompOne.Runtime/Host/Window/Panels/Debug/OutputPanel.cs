@@ -94,8 +94,8 @@ internal sealed class OutputPanel : IPanel
         var offset = (avail - imageSize) * 0.5f;
         ImGui.SetCursorPos(ImGui.GetCursorPos() + offset);
         uint tex = _texId;
-        if (Hle.GpuHle.CrtFilter && Hle.GpuHle.Backend is Hle.GlBackend gl && _texId == gl.PresentTexture)
-            tex = CrtTexture(gl, ref imageSize);
+        if (Hle.GpuHle.CrtFilter && HostWindow.IsPresentTexture(_texId))
+            tex = CrtTexture(ref imageSize);
         ImGui.Image((nint)tex, imageSize);
         ImageMin = ImGui.GetItemRectMin();
         ImageMax = ImGui.GetItemRectMax();
@@ -118,7 +118,7 @@ internal sealed class OutputPanel : IPanel
         }
     }
 
-    static uint CrtTexture(Hle.GlBackend gl, ref Vector2 imageSize)
+    static uint CrtTexture(ref Vector2 imageSize)
     {
         // The shadow mask needs one shader pixel per screen pixel: snap the image
         // to whole framebuffer pixels and filter at exactly that size.
@@ -128,7 +128,7 @@ internal sealed class OutputPanel : IPanel
         int height = Math.Max(1, (int)MathF.Round(imageSize.Y * scale.Y));
         var pos = ImGui.GetCursorScreenPos() * scale;
         ImGui.SetCursorScreenPos(new Vector2(MathF.Round(pos.X) / scale.X, MathF.Round(pos.Y) / scale.Y));
-        uint tex = gl.RenderCrt(width, height);
+        uint tex = HostWindow.RenderCrt(width, height);
         if (tex == 0) return _texId;
         imageSize = new Vector2(width / scale.X, height / scale.Y);
         return tex;

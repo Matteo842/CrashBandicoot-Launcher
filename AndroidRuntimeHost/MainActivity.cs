@@ -635,43 +635,63 @@ public sealed class MainActivity : Activity
             Surface? surface = null;
             Silk.NET.OpenGL.GL? gl = null;
             RecompOne.Runtime.Hle.GlBackend? backend = null;
+            AndroidVulkanVideo? vulkan = null;
+            IAndroidVideo? video = null;
             GameGpuDiagnosticsSession? diagnostics = null;
             AndroidPlatformHost? host = null;
             try
             {
                 surface = WaitForGameSurface();
-                egl = new AndroidEglContext(surface, AcquireCurrentGameSurface);
-                gl = Silk.NET.OpenGL.GL.GetApi(egl);
                 RecompOne.Runtime.Hle.GlVram.Scale = ConfigManager.View.InternalResolution;
-                backend = new RecompOne.Runtime.Hle.GlBackend(gl);
-                var gpuInfo = AndroidGlesInfo.Capture(
-                    gl, egl, Intent?.GetStringExtra(AndroidGlesInfo.ForceFramebufferFetchExtra));
-                // Framebuffer fetch keeps effects such as Crash's spin in one
-                // ordered batch. EXT and ARM expose different shader syntax,
-                // so the selected path must be passed explicitly to the backend.
-                backend.InitGl(gles: true, framebufferFetch: gpuInfo.FramebufferFetchPath);
-                if (!backend.Ready)
-                    throw new InvalidOperationException("The Android OpenGL ES renderer failed to initialize.");
-                var configured = gpuInfo.ConfigureBackend(
-                    backend, ConfigManager.View.InternalResolution);
-                var warmupStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                backend.WarmGpuPipelines();
-                var warmupMs = (System.Diagnostics.Stopwatch.GetTimestamp() - warmupStart)
-                    * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-                Android.Util.Log.Info("CrashGPU",
-                    $"GPU {gpuInfo.Vendor} / {gpuInfo.Renderer}; " +
-                    $"framebuffer fetch: {gpuInfo.FramebufferFetchLabel}; " +
-                    $"texture barrier: {(configured.textureBarrier ? gpuInfo.TextureBarrierFunction : "flush fallback")}; " +
-                    $"2x2 shading: {configured.coarseShading}; pipeline warmup {warmupMs:F0} ms");
-                diagnostics = new GameGpuDiagnosticsSession(
-                    this, gpuInfo, ConfigManager.View.InternalResolution,
-                    configured.textureBarrier, configured.coarseShading);
+                if (ConfigManager.View.VulkanRenderer)
+                    vulkan = TryCreateVulkan(surface);
 
-                RecompOne.Runtime.Hle.GpuHle.Backend = backend;
+                if (vulkan != null)
+                {
+                    video = vulkan;
+                }
+                else
+                {
+                    if (ConfigManager.View.VulkanRenderer)
+                    {
+                        // A window that backed a Vulkan swapchain is released
+                        // with it; start EGL on a fresh Surface all the same.
+                        surface.Dispose();
+                        surface = AcquireCurrentGameSurface();
+                    }
+                    egl = new AndroidEglContext(surface, AcquireCurrentGameSurface);
+                    gl = Silk.NET.OpenGL.GL.GetApi(egl);
+                    backend = new RecompOne.Runtime.Hle.GlBackend(gl);
+                    var gpuInfo = AndroidGlesInfo.Capture(
+                        gl, egl, Intent?.GetStringExtra(AndroidGlesInfo.ForceFramebufferFetchExtra));
+                    // Framebuffer fetch keeps effects such as Crash's spin in one
+                    // ordered batch. EXT and ARM expose different shader syntax,
+                    // so the selected path must be passed explicitly to the backend.
+                    backend.InitGl(gles: true, framebufferFetch: gpuInfo.FramebufferFetchPath);
+                    if (!backend.Ready)
+                        throw new InvalidOperationException("The Android OpenGL ES renderer failed to initialize.");
+                    var configured = gpuInfo.ConfigureBackend(
+                        backend, ConfigManager.View.InternalResolution);
+                    var warmupStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                    backend.WarmGpuPipelines();
+                    var warmupMs = (System.Diagnostics.Stopwatch.GetTimestamp() - warmupStart)
+                        * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    Android.Util.Log.Info("CrashGPU",
+                        $"GPU {gpuInfo.Vendor} / {gpuInfo.Renderer}; " +
+                        $"framebuffer fetch: {gpuInfo.FramebufferFetchLabel}; " +
+                        $"texture barrier: {(configured.textureBarrier ? gpuInfo.TextureBarrierFunction : "flush fallback")}; " +
+                        $"2x2 shading: {configured.coarseShading}; pipeline warmup {warmupMs:F0} ms");
+                    diagnostics = new GameGpuDiagnosticsSession(
+                        this, gpuInfo, ConfigManager.View.InternalResolution,
+                        configured.textureBarrier, configured.coarseShading);
+                    video = new AndroidGlVideo(egl, backend);
+                }
+
+                RecompOne.Runtime.Hle.GpuHle.Backend = video.Backend;
                 RecompOne.Runtime.Hle.GpuHle.Active = true;
                 RecompOne.Runtime.Hle.GpuHle.NativeResolution =
                     ConfigManager.View.InternalResolution <= 1;
-                host = new AndroidPlatformHost(this, _status, _progress, egl, backend, diagnostics);
+                host = new AndroidPlatformHost(this, _status, _progress, video, diagnostics);
                 host.AttachHud(_devHud);
                 host.AttachBoxHud(_boxHud);
                 host.AttachGemHud(_gemHud);
@@ -689,12 +709,40 @@ public sealed class MainActivity : Activity
                 _activeHost = null;
                 RecompOne.Runtime.Hle.GpuHle.Active = false;
                 RecompOne.Runtime.Hle.GpuHle.Backend = null;
+                vulkan?.Dispose();
                 backend?.Dispose();
                 gl?.Dispose();
                 egl?.Dispose();
                 surface?.Dispose();
             }
         });
+
+    /// <summary>
+    /// Vulkan renderer (Settings › Vulkan renderer). Any failure falls back to
+    /// OpenGL ES with a notice, so a bad driver never blocks the game.
+    /// </summary>
+    AndroidVulkanVideo? TryCreateVulkan(Surface surface)
+    {
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            var cache = Path.Combine(FilesDir!.AbsolutePath, "runtime", "vulkan-pipelines.bin");
+            var video = AndroidVulkanVideo.Create(surface, AcquireCurrentGameSurface, cache);
+            var ms = (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000.0
+                / System.Diagnostics.Stopwatch.Frequency;
+            Android.Util.Log.Info("CrashGPU",
+                $"Vulkan {video.ApiVersion} on {video.DeviceName}; init {ms:F0} ms");
+            return video;
+        }
+        catch (Exception ex)
+        {
+            Android.Util.Log.Warn("CrashGPU", $"Vulkan unavailable, using OpenGL ES: {ex}");
+            RunOnUiThread(() => Toast.MakeText(this,
+                $"Vulkan not available ({ex.GetBaseException().Message}). Using OpenGL ES.",
+                ToastLength.Long)?.Show());
+            return null;
+        }
+    }
 
     Surface WaitForGameSurface()
     {

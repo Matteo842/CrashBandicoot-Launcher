@@ -218,16 +218,28 @@ public class ViewConfig
     public const int GraphicsApiAuto = 0;
     public const int GraphicsApiGl33 = 1;
     public const int GraphicsApiGles = 2;
+    public const int GraphicsApiVulkan = 3;
 
     /// <summary>
-    /// Renderer for the game window (#167, #80). Auto opens OpenGL 4.3 and falls
-    /// back to OpenGL 3.3, then OpenGL ES 3, when the driver lacks it. The other
-    /// values are tried first, then the rest of the Auto list. Applies on next start.
+    /// Renderer for the desktop game window (#167, #80). Auto opens OpenGL 4.3 and
+    /// falls back to OpenGL 3.3, then OpenGL ES 3, when the driver lacks it. The
+    /// other values are tried first, then the rest of the Auto list; Vulkan falls
+    /// back to that list on any failure. Applies on next start.
     /// </summary>
     public int GraphicsApi
     {
-        get => Math.Clamp(GetInt("GraphicsApi", GraphicsApiAuto), GraphicsApiAuto, GraphicsApiGles);
-        set => SetInt("GraphicsApi", Math.Clamp(value, GraphicsApiAuto, GraphicsApiGles));
+        get => Math.Clamp(GetInt("GraphicsApi", GraphicsApiAuto), GraphicsApiAuto, GraphicsApiVulkan);
+        set => SetInt("GraphicsApi", Math.Clamp(value, GraphicsApiAuto, GraphicsApiVulkan));
+    }
+
+    /// <summary>
+    /// Vulkan game renderer on Android (the desktop uses <see cref="GraphicsApi"/>).
+    /// Off by default; any Vulkan failure falls back to OpenGL ES. Applies on next game start.
+    /// </summary>
+    public bool VulkanRenderer
+    {
+        get => GetBool("VulkanRenderer");
+        set => SetBool("VulkanRenderer", value);
     }
 
     /// <summary>Host swap-interval VSync (reduces tearing; may add input latency).</summary>
