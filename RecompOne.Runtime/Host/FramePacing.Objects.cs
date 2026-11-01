@@ -1146,7 +1146,11 @@ public static partial class FramePacing
     static void PatchDrawnLookAhead(
         CpuContext c, IMemory m, uint obj, uint drawn, bool crash, bool box, int itemsHint = 0)
     {
-        if (crash) return;
+        if (crash)
+        {
+            PatchHogRideMesh(c, m, obj, drawn);
+            return;
+        }
         if (IsRigidWorldPlat(m, obj)) return;
         if (TryReadGoolClass(m, obj, out uint meshType, out _)
             && meshType is GoolTypePins or GoolTypeChef or GoolTypePlan or GoolTypeFats or GoolTypeMonk
@@ -1178,7 +1182,16 @@ public static partial class FramePacing
         if (WantSvtxLog(crash, box))
             NoteSvtxLog(crash, box,
                 $"svtx lerp obj=0x{obj:X8} crash={crash} box={box} {from}->{to} n={n} t={t:0.00}");
+        LerpSvtxFrame(m, drawn, srcFrom, srcTo, n, t);
+    }
 
+    /// <summary>
+    /// Writes the blend of two SVTX frames over <paramref name="drawn"/> (origin
+    /// and vertex xyz); RestoreSvtx puts the authored frame back after the draw.
+    /// <paramref name="srcTo"/> may be <paramref name="drawn"/> itself.
+    /// </summary>
+    static void LerpSvtxFrame(IMemory m, uint drawn, uint srcFrom, uint srcTo, int n, double t)
+    {
         _svtxSaveOx = (int)m.ReadU32(drawn + 8);
         _svtxSaveOy = (int)m.ReadU32(drawn + 12);
         _svtxSaveOz = (int)m.ReadU32(drawn + 16);

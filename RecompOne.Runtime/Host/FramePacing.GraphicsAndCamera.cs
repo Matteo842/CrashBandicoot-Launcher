@@ -23,6 +23,7 @@ public static partial class FramePacing
         WidenNativeWideObjectFrustum(c, m);
         BeginNativeWideObjectRepair(c, m);
         BeginNativeWideCoreDepthObject(c, m);
+        TrackHogRidePose(c, m);
         if (!IsActive(m)) return true;
         if (GamePaused(m)) return true;
         // Full original 33 ms step already landed on the GOOL pose.

@@ -1,3 +1,4 @@
+using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Host;
@@ -62,6 +63,7 @@ public static partial class FramePacing
 
     static void ClearHogCam()
     {
+        _hogMeshTo = 0;
         _hogGateReady = false;
         _hogGateFrame = uint.MaxValue;
         _hogCamFullStep = false;
@@ -122,9 +124,12 @@ public static partial class FramePacing
         _newObj && HogCamSyncOn(m) && !HogGateBoundary(m);
 
     /// <summary>
-    /// Before GfxUpdateMatrices: lerp the last two 30 Hz poses, sampled at
-    /// the end of this present (60 FPS: t = 1/2, then the step's own pose),
-    /// like the mesh lerp. Extrapolating past the step overshot whenever the
+    /// Before GfxUpdateMatrices: lerp the last two 30 Hz poses by the gate
+    /// phase, one 30 Hz step behind. The phase is already taken at the end of
+    /// this present (the clock advanced before CamFollow), so adding dt again
+    /// counted it twice: at 120 FPS t went .375/.63/.88/1 (clamped), a short
+    /// last stride and a long first one every step, and Crash shook against
+    /// the scenery (#207). Extrapolating past the step overshot whenever the
     /// catch-up speed changed and snapped back on the next step. Real pose
     /// comes back before objects run.
     /// </summary>
@@ -135,7 +140,7 @@ public static partial class FramePacing
         try
         {
             CurrentGateFrame(out double phase);
-            double s = Math.Clamp((phase + _exactTicks) / RefTicks, 0, 1);
+            double s = Math.Clamp(phase / RefTicks, 0, 1);
             if (s >= 1) return;
             ReadCamPose(m, _hogPoseSaved);
             for (int i = 0; i < 6; i++)
@@ -173,6 +178,79 @@ public static partial class FramePacing
         {
             // overlay swap
         }
+    }
+
+    static uint _hogMeshFrom, _hogMeshTo, _hogMeshToEntry, _hogMeshFrame;
+    /// <summary>NTSC-U WillC Willy_Warthog_Spawn (gooc 36): the hog intro.</summary>
+    const uint StateWarthogSpawn = 35;
+
+    /// <summary>
+    /// Crash's mesh is never vertex-lerped, so unlocked his pose holds for a
+    /// whole 30 Hz frame while he slides smoothly. On the hog the run cycle is
+    /// 15 poses per half second and the legs read as stepping (#207). While he
+    /// rides it (not the death cine), blend the previous drawn pose into the
+    /// current one by the frames_elapsed phase: poses change exactly on
+    /// guest-tick /34 boundaries, so strides are even and the shown pose is at
+    /// most one original frame behind. The previous frame may belong to the
+    /// other run sequence (RUN_2 → RUN_1); same vertex count is required. A pose
+    /// held past its own frame (jump sleepframe) is drawn as authored.
+    /// Only blend from the pose of the frames_elapsed frame right before: a
+    /// tracker fed only by blended presents (full steps, the level-entry hold,
+    /// pause skip the patch) blended from a pose several frames old and Crash
+    /// twitched in the hog intro. Every Crash draw now feeds the tracker, and
+    /// the intro (Willy_Warthog_Spawn, Crash standing beside the hog) is drawn
+    /// as authored.
+    /// </summary>
+    static void PatchHogRideMesh(CpuContext c, IMemory m, uint obj, uint drawn, bool blend = true)
+    {
+        if ((drawn & 0xFF000000u) != 0x80000000u) return;
+        if (!CrashOnWarthog(m, obj) || (m.ReadU32(obj + ObjStateFlagsOff) & FlagStateDeathCine) != 0)
+        {
+            _hogMeshTo = 0;
+            return;
+        }
+        uint frame = m.ReadU32(FramesElapsedAddr);
+        if (drawn != _hogMeshTo)
+        {
+            // Intro poses are deloaded mid-spawn: only blend from a frame its entry still holds.
+            bool previous = _hogMeshTo != 0 && frame == _hogMeshFrame + 1
+                && IsEntryFrame(m, _hogMeshToEntry, _hogMeshTo);
+            _hogMeshFrom = previous ? _hogMeshTo : drawn;
+            _hogMeshTo = drawn;
+            _hogMeshToEntry = TrySvtxEntry(c, m, obj, out uint en, out _) ? en : 0;
+            _hogMeshFrame = frame;
+        }
+        if (!blend || _hogMeshFrom == drawn || frame != _hogMeshFrame) return;
+        if (GamePaused(m) || m.ReadU32(obj + ObjStateOff) == StateWarthogSpawn) return;
+        double t = (_guestTicks % RefTicks + _tickFrac) / RefTicks;
+        if (t >= 0.99) return;
+        int n = SvtxVertCount(m, drawn);
+        if (n <= 0 || n > SvtxVertMax || n != SvtxVertCount(m, _hogMeshFrom)) return;
+        LerpSvtxFrame(m, drawn, _hogMeshFrom, drawn, n, t);
+    }
+
+    /// <summary>Every Crash draw (full steps, original rate, pause too) feeds the hog pose tracker.</summary>
+    static void TrackHogRidePose(CpuContext c, IMemory m)
+    {
+        try
+        {
+            uint obj = c.A2;
+            if ((obj & 0xFF000000u) == 0x80000000u && obj == m.ReadU32(CrashPtrAddr))
+                PatchHogRideMesh(c, m, obj, c.A0, blend: false);
+        }
+        catch
+        {
+            // object freed
+        }
+    }
+
+    static bool IsEntryFrame(IMemory m, uint en, uint frame)
+    {
+        if ((en & 0xFF000000u) != 0x80000000u || m.ReadU32(en) != EntryMagic) return false;
+        uint type = m.ReadU32(en + 8);
+        if (type != SvtxEntryType && type != CvtxEntryType) return false;
+        int items = (int)m.ReadU32(en + 12);
+        return items is > 0 and <= 256 && FrameIndex(m, en, items, frame) >= 0;
     }
 
     static void ReadCamPose(IMemory m, int[] pose)
