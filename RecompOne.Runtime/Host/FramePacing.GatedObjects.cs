@@ -112,6 +112,13 @@ public static partial class FramePacing
         catch { return false; }
     }
 
+    static bool IsBridgePlank(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try { return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypeBrid; }
+        catch { return false; }
+    }
+
     static bool IsTurtleShell(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
@@ -452,12 +459,16 @@ public static partial class FramePacing
     /// (<c>scaley -= 0.05</c>) only while <c>collider</c> is Crash above it.
     /// Same-stamp Bound cleared that touch, so the bounce squash was missing
     /// or smaller than at 30 FPS, depending on the gate phase.
+    /// Bridge planks (#210): BridC Stance / Drop / Broken trans start the
+    /// fall on <c>collider</c> from Crash's floor test. Crash standing on a
+    /// plank does not overlap it, so same-stamp Bound cleared the touch and
+    /// the plank waited until a landing happened to overlap (late fall).
     /// </summary>
     static void LagCrashStampForEntity(IMemory m, uint obj)
     {
         if (_crashStampLagged
             || !(IsBoxObj(m, obj) || IsPoObConveyor(m, obj) || IsPoObSpring(m, obj)
-                || IsTurtleShell(m, obj))
+                || IsTurtleShell(m, obj) || IsBridgePlank(m, obj))
             || !TryReadCrash(m, out uint crash)) return;
         // Completion screen boxes are the GamOC Willy's children: the PS1 ran
         // them after him, same stamp. Nothing to lag.

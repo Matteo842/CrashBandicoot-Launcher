@@ -542,6 +542,11 @@ public static partial class FramePacing
     const uint StatePoObConveyor = 3;
     /// <summary>PoObC <c>Power_Spring</c> (idle; trans bounces <c>collider</c> when above).</summary>
     const uint StatePoObSpring = 0;
+    /// <summary>
+    /// BridC (Road to Nowhere / The High Road planks, fog). Stance / Drop /
+    /// Broken trans fall on <c>collider</c>; Stable dips on it (#210).
+    /// </summary>
+    const uint GoolTypeBrid = 23u;
     /// <summary>BonoC <c>Invisible_Clip</c> (end-of-bonus wall behind Crash, #212).</summary>
     const uint StateBonoClip = 4;
     /// <summary>TurtC (walking / path / shell turtles).</summary>
