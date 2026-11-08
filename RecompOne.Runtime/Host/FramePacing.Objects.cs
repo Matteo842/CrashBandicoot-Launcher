@@ -178,6 +178,18 @@ public static partial class FramePacing
         catch { return false; }
     }
 
+    /// <summary>
+    /// PoPlC <c>Platform_Path_Active</c> / <c>Platform_Path_Auto</c> (#193,
+    /// Heavy Machinery up/down discs): <c>LoopPathProg</c> / <c>TimePathProg</c>
+    /// then CarryCollider, gated like the mill.
+    /// </summary>
+    static bool IsGatedPathPlat(IMemory m, uint obj, uint type)
+    {
+        if (type != GoolTypePoPl) return false;
+        try { return m.ReadU32(obj + ObjStateOff) is StatePoPlActive or StatePoPlAuto; }
+        catch { return false; }
+    }
+
     /// <summary><see cref="IsWallMillPlat"/> for the ride object (class read here).</summary>
     static bool IsRiddenWallMillPlat(IMemory m, uint obj)
     {

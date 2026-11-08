@@ -191,6 +191,8 @@ public static partial class FramePacing
         _cameraSeekFrac.Clear();
         _cameraProgressFrac = 0;
         _cameraProgressZone = 0;
+        _camSpeedFrac = 0;
+        _camLagAfter = -1;
         _cameraProgressPath = 0;
         _autoCamDwell = 0;
         _autoCamDwellPath = 0;

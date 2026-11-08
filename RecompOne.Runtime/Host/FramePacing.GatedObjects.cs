@@ -1317,11 +1317,15 @@ public static partial class FramePacing
     /// RWaOC wall mill plats too (#181, Sunset Vista drums): a rising drum's
     /// Q box sat one step above the drawn drum, Crash's feet were inside it,
     /// StopAtWalls found walls all round and he walked in place.
+    /// PoPlC path plats too (#193): a vertical disc's Q box put the floor one
+    /// step above the drawn disc going up (Crash hovered) and one step below
+    /// it going down (feet sank in), in about half the gate phases.
     /// </summary>
     static bool GemBoundAfterTrans(IMemory m, uint obj)
     {
         if (!TryReadGoolClass(m, obj, out uint type, out _)
-            || (type != GoolTypeGems && !IsSeesawSlab(m, obj, type) && !IsWallMillPlat(m, obj, type)))
+            || (type != GoolTypeGems && !IsSeesawSlab(m, obj, type) && !IsWallMillPlat(m, obj, type)
+                && !IsGatedPathPlat(m, obj, type)))
             return false;
         if (!TryReadCrash(m, out uint crash)) return false;
         return m.ReadU32(obj + ObjAnimStampOff) != m.ReadU32(crash + ObjAnimStampOff);

@@ -331,6 +331,11 @@ public static partial class FramePacing
     const uint AutoCamSwitchRa = 0x8002B4BCu;
     /// <summary>zone_path <c>length</c> (u16, path points).</summary>
     const uint ZonePathLengthOff = 0x1Eu;
+    /// <summary>zone_path <c>avg_node_dist</c> (s16): CamFollow lag × this &lt;= 30000 snaps.</summary>
+    const uint ZonePathAvgNodeDistOff = 0x22u;
+    const int CamSnapMaxDist = 30000;
+    /// <summary>CamFollow cam_info <c>delta_progress</c>, copied to cam_speed after a snap.</summary>
+    const uint CamInfoDeltaOff = 0x14u;
     /// <summary>zone_header flags (zone entry item 0).</summary>
     const uint ZoneHeaderFlagsOff = 0x2FCu;
     const uint CamOffsetZAddr = 0x800564A4u;
@@ -760,6 +765,11 @@ public static partial class FramePacing
     static readonly Dictionary<uint, uint> _gateFrame = new();
     static readonly Dictionary<uint, double> _cameraSeekFrac = new();
     static double _cameraProgressFrac;
+    /// <summary>cam_speed at CamFollow entry (catch-up ramp pacing, #194).</summary>
+    static int _camSpeedPrev;
+    static double _camSpeedFrac;
+    /// <summary>CamFollow lag left after the last same-path call; -1 unknown.</summary>
+    static int _camLagAfter = -1;
     static uint _cameraProgressZone, _cameraProgressPath;
     /// <summary>Auto-cam path switch waiting out its 30 Hz frame: time spent, target path.</summary>
     static double _autoCamDwell;

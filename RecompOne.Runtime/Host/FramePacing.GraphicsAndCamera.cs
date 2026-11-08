@@ -330,7 +330,12 @@ public static partial class FramePacing
         CamTraceLevelUpdate(c);
         EnsureFrameTime(m);
         RestoreHogCamPose(m);
-        if (!IsActive(m) || _exactTicks >= RefTicks - 0.01 || c.RA == CamFollowSnapRa || _hogCamFullStep)
+        bool unlocked = IsActive(m) && _exactTicks < RefTicks - 0.01 && !_hogCamFullStep;
+        if (!unlocked)
+            _camLagAfter = -1;
+        else if (PaceCamFollowStep(c, m))
+            return true;
+        if (!unlocked || c.RA == CamFollowSnapRa)
         {
             _cameraProgressFrac = 0;
             _autoCamDwell = 0;
@@ -365,6 +370,98 @@ public static partial class FramePacing
             // zone swap
         }
         return true;
+    }
+
+    /// <summary>
+    /// CamFollow snaps to Crash while lag × the path's avg_node_dist is
+    /// &lt;= 30000, else catches up with <c>cam_speed = min(lag/2, cam_speed) +
+    /// 0x100</c>. Both are per 30 Hz step on the PS1, where the lag at each
+    /// call includes one whole step of Crash's motion. Per present it held
+    /// only dt of it: at 60 FPS the camera stayed snapped until Crash fell
+    /// twice as fast as on the PS1, started the catch-up late with a big lag
+    /// and rushed after him (#194, Heavy Machinery spring: Crash seemed to
+    /// speed up in the fall), and the +0x100 ramp ran per present (2× fast
+    /// rise). Rebuild the PS1 lag (carried lag + one step of the motion since
+    /// the last call), decide and size the speed from it, keep dt/34 of the
+    /// speed change and of the move. Same path only; path changes stay with
+    /// <see cref="PaceCamPathChange"/>. <c>S0</c> is CamFollow's cam_nearest at
+    /// both call sites (CamAdjustProgress does not touch it).
+    /// </summary>
+    static bool PaceCamFollowStep(CpuContext c, IMemory m)
+    {
+        bool snap = c.RA == CamFollowSnapRa;
+        if (!_inCamFollow || (!snap && c.RA != CamAdjustRa)) return false;
+        try
+        {
+            uint zone = m.ReadU32(CamZoneAddr);
+            uint path = m.ReadU32(CamPathAddr);
+            if (c.A0 != zone || c.A1 != path || (c.S0 & 0xFF000000u) != 0x80000000u
+                || m.ReadU32(Catalog.LevelIdAddr) == LidTitleMap)
+            {
+                _camLagAfter = -1;
+                return false;
+            }
+            int cur = (int)m.ReadU32(CamProgressAddr);
+            int req = (int)c.A2;
+            long lag = (int)m.ReadU32(c.S0 + CamInfoDeltaOff);
+            if (lag <= 0 || lag > PathWrap || req == cur)
+            {
+                _camLagAfter = snap ? 0 : -1;
+                return false;
+            }
+            long native = CamNativeLag(lag);
+            int avgNodeDist = (short)m.ReadU16(path + ZonePathAvgNodeDistOff);
+            if (snap && native * avgNodeDist <= CamSnapMaxDist)
+            {
+                _camLagAfter = 0;
+                return false;
+            }
+            int prev = _camSpeedPrev;
+            long want = native <= 0x200 ? native / 2
+                : native < 0x500 ? 0x200
+                : Math.Min(native / 2, (long)prev) + 0x100;
+            int speed = PaceCamSpeed(prev, (int)want);
+            int end = Math.Max((m.ReadU16(path + ZonePathLengthOff) << 8) - 1, 0);
+            int target = Math.Clamp(req > cur ? cur + speed : cur - speed, 0, end);
+            if (_cameraProgressZone != zone || _cameraProgressPath != path)
+            {
+                _cameraProgressFrac = 0;
+                _cameraProgressZone = zone;
+                _cameraProgressPath = path;
+            }
+            c.A2 = (uint)KeepCrashDelta(cur, target, PathWrap, ref _cameraProgressFrac);
+            // After a snap CamFollow copies delta_progress to cam_speed.
+            m.WriteU32(snap ? c.S0 + CamInfoDeltaOff : CamSpeedAddr, (uint)speed);
+            _camLagAfter = (int)Math.Max(0, lag - Math.Abs((long)(int)c.A2 - cur));
+            return true;
+        }
+        catch
+        {
+            _camLagAfter = -1;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// PS1 lag at this call: what the last call left plus a whole 30 Hz step
+    /// of the motion since (only dt of it happened here).
+    /// </summary>
+    static long CamNativeLag(long lag)
+    {
+        if (_camLagAfter < 0 || _exactTicks <= 0) return lag;
+        long moved = lag - _camLagAfter;
+        if (moved <= 0) return lag;
+        return lag + (long)Math.Round(moved * (RefTicks - _exactTicks) / _exactTicks);
+    }
+
+    static int PaceCamSpeed(int prev, int want)
+    {
+        if (prev <= 0 || want <= 0 || prev > PathWrap || want > PathWrap)
+        {
+            _camSpeedFrac = 0;
+            return want;
+        }
+        return KeepCrashDelta(prev, want, PathWrap, ref _camSpeedFrac);
     }
 
     /// <summary>
@@ -495,6 +592,7 @@ public static partial class FramePacing
             _camOffX = (int)m.ReadU32(CamOffsetXAddr);
             _camOffY = (int)m.ReadU32(CamOffsetYAddr);
             _camZoom = (int)m.ReadU32(CamZoomAddr);
+            _camSpeedPrev = (int)m.ReadU32(CamSpeedAddr);
             _inCamFollow = true;
         }
         catch

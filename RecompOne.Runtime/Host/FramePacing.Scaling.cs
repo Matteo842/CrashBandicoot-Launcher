@@ -532,7 +532,12 @@ public static partial class FramePacing
                 ClearCrashScaleFrac();
                 return;
             }
-            if (_crashAir)
+            // The hog takeoff / drum bounce present (vely SET) is airborne
+            // too, but FinishJumpScale has no pathprog: the hog kept a whole
+            // 30 Hz step of the path every hop (#217). The hog branch below
+            // keeps the jump Y the same way (FinishAirborneY). Full steps
+            // and dt 0 stay here: nothing to scale.
+            if (_crashAir && (!_crashHog || _exactTicks <= 0 || _exactTicks >= RefTicks - 0.01))
             {
                 _crashFracTY = 0;
                 _crashFracVY = 0;
@@ -556,7 +561,12 @@ public static partial class FramePacing
             // the death pose toward that snap leaves Crash beside the path
             // whenever dt&lt;34 (uncapped). At a 30 Hz hitch the lerp is off
             // so the checkpoint looks correct — same 60-only trap.
-            if (_crashHog && IsFirstFrame(m, o))
+            // Run → Jump (takeoff) and Jump → Run (landing) are first frames
+            // too, but there the old state's trans already ran MovePath: a
+            // plain spd(4) step. Kept whole, each hop put Crash 26/34 of a
+            // 30 Hz step ahead of every obstacle that had spawned, and the
+            // Hog Wild end native moved into his lane (#217).
+            if (_crashHog && IsFirstFrame(m, o) && !HogPathStep(m, o))
             {
                 _hogPathFrac = 0;
                 _hogTrotFracX = 0;
@@ -1090,6 +1100,25 @@ public static partial class FramePacing
         int y = _yTrans + _airDy;
         int vy = _airVy - KeepAirStep(4000.0 * _exactTicks, ref _airFracGravity);
         WriteAirborneY(m, y, vy, _airVy);
+    }
+
+    /// <summary>
+    /// This present's pathprog change is an ordinary forward
+    /// <c>spd(pathprog, 4)</c> step (34 per 34 ticks), not a spawn or
+    /// checkpoint write (those are backwards, zero, or far).
+    /// </summary>
+    static bool HogPathStep(IMemory m, uint o)
+    {
+        try
+        {
+            if (m.ReadU32(o + ObjStateOff) == StateWarthogSpawn) return false;
+            long d = (long)(int)m.ReadU32(o + ObjPathProgOff) - _opath;
+            return d > 0 && d <= 0x100;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     static int KeepHogPath(int from, int to)
