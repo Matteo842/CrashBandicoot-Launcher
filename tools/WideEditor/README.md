@@ -59,6 +59,13 @@ senza quel font i pulsanti mostrano il testo.
 - **Scolpisci terreno** (strumento): tieni premuto sui tuoi triangoli per alzare, abbassare,
   lisciare o appiattire (solo in altezza). Gli automatici toccati diventano tuoi; i vertici
   attaccati agli originali restano fermi. Ctrl = al contrario, Shift = liscia, Ctrl+rotella = raggio.
+- **Completa dal gemello** (Selezione > Completa dal gemello, o tasto destro): seleziona il
+  modello tagliato (clic, poi L) e premi "Cerca il gemello". Cerca solo nelle mesh caricate
+  un'altra copia dello stesso modello (stesse texture e forma, spostata, girata o specchiata):
+  in blu il gemello, in verde i suoi triangoli che al pezzo mancano, rimessi al posto giusto.
+  < > passa agli altri gemelli, "Vai al gemello" / "Torna al pezzo" spostano la camera,
+  "quanto cercare attorno" limita quanto del gemello prendere (abbassalo se entra il pavimento),
+  "Aggiungi" li crea come tuoi (un gruppo, selezionati). Gli originali eliminati non contano.
 - **Seleziona collegati (L)**: aggiunge tutto ciò che è attaccato (tuoi con tuoi, automatici
   della stessa mesh, originali nella loro mesh). **Automatici della mesh**: tutti in blocco.
 - **Rettangolo attraverso** (Selezionabili): il rettangolo prende anche quello che sta dietro.

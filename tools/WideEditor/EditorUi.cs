@@ -633,6 +633,7 @@ sealed partial class Editor
                         "Disattiva questi automatici e ne crea una copia tua uguale da sistemare.", -1)) CopyAsMine(true);
             }
         }
+        TwinSelectionSection();
         LightSelectionSection();
         BridgeSelectionSection();
         TerrainSelectionSection();
@@ -1049,6 +1050,7 @@ sealed partial class Editor
         if (_tool == Tool.Sculpt && _view.Contains(ImGui.GetIO().MousePos)) SculptOverlay(dl);
         if (_tool == Tool.Bridge) BridgeOverlay(dl);
         BridgePieceOverlay(dl);
+        TwinOverlay(dl);
         if (_tool == Tool.Vertex)
         {
             foreach (var t in _doc.Tris)

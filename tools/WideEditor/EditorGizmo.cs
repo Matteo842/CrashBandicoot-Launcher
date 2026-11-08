@@ -459,6 +459,7 @@ sealed partial class Editor
             if (ImGui.MenuItem("Seleziona collegati", "L")) SelectLinked();
             if (auto > 0 && ImGui.MenuItem("Seleziona tutti gli automatici della mesh")) SelectMeshAutos();
             if (ImGui.MenuItem("Estendi terreno dal bordo")) ExtendTerrain();
+            if (ImGui.MenuItem("Completa dal gemello (cerca modello uguale)")) FindTwin();
             if (ImGui.MenuItem("Luce: questa è la sorgente")) MarkLightSource();
             if (user > 0 && ImGui.MenuItem("Luce: copia dalla sorgente", "", false, _lightSource != null)) CopyLightFromSource();
             if (user > 0 && ImGui.MenuItem("Luce: dagli originali vicini")) LightFromNeighbours();
