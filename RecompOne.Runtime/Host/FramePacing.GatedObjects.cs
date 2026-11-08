@@ -84,6 +84,23 @@ public static partial class FramePacing
         catch { return false; }
     }
 
+    /// <summary>
+    /// BonoC Invisible_Clip (#212): invisible SOLID_SIDES box Tawna spawns
+    /// behind Crash at the end of a bonus round so he cannot walk back. Gated
+    /// skip presents drew nothing for it, so it left object_bounds on those
+    /// presents and Crash walked into (and through) it at high FPS.
+    /// </summary>
+    static bool IsBonusClip(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypeBono
+                && m.ReadU32(obj + ObjStateOff) == StateBonoClip;
+        }
+        catch { return false; }
+    }
+
     static bool IsPoObSpring(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;

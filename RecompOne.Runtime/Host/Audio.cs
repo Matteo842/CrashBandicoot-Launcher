@@ -11,8 +11,10 @@ internal static unsafe class Audio
     static ALDevice* _device;
     static ALCtx* _context;
 
-    // ~280 ms of queued audio at 44.1 kHz — enough margin for GC / timer coalescing after long idle.
-    const int NumBuffers = 12;
+    // ~186 ms of queued audio at 44.1 kHz — margin for GC / timer coalescing on the
+    // mixer thread. SpuStream adds its own ~67 ms queue, so total latency stays at
+    // the ~255 ms of the old 12-buffer pull mixer.
+    const int NumBuffers = 8;
     const int FramesPerBuffer = 1024;
     const int SampleRate = 44100;
 
@@ -96,6 +98,13 @@ internal static unsafe class Audio
 
         _al.SourcePlay(_source);
 
+        // #215: render the SPU per VBlank (exactly 735 frames per sequencer tick)
+        // instead of mixing 1024-frame blocks on pull. The pull mixer heard each
+        // tick at the next block start, so ticks 16.7 ms apart came out 0 / 23 / 46 ms
+        // apart and the music sped up and slowed down. Same path as Android (#23).
+        SpuStream.ResetConsumer();
+        SpuStream.Enabled = true;
+
         _running = true;
         _ready = true;
         _mixerThread = new Thread(MixerLoop)
@@ -110,6 +119,7 @@ internal static unsafe class Audio
 
     static void CleanupPartialInit()
     {
+        SpuStream.Enabled = false;
         _running = false;
         _ready = false;
         try { _mixerThread?.Join(200); } catch { /* ignore */ }
@@ -202,7 +212,10 @@ internal static unsafe class Audio
             uint buf = 0;
             _al.SourceUnqueueBuffers(_source, 1, &buf);
 
-            spu.Mix(_sampleBuf, FramesPerBuffer);
+            if (SpuStream.Enabled)
+                SpuStream.ReadResampled(_sampleBuf, FramesPerBuffer, SampleRate);
+            else
+                spu.Mix(_sampleBuf, FramesPerBuffer);
 
             _al.BufferData(buf, BufferFormat.Stereo16, _sampleBuf, SampleRate);
             _al.SourceQueueBuffers(_source, 1, &buf);
@@ -221,6 +234,7 @@ internal static unsafe class Audio
     public static void Shutdown()
     {
         if (_alc == null) return;
+        SpuStream.Enabled = false;
         _running = false;
         _ready = false;
         _mixerThread?.Join(500);

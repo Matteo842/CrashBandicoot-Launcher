@@ -588,9 +588,16 @@ public static partial class FramePacing
     {
         try
         {
+            uint statusB = m.ReadU32(obj + ObjStatusBOff);
+            if ((statusB & FlagInvisible) != 0 && IsBonusClip(m, obj))
+            {
+                // Nothing to draw, but the original computes its bound every
+                // update: keep the invisible wall in object_bounds (#212).
+                RegisterGatedBound(m, obj, statusB);
+                return;
+            }
             uint seq = m.ReadU32(obj + ObjAnimSeqOff);
             if ((seq & 0xFF000000u) != 0x80000000u) return;
-            uint statusB = m.ReadU32(obj + ObjStatusBOff);
             if ((statusB & FlagInvisible) != 0) return;
             if (!GatedObjectShouldDisplay(m, obj, statusB)) return;
             if (!_gateRot.ContainsKey(obj))

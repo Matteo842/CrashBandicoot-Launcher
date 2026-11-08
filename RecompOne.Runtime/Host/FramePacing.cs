@@ -542,6 +542,8 @@ public static partial class FramePacing
     const uint StatePoObConveyor = 3;
     /// <summary>PoObC <c>Power_Spring</c> (idle; trans bounces <c>collider</c> when above).</summary>
     const uint StatePoObSpring = 0;
+    /// <summary>BonoC <c>Invisible_Clip</c> (end-of-bonus wall behind Crash, #212).</summary>
+    const uint StateBonoClip = 4;
     /// <summary>TurtC (walking / path / shell turtles).</summary>
     const uint GoolTypeTurt = 19u;
     /// <summary>TurtC <c>Turtle_Shell</c>. Trans squashes <c>scaley</c> while <c>collider</c> is Crash above.</summary>
