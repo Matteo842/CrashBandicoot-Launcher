@@ -280,6 +280,13 @@ public static class LibCd
         if (_readActive) EnsureXaThread();
     }
 
+    /// <summary>
+    /// Embedded session ended (Return to Launcher, #218): stop the drive so the
+    /// CdXa / CdStream threads go idle instead of decoding the old disc position
+    /// into the XA ring while the launcher is shown.
+    /// </summary>
+    internal static void StopForSessionEnd() => CdResetState();
+
     static void CdResetState()
     {
         LibCdStream.OnStopStream();

@@ -89,6 +89,10 @@ internal static unsafe class Audio
         fixed (uint* ptr = _buffers)
             _al.GenBuffers(NumBuffers, ptr);
 
+        // #218: _sampleBuf is static. After Return to Launcher it still holds the
+        // last 23 ms block of the previous session, and priming the queue with it
+        // played that block 8 times in a row: a buzz when the game started again.
+        Array.Clear(_sampleBuf);
         for (int i = 0; i < _buffers.Length; i++)
         {
             _al.BufferData(_buffers[i], BufferFormat.Stereo16, _sampleBuf, SampleRate);
@@ -104,6 +108,8 @@ internal static unsafe class Audio
         // apart and the music sped up and slowed down. Same path as Android (#23).
         SpuStream.ResetConsumer();
         SpuStream.Enabled = true;
+        // Drop CD-XA left queued by a previous embedded session (#218).
+        XaAudio.Reset();
 
         _running = true;
         _ready = true;
@@ -249,5 +255,9 @@ internal static unsafe class Audio
         if (_device != null) _alc.CloseDevice(_device);
         _context = null;
         _device = null;
+        // Embedded launcher starts a new session in this process: forget the old
+        // session's SPU and pause flag so the next one starts like a first launch.
+        _spu = null;
+        _paused = false;
     }
 }

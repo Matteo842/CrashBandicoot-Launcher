@@ -161,6 +161,7 @@ public static class Runtime
             _platformHost.Shutdown();
         else
         {
+            Sdk.LibCd.StopForSessionEnd();
             Audio.Shutdown();
             HostWindow.Shutdown();
         }
