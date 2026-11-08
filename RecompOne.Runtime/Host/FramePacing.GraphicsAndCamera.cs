@@ -348,7 +348,7 @@ public static partial class FramePacing
             {
                 if (AutoCamDwell(c, m))
                     return false;
-                if (PaceIslandCamLeaveStart(c, m))
+                if (PaceIslandCamJunction(c, m))
                     return true;
                 if (c.RA != CamAdjustRa || !PaceCamPathChange(c, m))
                     _cameraProgressFrac = 0;

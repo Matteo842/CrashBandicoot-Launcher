@@ -87,32 +87,85 @@ public static partial class FramePacing
         return cur + (req - (cur & ~0xFF));
     }
 
+    /// <summary>RA of CamUpdate's cam_mode 7 LevelUpdate (shared with the auto-cam same-path step).</summary>
+    const uint IslandCamRa = 0x8002BA7Cu;
+    /// <summary>RA of CamUpdate's cam_mode 8 (island-to-island) LevelUpdate.</summary>
+    const uint IslandTransitCamRa = 0x8002B730u;
     /// <summary>
-    /// Going back from inside the first point (0 &lt; progress &lt; 0x100), the
-    /// island camera (cam_mode 7 and the island-to-island cam_mode 8) jumps to
-    /// the previous path at once. On the PS1 it left from exactly point 0.
-    /// Finish the way to point 0 at wall speed first; the next call leaves
-    /// from there. Forward exits leave from the path end, never from inside
-    /// point 0 of a path longer than one point.
+    /// NTSC-U <c>island_cam_state</c>: -1 map init, 1 follow, 5 / 6 leave to
+    /// the next / previous island (cam_mode 7 spins +4 points per call).
     /// </summary>
-    static bool PaceIslandCamLeaveStart(CpuContext c, IMemory m)
+    const uint IslandCamStateAddr = 0x80061994u;
+
+    /// <summary>
+    /// The island camera path is a ring of zone paths: a fractional progress
+    /// on a path's last point already blends into the next path's point 0.
+    /// On the PS1 every call moves a whole step (1 point, 4 while leaving the
+    /// island) and a seam is crossed inside that step. Unlocked, the same-path
+    /// steps keep dt/34, but the seam call jumped at once: forward a whole
+    /// point (up to 4) in one present, backward a whole point after an
+    /// exponential crawl to point 0 (dt/34 of the rest per present, ~120 ms
+    /// nearly stopped at 60 FPS: #191 L1/R1 rotation stops at every seam,
+    /// #196 hitches between levels). That crawl also left the camera on the
+    /// wrong path while IsldC already saw it within 3 degrees and took the
+    /// next move; leaving the island then spun forward a whole lap (#196).
+    /// Keep moving dt/34 of the PS1 step along the ring: stay on the old path
+    /// until the step crosses the seam, then enter the new one with the rest.
+    /// </summary>
+    static bool PaceIslandCamJunction(CpuContext c, IMemory m)
     {
+        bool cam7 = c.RA == IslandCamRa;
+        if (!cam7 && c.RA != IslandTransitCamRa) return false;
         if (m.ReadU32(Catalog.LevelIdAddr) != LidTitleMap) return false;
+        int state = (int)m.ReadU32(IslandCamStateAddr);
+        if (state <= 0) return false;
         uint zone = m.ReadU32(CamZoneAddr);
         uint path = m.ReadU32(CamPathAddr);
-        if ((path & 0xFF000000u) != 0x80000000u || m.ReadU16(path + ZonePathLengthOff) <= 1)
+        uint newPath = c.A1;
+        if ((path & 0xFF000000u) != 0x80000000u || (newPath & 0xFF000000u) != 0x80000000u)
             return false;
+        int end = m.ReadU16(path + ZonePathLengthOff) << 8;
+        int newEnd = m.ReadU16(newPath + ZonePathLengthOff) << 8;
+        if (end <= 0x100 || newEnd <= 0) return false;
         int cur = (int)m.ReadU32(CamProgressAddr);
-        if (cur <= 0 || cur >= 0x100) return false;
+        int req = (int)c.A2;
+        int newLast = newEnd - 0x100;
+        // cam_mode 7: +4 points while leaving the island, else one point either
+        // way (angle sign). cam_mode 8: one point, forward on odd states.
+        int step = cam7 && (state & 4) != 0 ? 0x400 : 0x100;
+        bool mayForward = cam7 || (state & 1) != 0;
+        bool mayBackward = cam7 ? (state & 4) == 0 : (state & 1) == 0;
+        bool forward = mayForward && cur < end && cur + step >= end && (req == 0 || req == newLast);
+        bool backward = !forward && mayBackward && cur >= 0 && cur < 0x100;
+        if (!forward && !backward) return false;
         if (_cameraProgressZone != zone || _cameraProgressPath != path)
-        {
             _cameraProgressFrac = 0;
+        int kept = KeepCrashDelta(0, step, PathWrap, ref _cameraProgressFrac);
+        if (forward ? cur + kept < end : kept <= cur)
+        {
+            c.A0 = zone;
+            c.A1 = path;
+            c.A2 = (uint)(forward ? cur + kept : cur - kept);
             _cameraProgressZone = zone;
             _cameraProgressPath = path;
+            return true;
         }
-        c.A0 = zone;
-        c.A1 = path;
-        c.A2 = (uint)KeepCrashDelta(cur, 0, PathWrap, ref _cameraProgressFrac);
+        if (forward)
+        {
+            // Entered at point 0 it moves on forward; entered at its end (leaving
+            // to the previous island) the transit path is walked backward.
+            int rest = Math.Min(cur + kept - end, newLast);
+            c.A2 = (uint)(req == 0 ? rest : req - rest);
+        }
+        else if (req == newLast)
+        {
+            // Previous path's last point blends into this path's point 0.
+            c.A2 = (uint)(newLast + 0x100 - (kept - cur));
+        }
+        // else: a backward entry at point 0 (transit start back onto the ring)
+        // is the same spot; take it as the PS1 does.
+        _cameraProgressZone = c.A0;
+        _cameraProgressPath = newPath;
         return true;
     }
 }
