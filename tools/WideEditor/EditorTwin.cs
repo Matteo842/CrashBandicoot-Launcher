@@ -65,6 +65,9 @@ sealed partial class Editor
         public List<Vector3[]> Existing = [];
         public Dictionary<(int, int, int), List<int>> ExistingGrid = [];
         public int DocVersion;
+        // Pieces the user picked, from any twin, by centre: kept when switching twin or reach.
+        public Dictionary<VKey, UserTri> Chosen = [];
+        public List<int> Hover = [];
     }
 
     TwinSearch? _twin;
@@ -382,7 +385,7 @@ sealed partial class Editor
     {
         if (CurrentTwin() is not { } h) return;
         Say($"Gemello {_twin!.Index + 1} di {_twin.Hyps.Count}: {h.Votes} triangoli su {_twin.Sel.Count} uguali"
-            + $"{(h.ToTwin.Mirror ? " (specchiato)" : "")}, {h.Add.Count} pezzi da aggiungere (in verde).");
+            + $"{(h.ToTwin.Mirror ? " (specchiato)" : "")}, {h.Add.Count} pezzi possibili in verde. Clic sui pezzi verdi per sceglierli.");
     }
 
     void TwinStep(int d)
@@ -402,23 +405,166 @@ sealed partial class Editor
         StopFollow();
     }
 
+    /// <summary>The twin preview is open: clicks only choose its green pieces.</summary>
+    bool TwinPicking => _tool == Tool.Select && CurrentTwin() != null;
+
+    /// <summary>Pieces that can be clicked: the current twin's ones and those already chosen.</summary>
+    List<(VKey Key, UserTri T)> TwinCandidates()
+    {
+        var list = new List<(VKey, UserTri)>();
+        if (CurrentTwin() is not { } h) return list;
+        var seen = new HashSet<VKey>();
+        foreach (var t in h.Add)
+        {
+            var k = KeyOf(t.Center);
+            if (seen.Add(k)) list.Add((k, t));
+        }
+        foreach (var (k, t) in _twin!.Chosen)
+            if (seen.Add(k)) list.Add((k, t));
+        return list;
+    }
+
+    /// <summary>The nearest green triangle under the mouse (-1: none).</summary>
+    int TwinPickAt(List<(VKey Key, UserTri T)> list, Vector2 mouse)
+    {
+        int best = -1;
+        float bestDepth = float.MaxValue;
+        Span<Vector2> s = stackalloc Vector2[3];
+        for (int i = 0; i < list.Count; i++)
+        {
+            var t = list[i].T;
+            bool ok = true;
+            for (int k = 0; k < 3 && ok; k++) ok = _cam.Depth(t.V[k].Pos) > 1 && _cam.Project(t.V[k].Pos, _view, out s[k]);
+            if (!ok) continue;
+            float c0 = Cross2(s[1] - s[0], mouse - s[0]), c1 = Cross2(s[2] - s[1], mouse - s[1]), c2 = Cross2(s[0] - s[2], mouse - s[2]);
+            if (!((c0 >= 0 && c1 >= 0 && c2 >= 0) || (c0 <= 0 && c1 <= 0 && c2 <= 0))) continue;
+            float depth = _cam.Depth(t.Center);
+            if (depth < bestDepth) { bestDepth = depth; best = i; }
+        }
+        return best;
+    }
+
+    static float Cross2(Vector2 a, Vector2 b) => a.X * b.Y - a.Y * b.X;
+
+    Material TwinMat(UserTri t) => L!.MeshByName.TryGetValue(t.Mesh, out var m) && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
+
+    static int SharedCorners(UserTri a, UserTri b) =>
+        a.V.Count(v => b.V.Any(w => Vector3.DistanceSquared(v.Pos, w.Pos) < 4));
+
+    /// <summary>What one click takes: the triangle and the other half of its square (shared
+    /// side, same texture, same surface); <paramref name="piece"/> (double click, Alt): every
+    /// triangle joined to it by a side with the same texture.</summary>
+    List<int> TwinSquare(List<(VKey Key, UserTri T)> list, int i, bool piece)
+    {
+        var cell = new List<int> { i };
+        var mat = TwinMat(list[i].T);
+        if (!piece)
+        {
+            var a = list[i].T;
+            var n = Vector3.Cross(a.V[1].Pos - a.V[0].Pos, a.V[2].Pos - a.V[0].Pos);
+            int partner = -1;
+            float best = 0.95f;
+            for (int j = 0; j < list.Count; j++)
+            {
+                if (j == i || SharedCorners(a, list[j].T) < 2 || TwinMat(list[j].T) != mat) continue;
+                var t = list[j].T;
+                var m = Vector3.Cross(t.V[1].Pos - t.V[0].Pos, t.V[2].Pos - t.V[0].Pos);
+                if (n.LengthSquared() < 1e-6f || m.LengthSquared() < 1e-6f) continue;
+                float dot = MathF.Abs(Vector3.Dot(Vector3.Normalize(n), Vector3.Normalize(m)));
+                if (dot > best) { best = dot; partner = j; }
+            }
+            if (partner >= 0) cell.Add(partner);
+            return cell;
+        }
+        var seen = new HashSet<int> { i };
+        var queue = new Queue<int>(cell);
+        while (queue.Count > 0)
+        {
+            int a = queue.Dequeue();
+            for (int j = 0; j < list.Count; j++)
+                if (!seen.Contains(j) && SharedCorners(list[a].T, list[j].T) >= 2 && TwinMat(list[j].T) == mat)
+                {
+                    seen.Add(j);
+                    cell.Add(j);
+                    queue.Enqueue(j);
+                }
+        }
+        return cell;
+    }
+
+    List<(VKey Key, UserTri T)>? _twinHoverList;
+
+    void TwinHover(Vector2 mouse)
+    {
+        if (_twin == null) return;
+        var list = TwinCandidates();
+        int i = TwinPickAt(list, mouse);
+        _twin.Hover = i < 0 ? [] : TwinSquare(list, i, Alt);
+        _twinHoverList = list;
+    }
+
+    /// <summary>Click on a green piece: chosen if it was not, left out if it was.</summary>
+    void TwinClick(Vector2 mouse, bool piece)
+    {
+        if (_twin == null) return;
+        var list = TwinCandidates();
+        int i = TwinPickAt(list, mouse);
+        if (i < 0) return;
+        var cell = TwinSquare(list, i, piece);
+        bool take = !_twin.Chosen.ContainsKey(list[i].Key);
+        foreach (int j in cell)
+            if (take) _twin.Chosen[list[j].Key] = list[j].T.Clone();
+            else _twin.Chosen.Remove(list[j].Key);
+        Say($"{(take ? "Scelti" : "Tolti")} {cell.Count} triangoli. Scelti in tutto: {_twin.Chosen.Count}. Invio = aggiungi, Esc = chiudi.");
+    }
+
+    /// <summary>Rectangle over the green pieces: chooses those inside (Alt: leaves them out).</summary>
+    void TwinBox(Vector2 a, Vector2 b)
+    {
+        if (_twin == null) return;
+        var min = Vector2.Min(a, b);
+        var max = Vector2.Max(a, b);
+        int n = 0;
+        foreach (var (k, t) in TwinCandidates())
+        {
+            if (_cam.Depth(t.Center) <= 1 || !_cam.Project(t.Center, _view, out var c)) continue;
+            if (c.X < min.X || c.Y < min.Y || c.X > max.X || c.Y > max.Y) continue;
+            if (Alt) _twin.Chosen.Remove(k); else _twin.Chosen[k] = t.Clone();
+            n++;
+        }
+        Say($"{(Alt ? "Tolti" : "Scelti")} {n} triangoli col rettangolo. Scelti in tutto: {_twin.Chosen.Count}.");
+    }
+
+    void TwinChooseAll(bool on)
+    {
+        if (_twin == null) return;
+        if (!on) { _twin.Chosen.Clear(); return; }
+        foreach (var (k, t) in TwinCandidates()) _twin.Chosen[k] = t.Clone();
+    }
+
+    /// <summary>Adds the chosen pieces (from every twin looked at) as own triangles.</summary>
     void ApplyTwin()
     {
-        if (CurrentTwin() is not { } h || h.Add.Count == 0) return;
+        if (CurrentTwin() == null || _twin!.Chosen.Count == 0)
+        {
+            Say("Nessun pezzo scelto: clic sui pezzi verdi (o rettangolo) per sceglierli.");
+            return;
+        }
         BeginChange();
         int group = _doc.NextGroup++;
         _sel.Clear();
-        foreach (var t in h.Add)
+        foreach (var t in _twin.Chosen.Values)
         {
             var c = t.Clone();
             c.Group = group;
             _sel.Add(Key(Kind.User, _doc.Tris.Count));
             _doc.Tris.Add(c);
         }
-        int other = h.OtherMesh;
+        int count = _twin.Chosen.Count;
+        int other = _twin.Chosen.Values.Count(t => t.Mesh != _twin.Target);
         _twin = null;
         Changed();
-        Say($"Aggiunti {h.Add.Count} pezzi dal gemello (selezionati, gruppo {group})."
+        Say($"Aggiunti {count} triangoli dal gemello (selezionati, gruppo {group})."
             + (other > 0 ? $" {other} hanno una texture che la mesh del pezzo non usa: restano legati alla mesh del gemello." : "")
             + " Luce: \"Illuminazione dagli originali vicini\" se il colore non si intona.");
     }
@@ -431,11 +577,11 @@ sealed partial class Editor
             ImGui.SetTooltip("Seleziona il modello tagliato (clic, poi L per i collegati) e premi qui.\n"
                 + "Cerca nelle mesh caricate un'altra copia dello stesso modello (stesse texture e forma,\n"
                 + "anche girata o specchiata) e mostra in verde i pezzi che a questo mancano.\n"
-                + "Sono copie esatte dei triangoli del gemello, rimessi al posto giusto.");
+                + "Poi scegli col mouse quali pezzi verdi vuoi: si aggiungono solo quelli.");
         var h = CurrentTwin();
         if (h == null) return;
         ImGui.TextWrapped($"Gemello {_twin!.Index + 1} di {_twin.Hyps.Count}: {h.Votes}/{_twin.Sel.Count} uguali"
-            + $"{(h.ToTwin.Mirror ? ", specchiato" : "")}. Da aggiungere: {h.Add.Count}.");
+            + $"{(h.ToTwin.Mirror ? ", specchiato" : "")}. Pezzi possibili: {h.Add.Count}.");
         if (ImGui.Button("<##twin")) TwinStep(-1);
         ImGui.SameLine();
         if (ImGui.Button(">##twin")) TwinStep(1);
@@ -446,38 +592,61 @@ sealed partial class Editor
         ImGui.SetNextItemWidth(120 * S);
         ImGui.SliderFloat("quanto cercare attorno##twin", ref _twinReach, 0.1f, 3, "%.1f x");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Fin dove prendere i pezzi del gemello, rispetto alla grandezza del pezzo selezionato.\nSe in verde entra anche il pavimento o un muro vicino, abbassalo.");
+            ImGui.SetTooltip("Fin dove prendere i pezzi del gemello, rispetto alla grandezza del pezzo selezionato.");
         ImGui.Checkbox("Solo le texture del pezzo##twin", ref _twinTexOnly);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Prende dal gemello solo triangoli con texture che il pezzo selezionato già usa.");
-        ImGui.BeginDisabled(h.Add.Count == 0);
-        if (ImGui.Button($"Aggiungi i {h.Add.Count} pezzi mancanti", new Vector2(-1, 0))) ApplyTwin();
+        ImGui.TextWrapped("Clic su un pezzo verde = sceglilo / toglilo (il quadrato intero). Doppio clic o Alt = tutto il pezzo "
+            + "con quella texture. Rettangolo = scegli quelli dentro, Alt+rettangolo = togli. Si possono cliccare solo i pezzi verdi.");
+        if (ImGui.SmallButton("scegli tutti##twin")) TwinChooseAll(true);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("nessuno##twin")) TwinChooseAll(false);
+        ImGui.BeginDisabled(_twin.Chosen.Count == 0);
+        if (ImGui.Button($"Aggiungi i {_twin.Chosen.Count} scelti (Invio)", new Vector2(-1, 0))) ApplyTwin();
         ImGui.EndDisabled();
-        if (ImGui.SmallButton("annulla##twin")) _twin = null;
+        if (ImGui.SmallButton("chiudi (Esc)##twin")) _twin = null;
     }
 
-    /// <summary>Preview: the twin outlined in light blue, the pieces it would add in green.</summary>
+    /// <summary>Preview: the twin outlined in light blue, the pieces it could add in pale
+    /// green, the chosen ones in full green, the piece under the mouse in white.</summary>
     void TwinOverlay(ImDrawListPtr dl)
     {
         if (CurrentTwin() is not { } h) return;
         var s = new Vector2[3];
         int drawn = 0;
+        bool Proj(UserTri t)
+        {
+            for (int k = 0; k < 3; k++)
+                if (_cam.Depth(t.V[k].Pos) <= 1 || !_cam.Project(t.V[k].Pos, _view, out s[k])) return false;
+            return true;
+        }
         foreach (int i in h.Piece)
         {
             if (++drawn > 6000) break;
             var t = _twin!.Pool[i];
             bool ok = true;
             for (int k = 0; k < 3 && ok; k++) ok = _cam.Project(t.P[k], _view, out s[k]);
-            if (ok) dl.AddPolyline(ref s[0], 3, Col(0.3f, 0.8f, 1, 0.7f), ImDrawFlags.Closed, 1.2f * _ui);
+            if (ok) dl.AddPolyline(ref s[0], 3, Col(0.3f, 0.8f, 1, 0.35f), ImDrawFlags.Closed, 1f * _ui);
         }
         foreach (var t in h.Add)
         {
             if (++drawn > 12000) break;
-            bool ok = true;
-            for (int k = 0; k < 3 && ok; k++) ok = _cam.Project(t.V[k].Pos, _view, out s[k]);
-            if (!ok) continue;
-            dl.AddConvexPolyFilled(ref s[0], 3, Col(0.2f, 1, 0.3f, 0.25f));
-            dl.AddPolyline(ref s[0], 3, Col(0.2f, 1, 0.3f, 0.95f), ImDrawFlags.Closed, 1.6f * _ui);
+            if (_twin!.Chosen.ContainsKey(KeyOf(t.Center)) || !Proj(t)) continue;
+            dl.AddConvexPolyFilled(ref s[0], 3, Col(0.2f, 1, 0.3f, 0.10f));
+            dl.AddPolyline(ref s[0], 3, Col(0.2f, 1, 0.3f, 0.55f), ImDrawFlags.Closed, 1.2f * _ui);
         }
+        foreach (var t in _twin!.Chosen.Values)
+        {
+            if (!Proj(t)) continue;
+            dl.AddConvexPolyFilled(ref s[0], 3, Col(0.15f, 0.95f, 0.25f, 0.55f));
+            dl.AddPolyline(ref s[0], 3, Col(0.6f, 1, 0.6f, 1), ImDrawFlags.Closed, 2f * _ui);
+        }
+        if (_twinHoverList != null && _view.Contains(ImGui.GetIO().MousePos))
+            foreach (int i in _twin.Hover)
+                if (i < _twinHoverList.Count && Proj(_twinHoverList[i].T))
+                {
+                    dl.AddConvexPolyFilled(ref s[0], 3, Col(1, 1, 1, 0.18f));
+                    dl.AddPolyline(ref s[0], 3, Col(1, 1, 1, 1), ImDrawFlags.Closed, 2.5f * _ui);
+                }
     }
 }

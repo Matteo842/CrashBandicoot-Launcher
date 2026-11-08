@@ -1046,7 +1046,7 @@ sealed partial class Editor
             dl.AddPolyline(ref screen[0], n, Col(1, 0.9f, 0.2f, 0.95f), ImDrawFlags.Closed, 2f * _ui);
         }
 
-        if (_tool == Tool.Select && _sel.Count > 0) DrawGizmo(dl);
+        if (_tool == Tool.Select && _sel.Count > 0 && !TwinPicking) DrawGizmo(dl);
         if (_tool == Tool.Sculpt && _view.Contains(ImGui.GetIO().MousePos)) SculptOverlay(dl);
         if (_tool == Tool.Bridge) BridgeOverlay(dl);
         BridgePieceOverlay(dl);

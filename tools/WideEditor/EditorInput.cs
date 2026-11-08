@@ -165,12 +165,15 @@ sealed partial class Editor
             if (Ctrl && y) Redo();
             if (Ctrl && s) Save();
             if (Ctrl && d) CopyAsMine(false);
-            if (del) DeleteSelection();
+            bool twin = TwinPicking;
+            if (del && !twin) DeleteSelection();
+            if (twin && enter) ApplyTwin();
             if (_tool == Tool.Bridge && enter) BridgeNext();
             if (_tool == Tool.Bridge && back) BridgeUndoPoint();
             if (esc)
             {
-                if (_tool == Tool.Bridge && BridgeHasPoints) BridgeReset();
+                if (twin) _twin = null;
+                else if (_tool == Tool.Bridge && BridgeHasPoints) BridgeReset();
                 else if (_points.Count > 0) _points.Clear();
                 else if (_tool != Tool.Select) _tool = Tool.Select;
                 else _sel.Clear();
@@ -262,6 +265,7 @@ sealed partial class Editor
         _hoverVertex = null;
         if (_drag == DragMode.None) _snapHit = null;
         if (!over || _drag != DragMode.None) return;
+        if (TwinPicking) { TwinHover(mouse); return; }
         if (_tool == Tool.Select && _sel.Count > 0) _hoverAxis = GizmoHit(mouse);
         if (_tool == Tool.Vertex)
         {
@@ -299,6 +303,11 @@ sealed partial class Editor
         _dragStart = mouse;
         switch (_tool)
         {
+            case Tool.Select when TwinPicking:
+                // Choosing the twin's green pieces: nothing else of the map is picked.
+                _drag = DragMode.ClickPending;
+                _clickPiece = ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) || Alt;
+                break;
             case Tool.Select:
                 // With Ctrl or Shift a click always selects, even over the gizmo.
                 if (_hoverAxis >= 0 && !Ctrl && !Shift) StartGizmo(_hoverAxis, mouse);
@@ -355,7 +364,9 @@ sealed partial class Editor
     void LeftRelease()
     {
         var mouse = ImGui.GetIO().MousePos;
-        if (_drag == DragMode.ClickPending) ClickSelect(_hoverId, _clickPiece);
+        if (TwinPicking && _drag == DragMode.ClickPending) TwinClick(mouse, _clickPiece);
+        else if (TwinPicking && _drag == DragMode.Box) TwinBox(_dragStart, mouse);
+        else if (_drag == DragMode.ClickPending) ClickSelect(_hoverId, _clickPiece);
         else if (_drag == DragMode.Box) BoxSelect(_dragStart, mouse);
         _drag = DragMode.None;
         _moving.Clear();

@@ -62,10 +62,13 @@ senza quel font i pulsanti mostrano il testo.
 - **Completa dal gemello** (Selezione > Completa dal gemello, o tasto destro): seleziona il
   modello tagliato (clic, poi L) e premi "Cerca il gemello". Cerca solo nelle mesh caricate
   un'altra copia dello stesso modello (stesse texture e forma, spostata, girata o specchiata):
-  in blu il gemello, in verde i suoi triangoli che al pezzo mancano, rimessi al posto giusto.
-  < > passa agli altri gemelli, "Vai al gemello" / "Torna al pezzo" spostano la camera,
-  "quanto cercare attorno" limita quanto del gemello prendere (abbassalo se entra il pavimento),
-  "Aggiungi" li crea come tuoi (un gruppo, selezionati). Gli originali eliminati non contano.
+  in blu il gemello, in verde chiaro i suoi triangoli che al pezzo mancano, già al posto giusto.
+  Poi componi il puzzle: finché l'anteprima è aperta si possono cliccare **solo i pezzi verdi**.
+  Clic = sceglie/toglie il quadrato (bianco sotto il mouse, verde pieno se scelto), doppio clic
+  o Alt = tutto il pezzo con quella texture, rettangolo = sceglie quelli dentro (Alt = toglie).
+  < > passa agli altri gemelli (i pezzi scelti restano: puoi prenderli da più gemelli),
+  "Vai al gemello" / "Torna al pezzo" spostano la camera, "quanto cercare attorno" limita il
+  verde. Invio o "Aggiungi i N scelti" li crea come tuoi (un gruppo, selezionati); Esc chiude.
 - **Seleziona collegati (L)**: aggiunge tutto ciò che è attaccato (tuoi con tuoi, automatici
   della stessa mesh, originali nella loro mesh). **Automatici della mesh**: tutti in blocco.
 - **Rettangolo attraverso** (Selezionabili): il rettangolo prende anche quello che sta dietro.
