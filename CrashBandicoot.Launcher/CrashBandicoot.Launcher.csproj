@@ -7,10 +7,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>CrashBandicoot</AssemblyName>
     <RootNamespace>CrashBandicoot.Launcher</RootNamespace>
-    <Version>2.4</Version>
-    <AssemblyVersion>2.4.0.0</AssemblyVersion>
-    <FileVersion>2.4.0.0</FileVersion>
-    <InformationalVersion>2.4</InformationalVersion>
+    <Version>2.5</Version>
+    <AssemblyVersion>2.5.0.0</AssemblyVersion>
+    <FileVersion>2.5.0.0</FileVersion>
+    <InformationalVersion>2.5</InformationalVersion>
     <Product>Crash Bandicoot: Recompiled</Product>
     <AssemblyTitle>Crash Bandicoot: Recompiled</AssemblyTitle>
     <Description>Unofficial Crash Bandicoot (PS1 NTSC-U) recompilation launcher — not affiliated with Sony, Activision, or Naughty Dog.</Description>
