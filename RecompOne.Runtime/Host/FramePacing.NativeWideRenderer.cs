@@ -1870,5 +1870,5 @@ public static partial class FramePacing
             span[i] = scratch[order[i]];
     }
 
-    static bool NativeWideLevelSupported(uint level) => level is not (25 or 45 or 56 or 57);
+    static bool NativeWideLevelSupported(uint level) => level is not (25 or 45 or 57);
 }

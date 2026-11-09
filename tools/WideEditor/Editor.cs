@@ -120,8 +120,10 @@ sealed partial class Editor : IDisposable
         foreach (var e in doc.RootElement.GetProperty("levels").EnumerateArray())
         {
             string kind = e.GetProperty("kind").GetString() ?? "";
-            if (kind is not ("gameplay" or "bonus")) continue;
-            _levels.Add((e.GetProperty("id").GetInt32(), e.GetProperty("name").GetString() ?? "", kind));
+            int id = e.GetProperty("id").GetInt32();
+            // The intro (56) is drawn in 16:9 too (#189); its camera walks the zone paths.
+            if (kind is not ("gameplay" or "bonus") && id != 56) continue;
+            _levels.Add((id, e.GetProperty("name").GetString() ?? "", kind));
         }
     }
 

@@ -311,6 +311,7 @@ public sealed partial class Gpu
         if (!_hleLoadActive) return;
         int n = _loadW * _loadH;
         var pixels = _hleLoad;
+        Host.IntroVersionSign.Patch(_loadW, _loadH, pixels, n);
         Events.VramTransfers.NotifyLoad(_loadX, _loadY, _loadW, _loadH, pixels, n);
 
         var span = pixels.AsSpan(0, n);
