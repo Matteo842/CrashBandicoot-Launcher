@@ -57,9 +57,11 @@ AppPaths.SetRoot(Path.Combine(output, "state")); Directory.CreateDirectory(AppPa
 Directory.SetCurrentDirectory(AppPaths.Root); ConfigManager.Load();
 ConfigManager.Game.CdPath = disc; ConfigManager.Game.Muted = true;
 // WIDE=0 runs the original 4:3 view (retail comparison frames).
-ConfigManager.View.Widescreen = Environment.GetEnvironmentVariable("WIDE") != "0"; ConfigManager.View.InternalResolution = 2;
+ConfigManager.View.Widescreen = Environment.GetEnvironmentVariable("WIDE") != "0"; ConfigManager.View.InternalResolution = int.TryParse(Environment.GetEnvironmentVariable("RES"), out int res) ? res : 2;
 ConfigManager.View.Fullscreen = false; ConfigManager.View.FrameRate = fps;
 ConfigManager.View.HideTopBar = true;
+// Frames are read back from the OpenGL backend (Windows Auto now starts on Vulkan).
+ConfigManager.View.GraphicsApi = ViewConfig.GraphicsApiOpenGl;
 CheatConfig.GodMode = false; CheatConfig.Fly = false;
 // PACELOG=1 writes state/logs/pacing.txt (unlock arm, land-lock gates).
 if (Environment.GetEnvironmentVariable("PACELOG") == "1") ConfigManager.View.SetBool("Diagnostics.FramePacing", true);
@@ -267,11 +269,18 @@ using var noSky = Environment.GetEnvironmentVariable("NOSKY") == "1"
         typeof(NoFix).GetMethod(nameof(NoFix.NoArc))!)
     : null;
 
+// TRILOG=<render> writes every triangle the backend gets during that render to tris<render>.txt.
+int triLogRender = int.TryParse(Environment.GetEnvironmentVariable("TRILOG"), out int tlr) ? tlr : -1;
+using var triHook = triLogRender >= 0
+    ? new Hook(typeof(GlBackend).GetMethod(nameof(GlBackend.DrawTri))!, (TriLog.Hook)TriLog.Draw)
+    : null;
 using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
     (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((original, c, m) =>
     {
         if (aspect > 0 && GpuHle.WideAspect != aspect) { GpuHle.WideAspect = aspect; GpuHle.RefreshWideFov(); }
+        if (renders + 1 == triLogRender) TriLog.Start(Path.Combine(output, $"tris{renders + 1:D5}.txt"));
         original(c, m); renders++;
+        TriLog.Stop();
         if (stateFile != null && !stateRequested && frames >= stateAt) { SaveStates.RequestLoad(1); stateRequested = true; }
         if (path != null && frames >= int.Parse(path[1]))
         {
@@ -354,4 +363,20 @@ static class NoFix
     public static IReadOnlyList<T> Empty<T>(Func<IMemory, object, IReadOnlyList<T>> original, IMemory m, object world) => [];
     public static T? None<T>(Func<uint, T> original, uint level) => default;
     public static bool NoArc(Func<IMemory, object, uint, bool> original, IMemory m, object world, uint level) => false;
+}
+
+static class TriLog
+{
+    public delegate void Orig(GlBackend self, in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f);
+    public delegate void Hook(Orig orig, GlBackend self, in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f);
+    static StreamWriter? _out;
+    static int _n;
+    public static void Start(string file) { _out = new StreamWriter(file); _n = 0; }
+    public static void Stop() { _out?.Dispose(); _out = null; }
+    public static void Draw(Orig orig, GlBackend self, in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
+    {
+        _out?.WriteLine($"{_n++} {f.WideMode} ot={GpuHle.CurrentOtSlot} tex={f.Textured} semi={f.SemiTrans} tp={f.TPage:X} clut={f.Clut:X} "
+            + $"{a.X:F1},{a.Y:F1},{a.Z:F0} {b.X:F1},{b.Y:F1},{b.Z:F0} {c.X:F1},{c.Y:F1},{c.Z:F0} uv {a.U},{a.V} {b.U},{b.V} {c.U},{c.V}");
+        orig(self, a, b, c, f);
+    }
 }

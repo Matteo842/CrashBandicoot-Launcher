@@ -247,6 +247,10 @@ public static partial class FramePacing
         _nativeWideCorePending.Clear();
     }
 
+    // Semi-transparent with an additive blend (B+F or B+F/4): light, never a solid surface.
+    static bool NativeWideAdditiveGlow(in PrimFlags flags) =>
+        flags.SemiTrans && flags.BlendMode is 1 or 3;
+
     static void ClearNativeWideUserCore()
     {
         _nativeWideUserCore.Clear();
@@ -703,7 +707,7 @@ public static partial class FramePacing
             if (t.Flags.WideMode == WidePrimitiveMode.WorldSides)
                 _nativeWidePending.Add(t);
         foreach (ref readonly var t in transparent)
-            if (t.Flags.WideMode == WidePrimitiveMode.WorldSides)
+            if (t.Flags.WideMode == WidePrimitiveMode.WorldSides && !NativeWideAdditiveGlow(t.Flags))
                 _nativeWidePending.Add(t);
         // Wide Editor triangles last, over the scenery they were drawn on.
         foreach (ref readonly var t in opaque)
@@ -712,6 +716,13 @@ public static partial class FramePacing
         foreach (ref readonly var t in transparent)
             if (t.Flags.WideMode == WidePrimitiveMode.WorldUserSides)
                 _nativeWidePending.Add(t);
+        // Additive glows (steam puffs, light): depth-tested but no depth written, after
+        // everything they can lie in front of. Written depth made the whole triangle,
+        // faint texels included, hide objects behind it in the bands: the Heavy Machinery
+        // crate beside the pipe steam lost its left face (#172 follow-up).
+        foreach (ref readonly var t in transparent)
+            if (t.Flags.WideMode == WidePrimitiveMode.WorldSides && NativeWideAdditiveGlow(t.Flags))
+                _nativeWidePending.Add(t with { Flags = t.Flags with { WideMode = WidePrimitiveMode.DepthTest } });
         NativeWideSortFarFirst(_nativeWideCoreTransparent);
         _nativeWideCorePending.AddRange(_nativeWideCoreOpaque);
         _nativeWideCorePending.AddRange(_nativeWideCoreTransparent);
