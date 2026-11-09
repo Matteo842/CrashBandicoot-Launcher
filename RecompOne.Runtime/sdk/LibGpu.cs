@@ -28,7 +28,12 @@ public static class LibGpu
                 uint header = m.ReadU32(addr);
                 uint count = header >> 24;
                 if (addr - otBase < 0x2000u)
-                    GpuHle.CurrentOtSlot = (int)((addr - otBase) >> 2);
+                {
+                    int slot = (int)((addr - otBase) >> 2);
+                    // Wide Editor triangles of the farther slots, after their scenery.
+                    Host.FramePacing.DrawNativeWideUserCore(slot);
+                    GpuHle.CurrentOtSlot = slot;
+                }
                 if (Host.FramePacing.IsNativeWideWorldPrimitive(addr))
                 {
                     // Neighbour scenery in the 4:3 core goes after the background
@@ -54,6 +59,7 @@ public static class LibGpu
                 if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
                 addr = next & 0x1FFFFCu;
             }
+            Host.FramePacing.DrawNativeWideUserCore(int.MaxValue);
         }
         finally
         {

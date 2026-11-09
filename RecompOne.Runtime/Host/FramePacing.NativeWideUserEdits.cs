@@ -26,6 +26,8 @@ public static partial class FramePacing
     static DateTime _nativeWideUserStamp;
     static long _nativeWideUserNextCheck;
     static int _nativeWideUserVersion;
+    // Any triangle of this level marked for the 4:3 core (NativeWideAddUserCore).
+    static bool _nativeWideUserAnyCore;
     static readonly Dictionary<(NativeWideSceneryKey, bool), (int Version, IReadOnlyList<NativeWideRepair> Source,
         IReadOnlyList<NativeWideRepair> Result)> _nativeWideUserRepairs = [];
     static readonly Dictionary<NativeWideSceneryKey, (int Version, int[]? Source, int[]? Result)> _nativeWideUserHidden = [];
@@ -71,6 +73,7 @@ public static partial class FramePacing
             }
         }
         _nativeWideUserEdits = edits;
+        _nativeWideUserAnyCore = edits.Values.Any(e => e.Triangles.Any(t => t.Core));
         _nativeWideUserVersion++;
         if (edits.Count > 0)
             PaceLog($"native-wide user edits level={level} meshes={edits.Count} "
@@ -98,7 +101,8 @@ public static partial class FramePacing
                     bool behind = t.TryGetProperty("behind", out var b) && b.GetBoolean();
                     user.Triangles.Add(new(t.GetProperty("poly").GetInt32(), Corner(0), Corner(1), Corner(2),
                         Boundary: !behind, Culled: t.TryGetProperty("culled", out var c) && c.GetBoolean(),
-                        Rank: t.TryGetProperty("rank", out var r) ? r.GetSingle() : 0, Behind: behind, User: true));
+                        Rank: t.TryGetProperty("rank", out var r) ? r.GetSingle() : 0, Behind: behind, User: true,
+                        Core: t.TryGetProperty("core", out var k) && k.GetBoolean()));
                 }
             if (mesh.TryGetProperty("hidden", out var hidden))
                 foreach (var h in hidden.EnumerateArray()) user.Hidden.Add(h.GetInt32());

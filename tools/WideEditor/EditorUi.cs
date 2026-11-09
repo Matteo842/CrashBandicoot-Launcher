@@ -122,6 +122,7 @@ sealed partial class Editor
         RightPanel(io);
         StatusBar(io);
         LeavePopup();
+        CorePopup();
         HelpWindow();
         ContextMenu();
     }
@@ -826,7 +827,22 @@ sealed partial class Editor
 
         ImGui.SeparatorText("Profondità");
         bool behind = _doc.Tris[user[0]].Behind;
-        if (ImGui.RadioButton("Vera profondità", !behind)) { PushUndo(); foreach (int i in user) _doc.Tris[i].Behind = false; Changed(); }
+        if (ImGui.RadioButton("Vera profondità", !behind))
+        {
+            // The triangles themselves, not their indices: keys still reach the
+            // view while the warning is open (Delete would shift the indices).
+            var list = user.Select(i => _doc.Tris[i]).ToList();
+            void Apply()
+            {
+                PushUndo();
+                foreach (var t in list.Where(_doc.Tris.Contains)) t.Behind = false;
+                Changed();
+            }
+            // Core triangles behind the scene only fill voids; with true depth they can cover the original.
+            int core = list.Count(t => t.Core && t.Behind);
+            if (core > 0) AskCore(core, Apply, "Passano a \"Vera profondità\": nel centro 4:3 da adesso possono coprire la scena originale.");
+            else Apply();
+        }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Davanti o dietro come un oggetto vero della scena.");
         if (ImGui.RadioButton("Dietro la scena (tappa solo i buchi)", behind)) { PushUndo(); foreach (int i in user) _doc.Tris[i].Behind = true; Changed(); }
         if (behind)
@@ -848,11 +864,149 @@ sealed partial class Editor
             foreach (int i in user) _doc.Tris[i].Culled = culled;
             Changed();
         }
+
+        CoreSection(user);
+    }
+
+    // ---- Also in the 4:3 core ----
+
+    (int Count, Action Apply, string Note)? _coreAsk;
+    bool _coreAskOpen;
+
+    void CoreSection(List<int> user)
+    {
+        ImGui.SeparatorText("Centro 4:3");
+        var sky = user.Where(i => L!.MeshByName.TryGetValue(_doc.Tris[i].Mesh, out var m) && m.Backdrop).ToList();
+        var ground = user.Except(sky).ToList();
+        int core = ground.Count(i => _doc.Tris[i].Core);
+        if (ground.Count == 0)
+        {
+            ImGui.TextDisabled("Il cielo resta solo nelle bande.");
+            return;
+        }
+        ImGui.PushStyleColor(ImGuiCol.Text, core > 0 ? new Vector4(1, 0.6f, 0.2f, 1) : new Vector4(0.7f, 0.7f, 0.7f, 1));
+        ImGui.Text(core == 0 ? "Solo nelle bande 16:9 (come sempre)."
+            : core == ground.Count ? $"Anche al centro 4:3: tutti ({core})." : $"Anche al centro 4:3: {core} di {ground.Count}.");
+        ImGui.PopStyleColor();
+        if (core < ground.Count)
+        {
+            if (ImGui.Button("Mostra anche al centro 4:3..."))
+            {
+                // The triangles themselves, not their indices (see "Vera profondità").
+                var list = ground.Select(i => _doc.Tris[i]).Where(t => !t.Core).ToList();
+                AskCore(list.Count, () =>
+                {
+                    PushUndo();
+                    foreach (var t in list.Where(_doc.Tris.Contains)) t.Core = true;
+                    Changed();
+                }, null);
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Il gioco li disegna anche nella parte centrale originale (solo in 16:9).\nPrima ti chiede conferma.");
+        }
+        if (core > 0)
+        {
+            if (core < ground.Count) ImGui.SameLine();
+            if (ImGui.Button("Solo nelle bande"))
+            {
+                PushUndo();
+                foreach (int i in ground) _doc.Tris[i].Core = false;
+                Changed();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Toglie questi triangoli dal centro 4:3: restano solo nelle bande.");
+            ImGui.TextDisabled(_doc.Tris[ground.First(i => _doc.Tris[i].Core)].Behind
+                ? "Dietro la scena: al centro riempiono solo dove il gioco\nnon disegna niente."
+                : "Vera profondità: al centro il gioco li mette in ordine di\ndistanza tra i suoi poligoni, come se fossero suoi.");
+        }
+    }
+
+    void AskCore(int count, Action apply, string? note)
+    {
+        _coreAsk = (count, apply, note ?? "");
+        _coreAskOpen = true;
+    }
+
+    void CorePopup()
+    {
+        const string title = "Mostrare nel centro 4:3?";
+        if (_coreAskOpen)
+        {
+            ImGui.OpenPopup(title);
+            _coreAskOpen = false;
+        }
+        bool open = true;
+        if (!ImGui.BeginPopupModal(title, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!ImGui.IsPopupOpen(title)) _coreAsk = null;
+            return;
+        }
+        if (_coreAsk is not { } ask)
+        {
+            ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+            return;
+        }
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.6f, 0.2f, 1));
+        ImGui.Text($"Attenzione: {ask.Count} triangol{(ask.Count == 1 ? "o" : "i")} anche nella parte centrale 4:3.");
+        ImGui.PopStyleColor();
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 34);
+        if (ask.Note.Length > 0) ImGui.Text(ask.Note);
+        ImGui.Spacing();
+        Point("Il centro è l'immagine originale del gioco: quello che metti lì lo vede chiunque giochi in 16:9.");
+        Point("Vera profondità: il gioco non ha profondità al centro, li ordina per distanza MEDIA come i suoi poligoni. "
+            + "Un triangolo grande o molto inclinato può finire davanti a pareti più vicine, a Crash o alle casse: "
+            + "meglio tanti triangoli piccoli.");
+        Point("Dietro la scena: riempiono solo dove il gioco non disegna niente (buchi neri/vuoti). È la scelta più sicura.");
+        Point("Qui nell'editor il centro usa la profondità vera: nel gioco l'ordine può essere un po' diverso. "
+            + "Controlla in gioco da tutte le angolazioni, con Crash vicino.");
+        Point("In 4:3 non cambia niente. Nell'editor sono arancioni.");
+        ImGui.PopTextWrapPos();
+        ImGui.Spacing();
+        if (ImGui.Button("Sì, mostrali anche al centro"))
+        {
+            ask.Apply();
+            _coreAsk = null;
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Annulla"))
+        {
+            _coreAsk = null;
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
+
+        // Bullet with the text wrapped at the pushed width (BulletText does not wrap).
+        static void Point(string text)
+        {
+            ImGui.Bullet();
+            ImGui.Text(text);
+        }
     }
 
     void HiddenSection()
     {
         if (L == null) return;
+        int core = _doc.Tris.Count(t => t.Core);
+        ImGui.Text($"Tuoi anche al centro 4:3: {core}");
+        if (core > 0)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Seleziona##core"))
+            {
+                _sel.Clear();
+                for (int i = 0; i < _doc.Tris.Count; i++)
+                    if (_doc.Tris[i].Core) _sel.Add(Key(Kind.User, i));
+                FrameSelection();
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Togli tutti dal centro"))
+            {
+                PushUndo();
+                foreach (var t in _doc.Tris) t.Core = false;
+                Changed();
+            }
+        }
         ImGui.Text($"Originali eliminati ovunque: {_doc.Removed.Count}");
         if (_doc.Removed.Count > 0 && ImGui.SmallButton("Ripristina tutti gli originali eliminati"))
         {

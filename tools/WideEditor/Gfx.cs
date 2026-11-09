@@ -18,10 +18,12 @@ struct GpuVertex
 
 static class Bits
 {
-    public const uint Textured = 1u << 8, Semi = 1u << 9, Backdrop = 1u << 16, Hidden = 1u << 19, Behind = 1u << 20;
+    public const uint Textured = 1u << 8, Semi = 1u << 9, Backdrop = 1u << 16, Hidden = 1u << 19, Behind = 1u << 20,
+        Core = 1u << 21;
     public const int KindShift = 17;
 
-    public static (uint Info, uint Clut) Of(Material m, int kind, bool hidden, bool behind, float rank, bool backdrop)
+    public static (uint Info, uint Clut) Of(Material m, int kind, bool hidden, bool behind, float rank, bool backdrop,
+        bool core = false)
     {
         uint info = (uint)Math.Max(m.Layer, 0) & 255;
         if (m.Textured && m.Layer >= 0) info |= Textured;
@@ -33,6 +35,7 @@ static class Bits
         info |= (uint)(kind & 3) << KindShift;
         if (hidden) info |= Hidden;
         if (behind) info |= Behind;
+        if (core) info |= Core;
         uint clut = (uint)(m.ClutX & 15) | ((uint)(m.ClutY & 127) << 8)
             | ((uint)Math.Clamp((int)MathF.Round(rank), 0, 255) << 16);
         return (info, clut);
@@ -188,7 +191,9 @@ sealed class Gfx : IDisposable
             if (uPass == 1 && (!semiPx || abr != uAbr)) discard;
             uint kind = (info >> 17) & 3u;
             if ((uTint & 1) != 0 && kind == 1u) c = mix(c, vec3(0.1, 0.85, 1.0), 0.35);
-            if ((uTint & 2) != 0 && kind == 2u) c = mix(c, vec3(0.25, 1.0, 0.25), 0.3);
+            // The user's triangles: green, orange when the game also draws them in the 4:3 core.
+            if ((uTint & 2) != 0 && kind == 2u)
+                c = (info & 2097152u) != 0u ? mix(c, vec3(1.0, 0.5, 0.05), 0.4) : mix(c, vec3(0.25, 1.0, 0.25), 0.3);
             if ((uTint & 4) != 0 && hidden) c = mix(c, vec3(1.0, 0.0, 0.0), 0.6);
             if (uWire != 0) c = vec3(0.0, 0.0, 0.0);
             // Editor-only view of the user's triangles in the 4:3 core (the game

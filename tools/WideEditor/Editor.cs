@@ -51,6 +51,9 @@ sealed partial class Editor : IDisposable
     int[] _meshBase = [];
     int _retailCount;
     readonly Dictionary<Mesh, (int Start, int Count)> _retailRange = [], _autoRange = [], _userRange = [];
+    // Parts of _userRange: triangles only in the bands, then those also in the 4:3 core
+    // with true depth, then those also in the core behind the scene.
+    readonly Dictionary<Mesh, (int Start, int Count)> _userBandRange = [], _userCoreRange = [], _userCoreFillRange = [];
     bool _retailDirty, _autoDirty, _userDirty;
 
     // View.
@@ -386,24 +389,41 @@ sealed partial class Editor : IDisposable
             _userDirty = false;
             var list = new List<GpuVertex>(_doc.Tris.Count * 3);
             _userRange.Clear();
+            _userBandRange.Clear();
+            _userCoreRange.Clear();
+            _userCoreFillRange.Clear();
             foreach (var group in Enumerable.Range(0, _doc.Tris.Count).GroupBy(i => _doc.Tris[i].Mesh))
             {
                 if (!L.MeshByName.TryGetValue(group.Key, out var m)) continue;
                 int start = list.Count;
-                foreach (int i in group)
+                // 0 = bands only, 1 = core with true depth, 2 = core behind the scene
+                // (the game keeps sky triangles in the bands).
+                int Part(UserTri t) => !t.Core || m.Backdrop ? 0 : t.Behind ? 2 : 1;
+                var ordered = group.OrderBy(i => Part(_doc.Tris[i])).ToList();
+                var bounds = new int[4];
+                for (int part = 0, k = 0; part < 3; part++)
                 {
-                    var t = _doc.Tris[i];
-                    var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
-                    var (info, clut) = Bits.Of(mat, (int)Kind.User, false, t.Behind, t.Rank, m.Backdrop);
-                    uint id = PickId(Kind.User, i);
-                    foreach (var v in t.V)
-                        list.Add(new GpuVertex
-                        {
-                            Pos = m.Backdrop ? v.Pos - m.Trans : v.Pos, Uv = v.Uv, Rgb = v.Rgb,
-                            Info = info, Clut = clut, Id = id,
-                        });
+                    bounds[part] = list.Count;
+                    for (; k < ordered.Count && Part(_doc.Tris[ordered[k]]) == part; k++)
+                    {
+                        int i = ordered[k];
+                        var t = _doc.Tris[i];
+                        var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
+                        var (info, clut) = Bits.Of(mat, (int)Kind.User, false, t.Behind, t.Rank, m.Backdrop, part > 0);
+                        uint id = PickId(Kind.User, i);
+                        foreach (var v in t.V)
+                            list.Add(new GpuVertex
+                            {
+                                Pos = m.Backdrop ? v.Pos - m.Trans : v.Pos, Uv = v.Uv, Rgb = v.Rgb,
+                                Info = info, Clut = clut, Id = id,
+                            });
+                    }
                 }
+                bounds[3] = list.Count;
                 _userRange[m] = (start, list.Count - start);
+                _userBandRange[m] = (bounds[0], bounds[1] - bounds[0]);
+                _userCoreRange[m] = (bounds[1], bounds[2] - bounds[1]);
+                _userCoreFillRange[m] = (bounds[2], bounds[3] - bounds[2]);
             }
             _userBuf!.Upload(list);
         }
@@ -431,11 +451,33 @@ sealed partial class Editor : IDisposable
             if (m.Backdrop == backdrops && _retailRange.TryGetValue(m, out var r)) _retailBuf!.Draw(r.Start, r.Count);
     }
 
-    void DrawUserOnly()
+    // The user's triangles the game draws only in the bands (ghosted in the core).
+    void DrawUserBandOnly()
     {
         foreach (var m in _drawMeshes)
-            if (_userRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
+            if (_userBandRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
     }
+
+    // Core triangles the game paints in its own order, among the original scenery:
+    // those with true depth of a mesh the 4:3 view draws itself.
+    void DrawUserCore()
+    {
+        foreach (var m in _drawMeshes)
+            if (OwnMesh(m) && _userCoreRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
+    }
+
+    // Core triangles under the whole original image (they show only where it leaves a
+    // void): "behind the scene" ones, and all of a neighbour zone's mesh.
+    void DrawUserCoreFill()
+    {
+        foreach (var m in _drawMeshes)
+        {
+            if (_userCoreFillRange.TryGetValue(m, out var f)) _userBuf!.Draw(f.Start, f.Count);
+            if (!OwnMesh(m) && _userCoreRange.TryGetValue(m, out var u)) _userBuf!.Draw(u.Start, u.Count);
+        }
+    }
+
+    bool AnyUserCore => _doc.Tris.Any(t => t.Core);
 
     /// <summary>Repairs and user triangles; those of backdrops (sky extensions) only
     /// with <paramref name="backdrops"/>, since the game draws them under everything.</summary>
@@ -500,11 +542,21 @@ sealed partial class Editor : IDisposable
             int coreW = (int)MathF.Round(w * Camera.CoreFraction), coreX = (w - coreW) / 2;
             _gfx.Scissor(coreX, 0, coreW, h);
             _gfx.State(tint, false, -1);
+            bool userCore = _showUser && AnyUserCore;
+            if (userCore)
+            {
+                // Like the game's core fill: drawn first, the original scene paints over it.
+                Passes(DrawUserCoreFill);
+                _gfx.ClearDepth();
+            }
             Passes(() => DrawRetail(false));
+            // The game sorts these by distance among its own polygons; true depth here
+            // is the editor's approximation of that order.
+            if (userCore) Passes(DrawUserCore);
             if (_ghostCore && _showUser)
             {
                 _gfx.Ghost(true);
-                Passes(DrawUserOnly);
+                Passes(DrawUserBandOnly);
                 _gfx.Ghost(false);
             }
             foreach (var (x, bw) in new[] { (0, coreX), (coreX + coreW, w - coreX - coreW) })

@@ -31,6 +31,12 @@ public static partial class FramePacing
     static readonly List<NativeWideTriangle> _nativeWideCorePending = new(512);
     static readonly List<NativeWideTriangle> _nativeWideCoreOpaque = new(512);
     static readonly List<NativeWideTriangle> _nativeWideCoreTransparent = new(64);
+    // Wide Editor triangles marked "also in the 4:3 core", by ordering-table slot:
+    // LibGpu.DrawOTag draws each after the retail primitives of its slot.
+    readonly record struct NativeWideUserCoreTriangle(int Slot, NativeWideTriangle Triangle);
+    static readonly List<NativeWideUserCoreTriangle> _nativeWideUserCore = new(64);
+    static readonly List<NativeWideTriangle> _nativeWideUserCoreScratch = new(8);
+    static int _nativeWideUserCoreNext;
     static readonly short[] _nativeWideMatrix = new short[9];
     // Eight meshes of the current zone plus resident meshes of its neighbours.
     const int NativeWideMaxWorlds = 16;
@@ -111,6 +117,7 @@ public static partial class FramePacing
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
         _nativeWideCorePending.Clear();
+        ClearNativeWideUserCore();
         _nativeWideFogBackground = null;
         _nativeWideSkyFill = null;
         _nativeWideView = null;
@@ -160,6 +167,7 @@ public static partial class FramePacing
             {
                 _nativeWidePending.Clear();
                 _nativeWideCorePending.Clear();
+                ClearNativeWideUserCore();
                 GpuHle.NativeWideRendererActive = false;
             }
         }
@@ -167,6 +175,7 @@ public static partial class FramePacing
         {
             _nativeWidePending.Clear();
             _nativeWideCorePending.Clear();
+            ClearNativeWideUserCore();
             GpuHle.NativeWideRendererActive = false;
             if (_nativeWideLogCount < 8)
             {
@@ -236,6 +245,49 @@ public static partial class FramePacing
         _nativeWideCorePending.Clear();
     }
 
+    static void ClearNativeWideUserCore()
+    {
+        _nativeWideUserCore.Clear();
+        _nativeWideUserCoreNext = 0;
+    }
+
+    /// <summary>
+    /// Wide Editor triangles the user marked for the 4:3 core (16:9 only). The core has
+    /// no depth: the game paints its ordering table from the farthest slot to the
+    /// nearest. Each triangle was filed under the slot the game gives a world polygon
+    /// at its distance, so it is painted as if it were one: after the farther
+    /// scenery, before nearer scenery, Crash and objects. Called on every slot word of
+    /// the walk with that slot, and with int.MaxValue at its end.
+    /// </summary>
+    public static void DrawNativeWideUserCore(int slot)
+    {
+        if (_nativeWideUserCoreNext >= _nativeWideUserCore.Count
+            || _nativeWideUserCore[_nativeWideUserCoreNext].Slot >= slot) return;
+        // Neighbour fills (and the user's own core fills) stay under them.
+        DrawNativeWideCore();
+        var gpu = Runtime.Gpu;
+        var backend = GpuHle.Backend;
+        bool draw = GpuHle.WideFovActive && gpu != null && backend is { Ready: true };
+        float dx = 0, dy = 0;
+        if (draw)
+        {
+            backend!.SetDrawEnv(gpu!.CurrentHleDrawEnv);
+            dx = gpu.DrawOffsetX - _nativeWideDrawX;
+            dy = gpu.DrawOffsetY - _nativeWideDrawY;
+        }
+        var list = CollectionsMarshal.AsSpan(_nativeWideUserCore);
+        while (_nativeWideUserCoreNext < list.Length && list[_nativeWideUserCoreNext].Slot < slot)
+        {
+            var triangle = list[_nativeWideUserCoreNext++].Triangle;
+            if (!draw) continue;
+            var a = triangle.A; var b = triangle.B; var c = triangle.C;
+            a.X += dx; a.Y += dy;
+            b.X += dx; b.Y += dy;
+            c.X += dx; c.Y += dy;
+            backend!.DrawTri(a, b, c, triangle.Flags);
+        }
+    }
+
     static void CaptureNativeWideWorldStart(IMemory m)
     {
         _nativeWideRangeOpen = false;
@@ -286,6 +338,7 @@ public static partial class FramePacing
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
         _nativeWideCorePending.Clear();
+        ClearNativeWideUserCore();
         _nativeWideView = null;
         ClearNativeWideHudRanges();
         ClearNativeWideCoreDepth();
@@ -495,6 +548,9 @@ public static partial class FramePacing
                 ? Array.Empty<NativeWideRepair>() : NativeWideSceneRepairs(m, world));
             // After the repairs: they are worked out from the authored polygons.
             NativeWideApplyRemoved(m, world);
+            if (_nativeWideUserAnyCore && world.Only == null)
+                NativeWideAddUserCore(m, world, repairs, tie, matrix, drawCount, projection, screenX, screenY,
+                    gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
             foreach (var chunk in NativeWideRepairChunksOf(repairs))
             {
                 if (!NativeWideBoxTouchesSides(chunk.Min, chunk.Max, world, matrix, near, projection, screenX, screenY,
@@ -595,6 +651,10 @@ public static partial class FramePacing
             }
         }
 
+        // Far first within a slot, as the farther triangle would be filed first.
+        _nativeWideUserCore.Sort(static (p, q) => p.Slot != q.Slot ? p.Slot.CompareTo(q.Slot)
+            : q.Triangle.Depth.CompareTo(p.Triangle.Depth));
+        _nativeWideUserCoreNext = 0;
         if (NativeWideCanopyOf(m.ReadU32(Catalog.LevelIdAddr)) is { } canopy)
             AddNativeWideCanopy(m, canopy, worldCount, matrix, projection, screenX, screenY,
                 gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
@@ -1318,6 +1378,94 @@ public static partial class FramePacing
             corners[i] = new((i & 1) != 0 ? max.X : min.X, (i & 2) != 0 ? max.Y : min.Y, (i & 4) != 0 ? max.Z : min.Z);
         return NativeWidePointsTouchSides(corners, world, matrix, near, projection, screenX, screenY, drawX, drawY,
             viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
+    }
+
+    /// <summary>
+    /// The 4:3 core part of the Wide Editor triangles marked for it. True-depth ones of
+    /// a mesh the game itself draws in the core go to the ordering-table walk, at the
+    /// slot RGteTransformWorlds would give them (0x800 - proj/2 - (sz0+sz1+sz2)/32).
+    /// "Behind the scene" ones, and those of neighbour meshes (which the core shows only
+    /// through the neighbour fill), join the core fill instead: under the whole retail
+    /// image, they show only where it leaves a void. Sky triangles stay in the bands.
+    /// The core part is clipped at the same 4:3 edge as the side part, from the same
+    /// projection, so the two halves meet without a seam.
+    /// </summary>
+    static void NativeWideAddUserCore(IMemory m, NativeWideWorld world, IReadOnlyList<NativeWideRepair> repairs,
+        int tie, short[] matrix, uint drawCount, int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float wideHalf, float halfHeight)
+    {
+        float near = projection * 0.5f + 1f;
+        Span<NativeWideClipVertex> corners = stackalloc NativeWideClipVertex[3];
+        var scratch = _nativeWideUserCoreScratch;
+        for (int ri = 0; ri < repairs.Count; ri++)
+        {
+            var repair = repairs[ri];
+            if (!repair.User || !repair.Core) continue;
+            if (!NativeWideRepairTouchesCore(repair, world, matrix, near, projection, screenX, screenY,
+                    drawX, drawY, viewCenterX, viewCenterY, coreHalf, halfHeight))
+                continue;
+            if (!TryNativeWideMaterial(m, world, repair.Polygon, drawCount, out PrimFlags flags,
+                    out _, out _, out _, out _, out _, out _, out _))
+                continue;
+            if (flags.WideMode == WidePrimitiveMode.BackdropSides) continue;
+            corners[0] = NativeWideRepairToCamera(m, repair.A, world, matrix);
+            corners[1] = NativeWideRepairToCamera(m, repair.B, world, matrix);
+            corners[2] = NativeWideRepairToCamera(m, repair.C, world, matrix);
+            flags.WideMode = WidePrimitiveMode.WorldCore;
+            if (repair.Behind || world.Neighbor)
+            {
+                int opaqueStart = _nativeWideCoreOpaque.Count, transparentStart = _nativeWideCoreTransparent.Count;
+                AddNativeWideClippedTriangle(corners, projection, screenX, screenY, drawX, drawY,
+                    viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight, flags, !repair.Culled,
+                    _nativeWideCoreOpaque, _nativeWideCoreTransparent);
+                if (repair.Behind)
+                {
+                    float back = NativeWideRankBack(repair, tie);
+                    NativeWideBehindScenery(_nativeWideCoreOpaque, opaqueStart, back);
+                    NativeWideBehindScenery(_nativeWideCoreTransparent, transparentStart, back);
+                }
+                continue;
+            }
+            scratch.Clear();
+            AddNativeWideClippedTriangle(corners, projection, screenX, screenY, drawX, drawY,
+                viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight, flags, !repair.Culled, scratch, scratch);
+            if (scratch.Count == 0) continue;
+            int sum = (int)Math.Max(corners[0].Z, near) + (int)Math.Max(corners[1].Z, near)
+                + (int)Math.Max(corners[2].Z, near);
+            int slot = Math.Clamp(_nativeWideOtFar - (sum >> 5), 0, Math.Max(_nativeWideOtFar, 0));
+            foreach (var t in scratch)
+                _nativeWideUserCore.Add(new(slot, t with { Flags = t.Flags with { WideMode = WidePrimitiveMode.CoreOnly } }));
+        }
+        scratch.Clear();
+    }
+
+    // NativeWideRepairTouchesSides for the 4:3 core.
+    static bool NativeWideRepairTouchesCore(
+        in NativeWideRepair repair, NativeWideWorld world, short[] matrix, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float halfHeight)
+    {
+        Span<Vector3> points = [Position(repair.A), Position(repair.B), Position(repair.C)];
+        float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+        int behind = 0;
+        foreach (var p in points)
+        {
+            float z = MathF.Floor((matrix[6] * p.X + matrix[7] * p.Y + matrix[8] * p.Z) / 4096f) + world.Z;
+            if (z < near)
+            {
+                behind++;
+                continue;
+            }
+            float x = MathF.Floor((matrix[0] * p.X + matrix[1] * p.Y + matrix[2] * p.Z) / 4096f) + world.X;
+            float y = MathF.Floor((matrix[3] * p.X + matrix[4] * p.Y + matrix[5] * p.Z) / 4096f) + world.Y;
+            float sx = NativeWideProjectAxis(x, z, projection, drawX + screenX);
+            float sy = NativeWideProjectAxis(y, z, projection, drawY + screenY);
+            minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx);
+            minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
+        }
+        if (behind > 0) return behind < points.Length;
+        return maxX > viewCenterX - coreHalf && minX < viewCenterX + coreHalf
+            && maxY >= viewCenterY - halfHeight && minY <= viewCenterY + halfHeight;
     }
 
     static bool NativeWideRepairTouchesSides(

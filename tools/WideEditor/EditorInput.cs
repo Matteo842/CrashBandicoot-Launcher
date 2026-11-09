@@ -711,6 +711,8 @@ sealed partial class Editor
             {
                 var c = _doc.Tris[i].Clone();
                 c.Group = group;
+                // Showing a triangle in the 4:3 core always goes through the warning.
+                c.Core = false;
                 return c;
             }
         }

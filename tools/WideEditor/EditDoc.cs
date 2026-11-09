@@ -13,12 +13,15 @@ sealed class UserTri
     public int Poly;
     public EdVertex[] V = new EdVertex[3];
     public bool Behind, Culled;
+    // Also drawn in the 4:3 core (16:9 only). Set only through the warning in the
+    // Selection panel; copies made from a triangle never inherit it.
+    public bool Core;
     public float Rank;
     public int Group;
 
     public UserTri Clone() => new()
     {
-        Mesh = Mesh, Poly = Poly, V = [.. V], Behind = Behind, Culled = Culled, Rank = Rank, Group = Group,
+        Mesh = Mesh, Poly = Poly, V = [.. V], Behind = Behind, Culled = Culled, Core = Core, Rank = Rank, Group = Group,
     };
 
     public Vector3 Center => (V[0].Pos + V[1].Pos + V[2].Pos) / 3;
@@ -90,6 +93,7 @@ sealed class EditDoc
                     w.WriteBoolean("behind", t.Behind);
                     if (t.Rank != 0) w.WriteNumber("rank", t.Rank);
                     if (t.Culled) w.WriteBoolean("culled", true);
+                    if (t.Core) w.WriteBoolean("core", true);
                     w.WriteNumber("group", t.Group);
                     w.WriteStartArray("v");
                     foreach (var v in t.V)
@@ -171,6 +175,7 @@ sealed class EditDoc
                         Poly = t.GetProperty("poly").GetInt32(),
                         Behind = t.TryGetProperty("behind", out var b) && b.GetBoolean(),
                         Culled = t.TryGetProperty("culled", out var c) && c.GetBoolean(),
+                        Core = t.TryGetProperty("core", out var k) && k.GetBoolean(),
                         Rank = t.TryGetProperty("rank", out var r) ? r.GetSingle() : 0,
                         Group = t.TryGetProperty("group", out var g) ? g.GetInt32() : 0,
                     };
