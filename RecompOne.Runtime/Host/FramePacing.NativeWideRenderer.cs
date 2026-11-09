@@ -144,7 +144,8 @@ public static partial class FramePacing
         uint zone = NativeWideGuestPointer(zoneEntry) ? EntryItem(m, zoneEntry, 0) : 0;
         uint level = m.ReadU32(Catalog.LevelIdAddr);
         uint shaderFlags = NativeWideGuestPointer(zone) ? m.ReadU32(zone + 0x2FCu) : 0;
-        bool supported = GpuHle.WideFovActive && NativeWideLevelSupported(level)
+        bool supported = GpuHle.WideFovActive
+            && (NativeWideLevelSupported(level) || IslandMapShowing(m))
             && NativeWideGuestPointer(zone);
         GpuHle.NativeWideRendererActive = supported;
         _nativeWideShader = (shaderFlags & 0x400u) != 0 ? NativeWideShader.Lamp
@@ -409,8 +410,9 @@ public static partial class FramePacing
                 | Math.Clamp(_nativeWideFarColor[2] >> 4, 0, 255) << 16);
         // Pinstripe's skylights have transparent panes: the sky seen through
         // them is the game's background fill, not scenery (#116). The Tawna
-        // rounds' sky strip shows both fills above and below it (#126).
-        if (m.ReadU32(Catalog.LevelIdAddr) is 8 or 36 or 51)
+        // rounds' sky strip shows both fills above and below it (#126). The
+        // island map's sea is the lower fill (#189).
+        if (m.ReadU32(Catalog.LevelIdAddr) is 8 or 36 or 51 or LidTitleMap)
             _nativeWideSkyFill = NativeWideSkyFillOf(m, zone, lower: m.ReadU32(Catalog.LevelIdAddr) != 8);
         if (_nativeWideShader == NativeWideShader.Ripple)
             for (int i = 0; i < 16; i++) _nativeWideRipple[i] = (int)m.ReadU32(0x1F800048u + (uint)i * 4u);
@@ -455,8 +457,9 @@ public static partial class FramePacing
             int texinfoCount = (int)FastU32(m, header + 0x14u);
             int tpageCount = (int)FastU32(m, header + 0x18u);
             if (polyCount is <= 0 or > 4096) return false;
+            // tpageCount 0: an untextured mesh (the island map's 3g_pW, #189).
             if (vertexCount is <= 0 or > 4096 || texinfoCount is <= 0 or > 4096
-                || tpageCount is <= 0 or > 8)
+                || tpageCount is < 0 or > 8)
                 return false;
             totalPolygons += polyCount;
             slot.PolyCount = polyCount;
@@ -823,7 +826,7 @@ public static partial class FramePacing
                 int texinfoCount = (int)FastU32(m, wgeoHeader + 0x14u);
                 int tpageCount = (int)FastU32(m, wgeoHeader + 0x18u);
                 if (polyCount is <= 0 or > 4096 || vertexCount is <= 0 or > 4096
-                    || texinfoCount is <= 0 or > 4096 || tpageCount is <= 0 or > 8)
+                    || texinfoCount is <= 0 or > 4096 || tpageCount is < 0 or > 8)
                     continue;
                 var slot = worlds[count];
                 bool textures = true;
@@ -1686,7 +1689,7 @@ public static partial class FramePacing
         uint p1 = FastU32(m, poly + 4u);
         int tinf = (int)((p0 >> 8) & 0x0FFFu);
         int tpagIndex = (int)((p0 >> 5) & 7u);
-        if ((uint)tinf >= (uint)world.TexinfoCount || (uint)tpagIndex >= (uint)world.TpageCount)
+        if ((uint)tinf >= (uint)world.TexinfoCount)
             return false;
         uint texinfo = world.Texinfos + (uint)tinf * 4u;
         uint colinfo = FastU32(m, texinfo);
@@ -1704,6 +1707,8 @@ public static partial class FramePacing
                 ? WidePrimitiveMode.BackdropSides : WidePrimitiveMode.WorldSides,
         };
         if (!textured) return true;
+        // Untextured meshes may have no pages at all (the map's island 3 shading, 3g_pW).
+        if ((uint)tpagIndex >= (uint)world.TpageCount) return false;
 
         int period = (int)((p1 >> 5) & 7u);
         int mask = (int)((p1 >> 1) & 0x0Fu);

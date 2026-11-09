@@ -56,6 +56,23 @@ public static partial class FramePacing
     }
 
     /// <summary>
+    /// #189: the island map is a 3D scene like a level, so it gets the 16:9 view.
+    /// The title, menus, game over and logos share lid 25 and stay 4:3.
+    /// </summary>
+    public static bool IslandMapShowing(IMemory m)
+    {
+        try
+        {
+            return m.ReadU32(Catalog.LevelIdAddr) == LidTitleMap
+                && TryReadCrash(m, out uint crash) && IsMapTraveler(m, crash);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The map allows pause, and CoreLoop tests <c>pads[0].tapped</c> for Start
     /// every loop; the pause menu reads it every present. A gated IsldC would
     /// run PadUpdate once per 30 Hz step and leave a stale tap for the other

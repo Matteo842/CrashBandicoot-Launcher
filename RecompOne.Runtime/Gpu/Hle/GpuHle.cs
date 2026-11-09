@@ -119,13 +119,16 @@ public static class GpuHle
     /// <summary>Call once per frame (e.g. PutDrawEnv) before GTE draws.</summary>
     public static void RefreshWideFov()
     {
-        bool uiOrCinema = false;
+        bool uiOrCinema = false, islandMap = false;
         var m = Runtime.Mem;
         if (m != null)
+        {
             uiOrCinema = Catalog.Levels.IsUiOrCinema(m.ReadU32(Catalog.LevelIdAddr));
+            islandMap = uiOrCinema && WideAspect > 0f && Host.FramePacing.IslandMapShowing(m);
+        }
 
-        // Gameplay only — menus/map/cinema keep clean 4:3 with black pillars.
-        WideFovActive = WideAspect > 0f && !uiOrCinema;
+        // Gameplay and the island map (#189); menus/title/cinema keep clean 4:3 with black pillars.
+        WideFovActive = WideAspect > 0f && (!uiOrCinema || islandMap);
         if (!WideFovActive)
             NativeWideRendererActive = false;
 

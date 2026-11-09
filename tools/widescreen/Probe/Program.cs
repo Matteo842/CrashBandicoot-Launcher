@@ -63,6 +63,10 @@ ConfigManager.View.HideTopBar = true;
 // Frames are read back from the OpenGL backend (Windows Auto now starts on Vulkan).
 ConfigManager.View.GraphicsApi = ViewConfig.GraphicsApiOpenGl;
 CheatConfig.GodMode = false; CheatConfig.Fly = false;
+// LEVELSELECT=1: every map node open (walk the whole island map, #189).
+CheatConfig.LevelSelect = Environment.GetEnvironmentVariable("LEVELSELECT") == "1";
+uint mapLevel = uint.TryParse(Environment.GetEnvironmentVariable("MAPLEVEL"), out uint ml) ? ml : 0;
+bool mapLevelSet = false;
 // PACELOG=1 writes state/logs/pacing.txt (unlock arm, land-lock gates).
 if (Environment.GetEnvironmentVariable("PACELOG") == "1") ConfigManager.View.SetBool("Diagnostics.FramePacing", true);
 // CAMTRACE=1 writes state/logs/camtrace.txt (one line per CamFollow: progress, LevelUpdate branch, cam_speed).
@@ -278,6 +282,13 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
     (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((original, c, m) =>
     {
         if (aspect > 0 && GpuHle.WideAspect != aspect) { GpuHle.WideAspect = aspect; GpuHle.RefreshWideFov(); }
+        // MAPLEVEL=<slot>: after New Game, the island map opens at that node (written
+        // every frame until IsldC has started, so it wins over the new game's 99).
+        if (mapLevel != 0 && !mapLevelSet)
+        {
+            if (FramePacing.IslandMapShowing(m)) mapLevelSet = true;
+            else { m.WriteU32(0x800618DCu, mapLevel); m.WriteU32(0x8006194Cu, mapLevel); }
+        }
         if (renders + 1 == triLogRender) TriLog.Start(Path.Combine(output, $"tris{renders + 1:D5}.txt"));
         original(c, m); renders++;
         TriLog.Stop();
