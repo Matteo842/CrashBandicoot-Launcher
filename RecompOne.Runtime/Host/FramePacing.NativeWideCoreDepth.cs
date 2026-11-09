@@ -17,6 +17,11 @@ public static partial class FramePacing
     // looked cut off and the cut moved with the walls (#178). Their 4:3 core
     // part is depth-tested instead, against the core fill, which also takes
     // the platform's polygons here.
+    // Heavy Machinery's lift disc (PoPlC, h2_6Z at X 13099) does the same at the
+    // bottom of its path: it rests left of the steam box (x2_6W) and the table
+    // paints its right edge over the box top and the red ring, which stand in
+    // front of it.
+    const uint LidHeavyMachinery = 6u;
     static readonly List<NativeWidePrimRange> _nativeWideCoreDepthRanges = [];
     static uint _nativeWideCoreDepthStart;
     static bool _nativeWideCoreDepthOpen;
@@ -29,12 +34,16 @@ public static partial class FramePacing
         if (!GpuHle.NativeWideRendererActive) return;
         try
         {
-            if (m.ReadU32(Catalog.LevelIdAddr) != LidLostCity) return;
+            uint level = m.ReadU32(Catalog.LevelIdAddr);
+            if (level is not (LidLostCity or LidHeavyMachinery)) return;
             uint obj = c.A2;
             if ((obj & 0xFF000000u) != 0x80000000u) obj = _obj;
-            if ((obj & 0xFF000000u) != 0x80000000u
-                || !TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeRWaO
-                || m.ReadU32(obj + ObjStateOff) is < StateRwaPusherSpawn or > StateRwaPusherLast)
+            if ((obj & 0xFF000000u) != 0x80000000u || !TryReadGoolClass(m, obj, out uint type, out _))
+                return;
+            if (level == LidLostCity
+                ? type != GoolTypeRWaO
+                    || m.ReadU32(obj + ObjStateOff) is < StateRwaPusherSpawn or > StateRwaPusherLast
+                : type != GoolTypePoPl)
                 return;
             if (!TryReadNativeWidePrimsTail(m, out uint tail)) return;
             _nativeWideCoreDepthStart = tail & 0x1FFFFCu;
@@ -89,16 +98,31 @@ public static partial class FramePacing
     static int[]? NativeWideCoreOccluders(IMemory m, NativeWideWorld world)
     {
         uint level = m.ReadU32(Catalog.LevelIdAddr);
-        if (level != LidLostCity) return null;
-        // The climb (d__wW): the first platform with its beams and merlons.
-        if ((world.PolyCount, world.VertexCount, (int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8))
-            != (2679, 2327, 93633, -5998))
-            return null;
+        if (level is not (LidLostCity or LidHeavyMachinery)) return null;
+        Vector3 min, max;
+        switch (level, world.PolyCount, world.VertexCount, (int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 8))
+        {
+            // The climb (d__wW): the first platform with its beams and merlons.
+            case (LidLostCity, 2679, 2327, 93633, -5998):
+                min = new Vector3(91550, -30700, -10);
+                max = new Vector3(93250, -29790, 1600);
+                break;
+            // x2_6W: the steam box beside the lift disc, with its lower ring.
+            case (LidHeavyMachinery, 801, 558, 11104, 0):
+                min = new Vector3(13590, -10420, -10);
+                max = new Vector3(14410, -9830, 810);
+                break;
+            // x1_6W: the red ring on top of that box.
+            case (LidHeavyMachinery, 3000, 2434, 17742, 0):
+                min = new Vector3(13830, -11110, -10);
+                max = new Vector3(14280, -10390, 720);
+                break;
+            default:
+                return null;
+        }
         var key = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),
             m.ReadU32(world.Header + 8), world.PolyCount, world.VertexCount);
         if (_nativeWideCoreOccluders.TryGetValue(key, out var polygons)) return polygons;
-        var min = new Vector3(91550, -30700, -10);
-        var max = new Vector3(93250, -29790, 1600);
         var origin = new Vector3((int)m.ReadU32(world.Header), (int)m.ReadU32(world.Header + 4), (int)m.ReadU32(world.Header + 8));
         var found = new List<int>();
         bool Inside(int vertex)
