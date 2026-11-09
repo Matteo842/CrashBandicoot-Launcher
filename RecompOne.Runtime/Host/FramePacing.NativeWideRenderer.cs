@@ -36,6 +36,8 @@ public static partial class FramePacing
     readonly record struct NativeWideUserCoreTriangle(int Slot, NativeWideTriangle Triangle);
     static readonly List<NativeWideUserCoreTriangle> _nativeWideUserCore = new(64);
     static readonly List<NativeWideTriangle> _nativeWideUserCoreScratch = new(8);
+    // Depth only: the zone's own scenery under those triangles (CoreDepthOnly).
+    static readonly List<NativeWideTriangle> _nativeWideUserCoreDepth = new(512);
     static int _nativeWideUserCoreNext;
     static readonly short[] _nativeWideMatrix = new short[9];
     // Eight meshes of the current zone plus resident meshes of its neighbours.
@@ -248,6 +250,7 @@ public static partial class FramePacing
     static void ClearNativeWideUserCore()
     {
         _nativeWideUserCore.Clear();
+        _nativeWideUserCoreDepth.Clear();
         _nativeWideUserCoreNext = 0;
     }
 
@@ -274,7 +277,18 @@ public static partial class FramePacing
             backend!.SetDrawEnv(gpu!.CurrentHleDrawEnv);
             dx = gpu.DrawOffsetX - _nativeWideDrawX;
             dy = gpu.DrawOffsetY - _nativeWideDrawY;
+            // First call of the frame: the scenery's depth, so a triangle the ordering
+            // table paints over nearer scenery is still hidden behind it.
+            foreach (ref readonly var triangle in CollectionsMarshal.AsSpan(_nativeWideUserCoreDepth))
+            {
+                var a = triangle.A; var b = triangle.B; var c = triangle.C;
+                a.X += dx; a.Y += dy;
+                b.X += dx; b.Y += dy;
+                c.X += dx; c.Y += dy;
+                backend!.DrawTri(a, b, c, triangle.Flags);
+            }
         }
+        _nativeWideUserCoreDepth.Clear();
         var list = CollectionsMarshal.AsSpan(_nativeWideUserCore);
         while (_nativeWideUserCoreNext < list.Length && list[_nativeWideUserCoreNext].Slot < slot)
         {
@@ -651,6 +665,9 @@ public static partial class FramePacing
             }
         }
 
+        if (_nativeWideUserCore.Count > 0)
+            AddNativeWideUserCoreDepth(m, drawWorldCount, drawCount, near, projection, screenX, screenY,
+                gpu.DrawOffsetX, gpu.DrawOffsetY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight);
         // Far first within a slot, as the farther triangle would be filed first.
         _nativeWideUserCore.Sort(static (p, q) => p.Slot != q.Slot ? p.Slot.CompareTo(q.Slot)
             : q.Triangle.Depth.CompareTo(p.Triangle.Depth));
@@ -1434,9 +1451,78 @@ public static partial class FramePacing
                 + (int)Math.Max(corners[2].Z, near);
             int slot = Math.Clamp(_nativeWideOtFar - (sum >> 5), 0, Math.Max(_nativeWideOtFar, 0));
             foreach (var t in scratch)
-                _nativeWideUserCore.Add(new(slot, t with { Flags = t.Flags with { WideMode = WidePrimitiveMode.CoreOnly } }));
+                _nativeWideUserCore.Add(new(slot, t with { Flags = t.Flags with { WideMode = WidePrimitiveMode.CoreUser } }));
         }
         scratch.Clear();
+    }
+
+    /// <summary>
+    /// The ordering table sorts by average depth, so a user triangle just behind a
+    /// platform can land in a nearer slot and be painted over it (#172 spikes on the
+    /// Heavy Machinery platforms). The core has no depth of its own: give it the depth
+    /// (no colour) of the zone's own opaque scenery around this frame's user triangles,
+    /// which then draw depth-tested against it. Neighbour meshes already write depth
+    /// through the core fill. Semi-transparent faces are left out, as before.
+    /// </summary>
+    static void AddNativeWideUserCoreDepth(IMemory m, int drawWorldCount, uint drawCount, float near,
+        int projection, int screenX, int screenY, int drawX, int drawY,
+        float viewCenterX, float viewCenterY, float coreHalf, float wideHalf, float halfHeight)
+    {
+        float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+        foreach (ref readonly var p in CollectionsMarshal.AsSpan(_nativeWideUserCore))
+        {
+            var t = p.Triangle;
+            x0 = Math.Min(x0, Math.Min(t.A.X, Math.Min(t.B.X, t.C.X)));
+            x1 = Math.Max(x1, Math.Max(t.A.X, Math.Max(t.B.X, t.C.X)));
+            y0 = Math.Min(y0, Math.Min(t.A.Y, Math.Min(t.B.Y, t.C.Y)));
+            y1 = Math.Max(y1, Math.Max(t.A.Y, Math.Max(t.B.Y, t.C.Y)));
+        }
+        var worlds = _nativeWideWorldPool;
+        var depth = _nativeWideUserCoreDepth;
+        for (int wi = 0; wi < drawWorldCount; wi++)
+        {
+            var world = worlds[wi];
+            if (world.Neighbor || world.Only != null || world.PolyCount == 0 || world.CameraVertices == null) continue;
+            for (int pi = 0; pi < world.PolyCount; pi++)
+            {
+                uint poly = world.Polygons + (uint)pi * 8u;
+                NativeWidePolygonVertices(FastU32(m, poly), FastU32(m, poly + 4u),
+                    out int indexA, out int indexB, out int indexC);
+                if (!NativeWideTouchesRect(world, indexA, indexB, indexC, near, projection,
+                        drawX + screenX, drawY + screenY, x0, y0, x1, y1))
+                    continue;
+                if (!TryNativeWideMaterial(m, world, pi, drawCount, out PrimFlags flags, out bool noCull,
+                        out short u0, out short v0, out short u1, out short v1, out short u2, out short v2))
+                    continue;
+                if (flags.SemiTrans || flags.WideMode == WidePrimitiveMode.BackdropSides) continue;
+                int start = depth.Count;
+                AddNativeWideClippedPolygon(m, world, indexA, indexB, indexC, u0, v0, u1, v1, u2, v2,
+                    projection, screenX, screenY, drawX, drawY, viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
+                    flags with { WideMode = WidePrimitiveMode.WorldCore }, noCull, depth, depth);
+                for (int i = start; i < depth.Count; i++)
+                    depth[i] = depth[i] with { Flags = depth[i].Flags with { WideMode = WidePrimitiveMode.CoreDepthOnly } };
+            }
+        }
+    }
+
+    // Does the triangle reach the screen rectangle (x0..x1, y0..y1)? Crossing the near plane counts.
+    static bool NativeWideTouchesRect(NativeWideWorld world, int ia, int ib, int ic, float near,
+        int projection, int originX, int originY, float x0, float y0, float x1, float y1)
+    {
+        var verts = world.CameraVertices!;
+        if ((uint)ia >= (uint)verts.Length || (uint)ib >= (uint)verts.Length || (uint)ic >= (uint)verts.Length)
+            return false;
+        var a = verts[ia]; var b = verts[ib]; var c = verts[ic];
+        if (a.Z < near && b.Z < near && c.Z < near) return false;
+        if (a.Z < near || b.Z < near || c.Z < near) return true;
+        float ax = NativeWideProjectAxis(a.X, a.Z, projection, originX);
+        float bx = NativeWideProjectAxis(b.X, b.Z, projection, originX);
+        float cx = NativeWideProjectAxis(c.X, c.Z, projection, originX);
+        if (Math.Max(ax, Math.Max(bx, cx)) < x0 || Math.Min(ax, Math.Min(bx, cx)) > x1) return false;
+        float ay = NativeWideProjectAxis(a.Y, a.Z, projection, originY);
+        float by = NativeWideProjectAxis(b.Y, b.Z, projection, originY);
+        float cy = NativeWideProjectAxis(c.Y, c.Z, projection, originY);
+        return Math.Max(ay, Math.Max(by, cy)) >= y0 && Math.Min(ay, Math.Min(by, cy)) <= y1;
     }
 
     // NativeWideRepairTouchesSides for the 4:3 core.

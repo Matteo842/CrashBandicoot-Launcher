@@ -83,6 +83,8 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
     ShaderModule _primVs, _primFs, _fullVs, _presentFs, _present24Fs;
     readonly Pipeline[] _vramPipes = new Pipeline[3];
     readonly Pipeline[] _rtPipes = new Pipeline[DepthStates * 3];
+    // Depth write, no colour: WidePrimitiveMode.CoreDepthOnly.
+    Pipeline _rtDepthOnlyPipe;
     RenderPass _presentPipesPass;
     Pipeline _presentPipe, _present24Pipe;
     CommandPool _cmdPool;
@@ -458,10 +460,11 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
         for (int depth = 0; depth < DepthStates; depth++)
             for (int blend = 0; blend < 3; blend++)
                 _rtPipes[depth * 3 + blend] = CreatePrimPipeline(_rtPass, depthAttachment: true, depth, blend);
+        _rtDepthOnlyPipe = CreatePrimPipeline(_rtPass, depthAttachment: true, 1, BlendOff, colorWrite: false);
         SavePipelineCache();
     }
 
-    Pipeline CreatePrimPipeline(RenderPass pass, bool depthAttachment, int depthState, int blend)
+    Pipeline CreatePrimPipeline(RenderPass pass, bool depthAttachment, int depthState, int blend, bool colorWrite = true)
     {
         var entry = (byte*)Marshal.StringToHGlobalAnsi("main");
         try
@@ -521,8 +524,9 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
                 SrcAlphaBlendFactor = BlendFactor.One,
                 DstAlphaBlendFactor = BlendFactor.Zero,
                 AlphaBlendOp = BlendOp.Add,
-                ColorWriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit |
-                                 ColorComponentFlags.BBit | ColorComponentFlags.ABit,
+                ColorWriteMask = !colorWrite ? ColorComponentFlags.None
+                    : ColorComponentFlags.RBit | ColorComponentFlags.GBit |
+                      ColorComponentFlags.BBit | ColorComponentFlags.ABit,
             };
 
             return CreatePipeline(pass, _primLayout, stages, &vertexInput,
@@ -981,6 +985,7 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
         if (_vramFb.Handle != 0) _vk.DestroyFramebuffer(_dev, _vramFb, null);
         foreach (var p in _vramPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
         foreach (var p in _rtPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
+        if (_rtDepthOnlyPipe.Handle != 0) _vk.DestroyPipeline(_dev, _rtDepthOnlyPipe, null);
         foreach (var (normal, rgb24) in _presentPipes.Values)
         {
             _vk.DestroyPipeline(_dev, normal, null);

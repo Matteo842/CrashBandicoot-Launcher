@@ -653,7 +653,8 @@ public sealed unsafe partial class VkBackend
         int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
         int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
         if (_kWideMode is WidePrimitiveMode.CoreOnly or WidePrimitiveMode.WorldCore
-                or WidePrimitiveMode.CoreDepthTest && rt.Margin > 0)
+                or WidePrimitiveMode.CoreDepthTest or WidePrimitiveMode.CoreDepthOnly
+                or WidePrimitiveMode.CoreUser && rt.Margin > 0)
         {
             cx0 = rt.Margin;
             cx1 = rt.Margin + rt.W - 1;
@@ -734,13 +735,14 @@ public sealed unsafe partial class VkBackend
         var cb = Cb;
 
         bool extension = _kWideMode == WidePrimitiveMode.WorldExtensionSides;
-        bool user = _kWideMode == WidePrimitiveMode.WorldUserSides;
+        bool user = _kWideMode is WidePrimitiveMode.WorldUserSides or WidePrimitiveMode.CoreUser;
+        bool depthOnly = _kWideMode == WidePrimitiveMode.CoreDepthOnly;
         bool worldPass = _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore;
         bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore
             or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.WorldUserSides or WidePrimitiveMode.DepthTest
-            or WidePrimitiveMode.CoreDepthTest;
-        bool depthWrite = worldPass || extension || user
-            || !_kTransparent && _kWideMode != WidePrimitiveMode.CoreDepthTest;
+            or WidePrimitiveMode.CoreDepthTest or WidePrimitiveMode.CoreDepthOnly or WidePrimitiveMode.CoreUser;
+        bool depthWrite = worldPass || extension || depthOnly || _kWideMode == WidePrimitiveMode.WorldUserSides
+            || !_kTransparent && _kWideMode is not (WidePrimitiveMode.CoreDepthTest or WidePrimitiveMode.CoreUser);
         int depthLess = !depthTest ? 0 : depthWrite ? 1 : 2;
 
         var viewport = new Viewport(0, 0, targetW, targetH, 0f, 1f);
@@ -813,7 +815,9 @@ public sealed unsafe partial class VkBackend
 
     void BindPrim(CommandBuffer cb, VkDisplayRt? rt, int depthState, int blend)
     {
-        var pipeline = rt != null ? _rtPipes[depthState * 3 + blend] : _vramPipes[blend];
+        var pipeline = rt == null ? _vramPipes[blend]
+            : _kWideMode == WidePrimitiveMode.CoreDepthOnly && _rtDepthOnlyPipe.Handle != 0 ? _rtDepthOnlyPipe
+            : _rtPipes[depthState * 3 + blend];
         _vk.CmdBindPipeline(cb, PipelineBindPoint.Graphics, pipeline);
     }
 }

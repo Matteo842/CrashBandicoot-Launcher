@@ -20,6 +20,13 @@ public enum WidePrimitiveMode : byte
     // nearer scenery (#178): depth-tested against the core fill, like its
     // side-band part against the side world.
     CoreDepthTest,
+    // Depth only, no colour, 4:3 core: the zone's own scenery around Wide
+    // Editor core triangles, so a triangle behind it stays hidden even when
+    // the ordering table paints it later.
+    CoreDepthOnly,
+    // Wide Editor triangles in the 4:3 core: depth-tested against the core
+    // depth (no write), offset towards the camera like WorldUserSides.
+    CoreUser,
 }
 
 public struct HleVertex

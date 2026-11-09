@@ -862,7 +862,8 @@ public sealed class GlBackend : IGpuBackend
         int cx0 = _kClipX0 - rt.X + rt.Margin, cy0 = _kClipY0 - rt.Y;
         int cx1 = _kClipX1 - rt.X + rt.Margin, cy1 = _kClipY1 - rt.Y;
         if (_kWideMode is WidePrimitiveMode.CoreOnly or WidePrimitiveMode.WorldCore
-                or WidePrimitiveMode.CoreDepthTest && rt.Margin > 0)
+                or WidePrimitiveMode.CoreDepthTest or WidePrimitiveMode.CoreDepthOnly
+                or WidePrimitiveMode.CoreUser && rt.Margin > 0)
         {
             cx0 = rt.Margin;
             cx1 = rt.Margin + rt.W - 1;
@@ -938,10 +939,12 @@ public sealed class GlBackend : IGpuBackend
 
         bool extension = _kWideMode == WidePrimitiveMode.WorldExtensionSides;
         bool user = _kWideMode == WidePrimitiveMode.WorldUserSides;
+        bool coreUser = _kWideMode == WidePrimitiveMode.CoreUser;
+        bool depthOnly = _kWideMode == WidePrimitiveMode.CoreDepthOnly;
         bool worldPass = _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore;
         bool depthTest = rt != null && _kWideMode is WidePrimitiveMode.WorldSides or WidePrimitiveMode.WorldCore
             or WidePrimitiveMode.WorldExtensionSides or WidePrimitiveMode.WorldUserSides or WidePrimitiveMode.DepthTest
-            or WidePrimitiveMode.CoreDepthTest;
+            or WidePrimitiveMode.CoreDepthTest or WidePrimitiveMode.CoreDepthOnly or WidePrimitiveMode.CoreUser;
         if (extension)
         {
             // Extensions participate in real depth, including against the
@@ -950,7 +953,7 @@ public sealed class GlBackend : IGpuBackend
             _gl.Enable(EnableCap.PolygonOffsetFill);
             _gl.PolygonOffset(1f, 1f);
         }
-        else if (user)
+        else if (user || coreUser)
         {
             // Wide Editor triangles: the other way round, a coplanar copy of a
             // retail face (retextured by hand) must cover the original.
@@ -968,14 +971,16 @@ public sealed class GlBackend : IGpuBackend
             // triangle. Object translucency keeps the conventional no-write path.
             // An object's core part only tests against the scenery: its own
             // faces keep the ordering table's order, edges included.
-            _gl.DepthMask(worldPass || extension || user
-                || !_kTransparent && _kWideMode != WidePrimitiveMode.CoreDepthTest);
+            _gl.DepthMask(worldPass || extension || user || depthOnly
+                || !_kTransparent && _kWideMode is not (WidePrimitiveMode.CoreDepthTest or WidePrimitiveMode.CoreUser));
         }
         else
         {
             _gl.Disable(EnableCap.DepthTest);
             _gl.DepthMask(false);
         }
+        // Core depth for Wide Editor triangles: depth only, the game paints the colour.
+        if (depthOnly) _gl.ColorMask(false, false, false, false);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.ScissorTest);
         int s = GlVram.Scale;
@@ -1086,6 +1091,7 @@ public sealed class GlBackend : IGpuBackend
 
         _gl.Disable(EnableCap.ScissorTest);
         _gl.DepthMask(true);
+        if (depthOnly) _gl.ColorMask(true, true, true, true);
         if (rt != null) { rt.Dirty = true; rt.LastDrawFrame = _frame; }
         _count = 0;
     }
