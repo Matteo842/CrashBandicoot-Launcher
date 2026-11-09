@@ -26,6 +26,15 @@ internal static class HostDiagnostics
     static double _drawnFps;
     static long _lastDrawnFrames;
 
+    /// <summary>
+    /// #192: what the plain FPS counter shows. In 30 FPS mode the window still
+    /// presents every 60 Hz vblank (each image twice), so presents/s read 60.
+    /// New images/s is the game's real rate; while nothing new is drawn
+    /// (game frozen under the pause menu) the last value is kept.
+    /// </summary>
+    public static double GameFps => _gameFps > 0 ? _gameFps : _fps;
+    static double _gameFps;
+
     public static void TickFrame()
     {
         _frames++;
@@ -37,6 +46,7 @@ internal static class HostDiagnostics
             long drawn = GpuHle.Backend?.DrawnFrames ?? 0;
             _drawnFps = (drawn - _lastDrawnFrames) * 1000.0 / elapsed;
             _lastDrawnFrames = drawn;
+            if (_drawnFps >= 0.5) _gameFps = _drawnFps;
             _frames = 0;
             _lastFpsSampleMs = now;
         }

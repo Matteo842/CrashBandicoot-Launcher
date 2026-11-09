@@ -1550,16 +1550,21 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         void AddHint(string t)
         {
-            page.Controls.Add(new Label
+            const int hintW = 520;
+            const int hintMinH = 44;
+            var hint = new Label
             {
                 Text = t,
                 ForeColor = Color.FromArgb(160, NativeTheme.Sand),
                 Font = NativeTheme.MakeNunito(14),
                 Location = new Point(12, y),
-                Size = new Size(520, 44),
                 BackColor = Color.Transparent,
-            });
-            y += hintGap;
+            };
+            // #201: long hints wrap to 3-4 lines; a fixed 2-line box clipped them.
+            var h = Math.Max(hintMinH, hint.GetPreferredSize(new Size(hintW, 0)).Height);
+            hint.Size = new Size(hintW, h);
+            page.Controls.Add(hint);
+            y += h + (hintGap - hintMinH);
         }
 
         // ── Display ──

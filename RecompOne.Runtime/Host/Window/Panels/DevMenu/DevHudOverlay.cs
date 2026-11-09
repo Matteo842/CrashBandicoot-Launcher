@@ -104,7 +104,7 @@ internal static class DevHudOverlay
         {
             // #176: plain FPS counter unless the detailed stats are asked for.
             if (!ConfigManager.View.DevHudDetails)
-                ImGui.TextUnformatted($"{HostDiagnostics.Fps:0} FPS");
+                ImGui.TextUnformatted($"{HostDiagnostics.GameFps:0} FPS");
             else
             {
                 ImGui.TextUnformatted($"{HostDiagnostics.Fps:0.00} fps");

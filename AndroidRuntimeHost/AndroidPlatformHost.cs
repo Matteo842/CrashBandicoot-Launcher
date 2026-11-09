@@ -30,6 +30,8 @@ sealed class AndroidPlatformHost(
     long _hudWindow = System.Diagnostics.Stopwatch.GetTimestamp();
     int _hudFrames;
     double _hudFps;
+    long _hudDrawn = -1;
+    double _hudGameFps;
     TextView? _boxHud;
     string? _boxText;
     int _boxTone = -1;
@@ -163,7 +165,10 @@ sealed class AndroidPlatformHost(
     void TickHud()
     {
         if (_hud == null || !ConfigManager.View.ShowDevHud)
+        {
+            _hudDrawn = -1; // HUD off: no stale count when it comes back
             return;
+        }
 
         _hudFrames++;
         var now = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -175,10 +180,20 @@ sealed class AndroidPlatformHost(
         LastFps = _hudFps;
         _hudFrames = 0;
         _hudWindow = now;
+        // #192: presents run at the display rate (30 FPS mode shows each image
+        // twice or more), so the plain counter shows new images/s instead;
+        // kept while nothing new is drawn (game frozen in pause).
+        long drawn = backend.DrawnFrames;
+        if (_hudDrawn >= 0)
+        {
+            double drawnFps = (drawn - _hudDrawn) / Math.Max(elapsed, 0.001);
+            if (drawnFps >= 0.5) _hudGameFps = drawnFps;
+        }
+        _hudDrawn = drawn;
         var fps = _hudFps;
         string text;
         if (!ConfigManager.View.DevHudDetails)
-            text = $"{fps:0} FPS";
+            text = $"{(_hudGameFps > 0 ? _hudGameFps : fps):0} FPS";
         else
         {
             long workingSet = 0;
