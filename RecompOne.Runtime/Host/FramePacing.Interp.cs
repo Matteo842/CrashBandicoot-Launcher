@@ -199,9 +199,10 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Start of a logic step. The pad is read now, not at the end of the step
-    /// before (33 ms older). Host pad sequences (exit to map) count original
-    /// vblanks, two per step, after the sample that shows their current phase.
+    /// Start of a logic step: fresh host input for it. Host pad sequences (exit
+    /// to map) are not ticked here: the guest samples the pad itself inside the
+    /// step (BIOS PAD_dr in PadUpdate) and must still see the current phase.
+    /// They tick at the step's two vblanks (Runtime.PresentFrame).
     /// </summary>
     static void InterpBeginStep(IMemory m)
     {
@@ -215,8 +216,6 @@ public static partial class FramePacing
         {
             // overlay swap
         }
-        ExitToMapInjector.TickLogicFrame();
-        ExitToMapInjector.TickLogicFrame();
         // A step is two vblanks; only a step that really waits gets more.
         LibEtc.HoldCatchUp(0);
     }

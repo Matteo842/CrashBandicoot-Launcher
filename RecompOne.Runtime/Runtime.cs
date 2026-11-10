@@ -131,6 +131,11 @@ public static class Runtime
         // nothing; the draw-only passes present (PresentInterp).
         if (!Host.FramePacing.InterpEngaged)
             PresentHost();
+        else
+            // The host present ticks the exit-to-map pad pulses once per vblank; a
+            // step has no host present, so its two vblanks tick them here, after
+            // the step's own pad sample.
+            Host.ExitToMapInjector.TickLogicFrame();
         Sdk.LibCd.Tick();
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); }
         Host.FramePacing.OnHostPresent(Mem);
