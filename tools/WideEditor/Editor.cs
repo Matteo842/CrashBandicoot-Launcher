@@ -122,7 +122,7 @@ sealed partial class Editor : IDisposable
             string kind = e.GetProperty("kind").GetString() ?? "";
             int id = e.GetProperty("id").GetInt32();
             // The intro (56) is drawn in 16:9 too (#189); its camera walks the zone paths.
-            if (kind is not ("gameplay" or "bonus") && id != 56) continue;
+            if (kind is not ("gameplay" or "bonus") && id is not (56 or 57)) continue;
             _levels.Add((id, e.GetProperty("name").GetString() ?? "", kind));
         }
     }

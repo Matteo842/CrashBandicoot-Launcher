@@ -116,8 +116,8 @@ public static class GpuHle
     /// <summary>Dejitter follows the user setting (no-op where geometry is not GTE-projected).</summary>
     public static bool DejitterActive { get; private set; }
 
-    /// <summary>#189: the intro cutscene (lid 56) is shown in 16:9; the ending (57) stays 4:3 for now.</summary>
-    public const uint WideCinemaLid = 56u;
+    /// <summary>#189: the intro (lid 56) and the ending (lid 57) cutscenes are shown in 16:9.</summary>
+    static bool IsWideCinema(uint lid) => lid is 56u or 57u;
 
     /// <summary>Call once per frame (e.g. PutDrawEnv) before GTE draws.</summary>
     public static void RefreshWideFov()
@@ -129,10 +129,10 @@ public static class GpuHle
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
             uiOrCinema = Catalog.Levels.IsUiOrCinema(lid);
             wideAnyway = uiOrCinema && WideAspect > 0f
-                && (lid == WideCinemaLid || Host.FramePacing.IslandMapShowing(m));
+                && (IsWideCinema(lid) || Host.FramePacing.IslandMapShowing(m));
         }
 
-        // Gameplay, the island map and the intro (#189); menus/title/ending keep clean 4:3 with black pillars.
+        // Gameplay, the island map and the intro/ending (#189); menus/title keep clean 4:3 with black pillars.
         WideFovActive = WideAspect > 0f && (!uiOrCinema || wideAnyway);
         if (!WideFovActive)
             NativeWideRendererActive = false;

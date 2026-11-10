@@ -34,6 +34,8 @@ public static partial class FramePacing
             return NativeWideSkyArcRepairs(m, world, level);
         if (NativeWideTawnaSky(m, world, level))
             return NativeWideTawnaSkyRepairs(m, world, level);
+        if (NativeWideEndingSky(m, world, level))
+            return NativeWideEndingSkyRepairs(m, world, level);
         if (level == 6)
         {
             var machineryKey = new NativeWideSceneryKey(level, m.ReadU32(world.Header), m.ReadU32(world.Header + 4),

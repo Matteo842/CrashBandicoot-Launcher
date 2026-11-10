@@ -80,6 +80,8 @@ def textured(fr, lid, repair_uvs=None, rows=None):
         mask = (fr.layer == li) & (fr.poly == pi)
         if repair:
             tri = fr.repair_tris[li][pi].astype(float)
+            if m.backdrop:
+                tri = tri - np.array(m.trans, float) + cam.pos
             src, uvs = repair_uvs[m.name][pi] if repair_uvs else (None, None)
             if src is None:
                 img[mask] = (0, 200, 200)
