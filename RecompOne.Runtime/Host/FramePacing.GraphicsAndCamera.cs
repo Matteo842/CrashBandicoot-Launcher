@@ -70,6 +70,9 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreGfxUpdateMatrices(CpuContext c, IMemory m)
     {
+        // Interpolated FPS: a draw-only pass only needs its camera; pickups, water
+        // and carries belong to the real steps.
+        if (InterpCamera(m)) return true;
         try
         {
             if ((m.ReadU32(DisplayFlagsAddr) & FlagSpinDeath) == 0)
@@ -327,6 +330,12 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
+        // Interpolated FPS: no zone change (page loads) in a draw-only pass.
+        if (_interpRender)
+        {
+            _interpDirty = true;
+            return false;
+        }
         CamTraceLevelUpdate(c);
         EnsureFrameTime(m);
         RestoreHogCamPose(m);
@@ -564,6 +573,11 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreCamFollow(CpuContext c, IMemory m)
     {
+        if (_interpRender)
+        {
+            _interpDirty = true;
+            return false;
+        }
         CamTraceBegin(m);
         EnsureFrameTime(m);
         _inCamFollow = false;
@@ -638,6 +652,11 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreCamDeath(CpuContext c, IMemory m)
     {
+        if (_interpRender)
+        {
+            _interpDirty = true;
+            return false;
+        }
         RestoreHogCamPose(m);
         if (!IsActive(m))
         {

@@ -15,6 +15,13 @@ internal static class FrameRateSetting
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGuiEx.TextDisabled("Gameplay, bonus, saves, level end and map. Title and menus stay 30 FPS.");
+        bool interp = ConfigManager.View.InterpolatedFps;
+        if (ImGui.Checkbox($"Exact 30 FPS logic, interpolated picture (experimental)##{id}", ref interp))
+        {
+            ConfigManager.View.InterpolatedFps = interp;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGuiEx.TextDisabled("High FPS without delta time: physics as the original, about 33 ms more input lag.");
         if (ConfigManager.View.FrameRateHotkeys)
             ImGuiEx.TextDisabled("Keys 1-5: original, 60, 120, 240, uncapped.");
         ImGuiEx.TextDisabled("This is a refresh cap. Speed is delta time (60 and 120 play the same).");

@@ -206,6 +206,7 @@ public static partial class FramePacing
             if (sky.Lower is uint lower)
                 backend.FillWideBands(env.ClipY0 + sky.Rows, env.ClipY1 + 1 - env.ClipY0 - sky.Rows, lower);
         }
+        InterpNoteWide(_nativeWidePending.Count, GpuHle.NativeWideRendererActive);
         float dx = gpu.DrawOffsetX - _nativeWideDrawX;
         float dy = gpu.DrawOffsetY - _nativeWideDrawY;
         foreach (ref readonly var triangle in CollectionsMarshal.AsSpan(_nativeWidePending))

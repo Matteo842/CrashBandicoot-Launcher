@@ -378,6 +378,17 @@ public class ViewConfig
         set => SetBool("StartPauseMenu", value);
     }
 
+    /// <summary>
+    /// Interpolated high FPS (prototype): the game logic stays the original 30 FPS
+    /// one and only the picture is drawn at the selected frame rate, between the
+    /// last two logic frames. Off by default: delta-time logic as before.
+    /// </summary>
+    public bool InterpolatedFps
+    {
+        get => GetBool("InterpolatedFps");
+        set => SetBool("InterpolatedFps", value);
+    }
+
     /// <summary>Keys 1–5 switch frame-rate presets during gameplay. On by default.</summary>
     public bool FrameRateHotkeys
     {

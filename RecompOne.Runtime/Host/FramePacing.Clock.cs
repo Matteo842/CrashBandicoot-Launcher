@@ -14,6 +14,8 @@ public static partial class FramePacing
     public static bool IsActive(IMemory? m)
     {
         if (!WantsUnlock || m == null || _inNsInit) return false;
+        // Interpolated FPS: the logic is the original 30 FPS one, never delta-timed.
+        if (_interpOn) return false;
         if (!_levelReady) return false;
         try
         {
@@ -886,6 +888,7 @@ public static partial class FramePacing
         if (ticks <= 0) return;
         if (_simTs != 0) _simTs += ticks;
         if (_irqTs != 0) _irqTs += ticks;
+        if (_interpStepTs != 0) _interpStepTs += ticks;
     }
 
 }

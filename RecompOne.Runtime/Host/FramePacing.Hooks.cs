@@ -112,6 +112,9 @@ public static partial class FramePacing
         RestorePadSpin(m);
         RestoreCrashStamp(m);
         _inCrashUpdate = false;
+        // Interpolated FPS: a draw-only pass draws the object and runs nothing.
+        if (_interpRender) return InterpDrawObject(c, m);
+        if (_interpOn) _interpObj = c.A0;
         NoteBoxDropUpdate(c.A0);
         // Hold / NSInit run GOOL with pacing off. Hoppers Wait then Jump
         // (may OR SOLID_TOP). If we do not record them here, unlock treats
@@ -293,6 +296,8 @@ public static partial class FramePacing
                 RestorePadSpin(m);
                 return;
             case GoolObjectUpdateAddr:
+                if (_interpRender) return;
+                if (_interpOn) InterpCapturePose(m);
                 ApplySingleBoxDrop(m);
                 RestorePadSpin(m);
                 RestoreCrashStamp(m);
@@ -420,13 +425,20 @@ public static partial class FramePacing
     {
         RestoreCardIo(m);
         FinishGpuUpdate(m);
-        UpdatePityMask(c, m);
+        // Interpolated FPS: a draw-only pass ends here, its guest state is put back
+        // and its picture presented. Everything below sees the real state.
+        bool drawOnly = InterpFinishRender(c, m);
+        if (!drawOnly)
+            UpdatePityMask(c, m);
         // Quick save / load (#130) only where the recompiled call chain is fixed.
         SaveStates.AtSafePoint(c, m);
+        InterpPlan(c, m, drawOnly);
     }
 
     public static bool PreNsInit(CpuContext c, IMemory m)
     {
+        InterpPromoteToStep();
+        InterpReset();
         // May redirect A1 (Stormy Ascent bonus) — before the log below.
         Cheats.CheatManager.OnLevelLoad(c, m);
         IntroOnNewGameLevelLoad(c, m);

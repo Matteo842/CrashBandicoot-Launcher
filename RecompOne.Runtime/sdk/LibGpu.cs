@@ -100,6 +100,7 @@ public static class LibGpu
         byte r0 = m.ReadU8(env + 0x19), g0 = m.ReadU8(env + 0x1A), b0 = m.ReadU8(env + 0x1B);
 
         gpu.WriteGp0(GetCs(clipX, clipY));
+        Host.FramePacing.InterpNoteDraw(clipX, clipY);
         gpu.WriteGp0(GetCe((short)(clipX + clipW - 1), (short)(clipY + clipH - 1)));
         gpu.WriteGp0(GetOfs(ofsX, ofsY));
         gpu.WriteGp0(GetMode(dfe, dtd, tpage));
@@ -147,6 +148,7 @@ public static class LibGpu
         bool pal = gpu.Pal;
 
         gpu.WriteGp1(0x05000000u | (((uint)dispY & 0x3FF) << 10) | ((uint)dispX & 0x3FF));
+        Host.FramePacing.InterpNoteDisp(dispX, dispY);
 
         int hStart = scrX * 10 + 0x260;
         int vStart = scrY + (pal ? 0x13 : 0x10);

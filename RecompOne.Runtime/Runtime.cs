@@ -127,6 +127,21 @@ public static class Runtime
 
     public static void PresentFrame()
     {
+        // Interpolated FPS: logic steps keep their vblank work below but show
+        // nothing; the draw-only passes present (PresentInterp).
+        if (!Host.FramePacing.InterpEngaged)
+            PresentHost();
+        Sdk.LibCd.Tick();
+        if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); }
+        Host.FramePacing.OnHostPresent(Mem);
+        Host.FramePacing.PulseVblankIrq();
+    }
+
+    /// <summary>Interpolated FPS: present and throttle only, no vblank work.</summary>
+    public static void PresentInterp() => PresentHost();
+
+    static void PresentHost()
+    {
         Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Game);
         if (_platformHost != null)
         {
@@ -143,10 +158,6 @@ public static class Runtime
         FrameClock.Throttle();
         Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Wait);
         Host.Diagnostics.FrameTimer.EndFrame();
-        Sdk.LibCd.Tick();
-        if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); }
-        Host.FramePacing.OnHostPresent(Mem);
-        Host.FramePacing.PulseVblankIrq();
     }
 
     public static void DispatchIrq(int irq)

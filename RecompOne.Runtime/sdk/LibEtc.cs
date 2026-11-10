@@ -35,6 +35,17 @@ public static class LibEtc
         // Unlocked: the limiter wait was a second present + throttle per loop,
         // so every preset simulated half its rate ("60 FPS" = 30 Hz loop with
         // dt≈34 flapping on the RefTicks-0.01 gates; 240 = 120 Hz).
+        // Interpolated FPS, draw-only pass: the wait is over at once. No present, no
+        // IRQ, no pad: the pass presents its own buffer after DrawOTag, and this
+        // guest state (the counter too) is thrown away.
+        if (FramePacing.InterpRenderPass)
+        {
+            FramePacing.InterpNoteRenderVSync();
+            if (m.ReadU32(VBlankCountAddr) < c.A0)
+                m.WriteU32(VBlankCountAddr, c.A0);
+            c.V0 = 0;
+            return;
+        }
         if (FramePacing.IsActive(m) && IsGpuLimiterWait(c, m))
         {
             c.V0 = 0;
@@ -113,6 +124,9 @@ public static class LibEtc
             return;
         }
         if (now - _lastVblankTs < VblankTicks) return;
+        // Interpolated FPS: a draw-only pass is stuck in a guest wait that only a
+        // vblank ends. Let it through; the pass is thrown away and the mode backs off.
+        FramePacing.InterpNoteStall();
 
         _catchUpGuard++;
         try
@@ -135,6 +149,15 @@ public static class LibEtc
             _catchUpGuard--;
         }
     }
+
+    /// <summary>
+    /// Interpolated FPS: the wall time between two logic steps is not a slow
+    /// frame. Restart the catch-up clock at the start of every loop iteration,
+    /// <paramref name="vblanks"/> ahead for a draw-only pass, so only a guest
+    /// that really waits (level change, cutscene skip) gets the extra vblanks.
+    /// </summary>
+    internal static void HoldCatchUp(int vblanks) =>
+        _lastVblankTs = Stopwatch.GetTimestamp() + vblanks * VblankTicks;
 
     public static uint AdvanceVBlank(CpuContext? c, IMemory m)
     {

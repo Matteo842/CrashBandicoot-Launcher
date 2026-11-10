@@ -63,6 +63,19 @@ internal static class ExitToMapInjector
     /// <summary>Advance the sequence once per presented frame.</summary>
     public static void Tick()
     {
+        // Interpolated FPS presents many times per pad sample: a pulse counted in
+        // presents ended before the next logic step read it. The steps tick instead.
+        if (FramePacing.InterpEngaged)
+        {
+            ApplyOverlay();
+            return;
+        }
+        TickLogicFrame();
+    }
+
+    /// <summary>One original vblank of the sequence (two per 30 Hz logic step).</summary>
+    public static void TickLogicFrame()
+    {
         if (_phase == Phase.Idle)
         {
             ApplyOverlay();

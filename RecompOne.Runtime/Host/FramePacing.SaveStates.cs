@@ -15,6 +15,7 @@ public static partial class FramePacing
         _nativeWidePickupZones.Clear();
         _fadeAcc = 0;
         _fadeHold = false;
+        InterpReset();
         Reset();
         // Reset stashes a ride carry for an FPS switch; the restored Crash never had it.
         DropResetCarry();

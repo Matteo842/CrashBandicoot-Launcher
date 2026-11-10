@@ -63,6 +63,24 @@ public sealed class PSMemory : IMemory
         _memYield = 65536;
     }
 
+    /// <summary>
+    /// Interpolated FPS: RAM and scratchpad only, into reused buffers. No
+    /// devices: GPU, SPU and timers keep running across a draw-only pass.
+    /// </summary>
+    internal void CopyGuestRam(ref byte[]? ram, ref byte[]? scratch)
+    {
+        if (ram == null || ram.Length != _ram.Length) ram = new byte[_ram.Length];
+        if (scratch == null || scratch.Length != _scratchpad.Length) scratch = new byte[_scratchpad.Length];
+        Buffer.BlockCopy(_ram, 0, ram, 0, _ram.Length);
+        Buffer.BlockCopy(_scratchpad, 0, scratch, 0, _scratchpad.Length);
+    }
+
+    internal void RestoreGuestRam(byte[] ram, byte[] scratch)
+    {
+        Buffer.BlockCopy(ram, 0, _ram, 0, _ram.Length);
+        Buffer.BlockCopy(scratch, 0, _scratchpad, 0, _scratchpad.Length);
+    }
+
     private static bool IsDmaChcr(uint phys) => phys >= 0x1F801080u && phys < 0x1F8010F0u && (phys & 0xFu) == 8u;
 
     private uint Hw32(uint phys)

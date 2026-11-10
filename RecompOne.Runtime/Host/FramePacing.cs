@@ -851,6 +851,9 @@ public static partial class FramePacing
     /// spawn physics run at 4× (face-plant on the sand).
     /// </summary>
     public static bool NeedsOriginalVblank =>
-        WantsUnlock && !_levelReady && !_inNsInit;
+        (WantsUnlock && !_levelReady && !_inNsInit)
+        // Interpolated FPS not engaged (hold, demo, card, streaming): the loop is the
+        // original one and must not run at the selected refresh cap.
+        || (_interpOn && !_interpEngaged && !_inNsInit);
 
 }
