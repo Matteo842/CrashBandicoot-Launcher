@@ -68,6 +68,14 @@ public static partial class FramePacing
     static bool _interpStall;
     static long _interpIterTs;
 
+    // Watchdog: where the game thread is, for logs/interp.txt when it stops reaching the safe point.
+    static volatile int _wdPhase;
+    static volatile uint _wdArg;
+    static volatile bool _wdDraw;
+    static long _wdBeat;
+    static Thread? _wd;
+    static int _camLogCount;
+
     // Once-a-second line in logs/interp.txt while engaged.
     static long _diagTs, _diagStepMax, _diagDrawMax;
     static int _diagSteps, _diagDraws, _diagObjLerp, _diagObjSnap, _diagObjNew;
@@ -132,6 +140,7 @@ public static partial class FramePacing
         _interpDirty = false;
         _interpStall = false;
         _interpIterTs = 0;
+        Volatile.Write(ref _wdBeat, 0);
         _interpReady = 0;
         _interpSnap = false;
     }
@@ -155,6 +164,7 @@ public static partial class FramePacing
         if (!_interpRender) return false;
         _interpRender = false;
         _interpDirty = false;
+        InterpMark(13);
         if (c.RA != InterpSafeRa || m is not PSMemory psm || !_interpSnap)
         {
             // Registers can only be put back at CoreLoop's own call. Not expected:
@@ -167,7 +177,9 @@ public static partial class FramePacing
         if (cost > _diagDrawMax) _diagDrawMax = cost;
         _diagDraws++;
         InterpRestore(c, psm);
+        InterpMark(14);
         InterpPresent();
+        InterpMark(15);
         if (_interpStall)
         {
             // The guest state after the last step waits for vblanks (level change,
@@ -193,6 +205,7 @@ public static partial class FramePacing
     /// </summary>
     static void InterpBeginStep(IMemory m)
     {
+        InterpMark(16);
         try
         {
             BiosB.RefreshPad(m);
@@ -278,6 +291,74 @@ public static partial class FramePacing
             InterpBeginStep(m);
         InterpDiag(now);
         _interpIterTs = Stopwatch.GetTimestamp();
+        _wdDraw = _interpRender;
+        InterpMark(_interpRender ? 2 : 1);
+        Volatile.Write(ref _wdBeat, _interpIterTs);
+        if (_wd == null)
+        {
+            _wd = new Thread(InterpWatchdog) { IsBackground = true, Name = "interp-watchdog" };
+            _wd.Start();
+        }
+    }
+
+    /// <summary>Breadcrumb for the watchdog. Phases: 1 step, 2 pass start, 3 LevelUpdate skip,
+    /// 5 camera, 6 world pass, 7 side scenery, 20 worlds done, 8 object draw (arg = object),
+    /// 9 object drawn, 10 DrawOTag, 11 DrawOTag done, 12 VSync, 13 pass end, 14 restored,
+    /// 15 presented, 16 pad read, 17 object update in a step (arg = object).</summary>
+    static void InterpMark(int phase, uint arg = 0)
+    {
+        _wdArg = arg;
+        _wdPhase = phase;
+    }
+
+    /// <summary>LibGpu.DrawOTag breadcrumbs.</summary>
+    public static void InterpMarkGpu(int phase)
+    {
+        if (_interpEngaged) InterpMark(phase);
+    }
+
+    static void InterpAppend(string line)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppPaths.LogsDir);
+            File.AppendAllText(Path.Combine(AppPaths.LogsDir, "interp.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    static void InterpWatchdog()
+    {
+        long reported = 0;
+        while (true)
+        {
+            Thread.Sleep(500);
+            long beat = Volatile.Read(ref _wdBeat);
+            if (beat == 0 || beat == reported) continue;
+            if (Stopwatch.GetTimestamp() - beat < 2 * Stopwatch.Frequency) continue;
+            reported = beat;
+            InterpVec9 a = _interpCamFrom, b = _interpCamTo;
+            InterpAppend($"HANG phase={_wdPhase} arg=0x{_wdArg:X8} pass={(_wdDraw ? "draw" : "step")} t={_interpT:0.000}"
+                + $" camFrom=({a.Tx},{a.Ty},{a.Tz} rot {a.Rx:X},{a.Ry:X},{a.Rz:X})"
+                + $" camTo=({b.Tx},{b.Ty},{b.Tz} rot {b.Rx:X},{b.Ry:X},{b.Rz:X}) camLerp={_interpCamHasFrom}");
+        }
+    }
+
+    /// <summary>First camera steps that are large for one frame: are they motion or cuts?</summary>
+    static void InterpLogCamStep(in InterpVec9 a, in InterpVec9 b)
+    {
+        if (_camLogCount >= 40) return;
+        static int Turn(int x, int y) => Math.Abs(((y - x + 0x800) & 0xFFF) - 0x800);
+        long dx = (long)b.Tx - a.Tx, dy = (long)b.Ty - a.Ty, dz = (long)b.Tz - a.Tz;
+        int turn = Math.Max(Turn(a.Rx, b.Rx), Math.Max(Turn(a.Ry, b.Ry), Turn(a.Rz, b.Rz)));
+        if (Math.Abs(dx) <= 48000 && Math.Abs(dy) <= 48000 && Math.Abs(dz) <= 48000 && turn <= 0x100) return;
+        _camLogCount++;
+        InterpAppend($"camstep d=({dx},{dy},{dz}) turn=0x{turn:X} from=({a.Tx},{a.Ty},{a.Tz} rot {a.Rx:X},{a.Ry:X},{a.Rz:X})"
+            + $" to=({b.Tx},{b.Ty},{b.Tz} rot {b.Rx:X},{b.Ry:X},{b.Rz:X})");
     }
 
     /// <summary>DrawNativeWideWorld in a draw-only pass: how much 16:9 side scenery this picture gets.</summary>
@@ -409,7 +490,11 @@ public static partial class FramePacing
     }
 
     /// <summary>LibEtc.VSync in a draw-only pass: no wait, no present, no vblank side effects.</summary>
-    public static void InterpNoteRenderVSync() => _interpDirty = true;
+    public static void InterpNoteRenderVSync()
+    {
+        _interpDirty = true;
+        InterpMark(12);
+    }
 
     static InterpVec9 InterpReadObject(IMemory m, uint obj)
     {
@@ -511,7 +596,9 @@ public static partial class FramePacing
             if ((seq & 0xFF000000u) != 0x80000000u) return false;
             if ((statusB & FlagInvisible) != 0) return false;
             if (!GatedObjectShouldDisplay(m, obj, statusB)) return false;
+            InterpMark(8, obj);
             Dispatcher.Call(c, m, GoolObjectTransformAddr);
+            InterpMark(9, obj);
         }
         catch (Exception ex)
         {
@@ -560,6 +647,7 @@ public static partial class FramePacing
             if (_interpRender)
             {
                 _interpDirty = true;
+                InterpMark(5);
                 if (_interpCamStamp != _interpDone)
                 {
                     _diagCamStale++;
@@ -586,6 +674,7 @@ public static partial class FramePacing
             }
             bool had = _interpCamStamp == _interpStep - 1;
             _interpCamFrom = had ? _interpCamTo : cur;
+            if (had) InterpLogCamStep(_interpCamFrom, cur);
             _interpCamHasFrom = had && !InterpCamCut(_interpCamTo, cur);
             _interpCamTo = cur;
             _interpCamStamp = _interpStep;

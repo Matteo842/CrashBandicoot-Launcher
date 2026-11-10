@@ -114,7 +114,11 @@ public static partial class FramePacing
         _inCrashUpdate = false;
         // Interpolated FPS: a draw-only pass draws the object and runs nothing.
         if (_interpRender) return InterpDrawObject(c, m);
-        if (_interpOn) _interpObj = c.A0;
+        if (_interpOn)
+        {
+            _interpObj = c.A0;
+            if (_interpEngaged) InterpMark(17, c.A0);
+        }
         NoteBoxDropUpdate(c.A0);
         // Hold / NSInit run GOOL with pacing off. Hoppers Wait then Jump
         // (may OR SOLID_TOP). If we do not record them here, unlock treats

@@ -93,8 +93,30 @@ public static partial class FramePacing
     /// strike chance N× as often (strobe). Keep the original 30 Hz cadence.
     /// A0 != 0 is level init.
     /// </summary>
+    /// <summary>
+    /// CamUpdate, compile-time hook (pipeline 10). Interpolated FPS: a draw-only
+    /// pass draws with the camera between the last two steps
+    /// (<see cref="InterpCamera"/>) and must not run the camera logic: with a
+    /// direction held, its path loop calls LevelUpdate until the camera changes
+    /// path, and every zone change loads pages.
+    /// </summary>
+    public static bool PreCamUpdate(CpuContext c, IMemory m)
+    {
+        if (!_interpRender) return true;
+        _interpDirty = true;
+        InterpMark(4);
+        return false;
+    }
+
     public static bool PreShaderParams(CpuContext c, IMemory m)
     {
+        // Interpolated FPS: the light sequence and the lightning roll belong to the
+        // steps. A draw-only pass would draw a flash the real frame never has.
+        if (_interpRender && c.A0 == 0)
+        {
+            _interpDirty = true;
+            return false;
+        }
         if (c.A0 != 0 || !IsActive(m))
         {
             _shaderAcc = 0;
@@ -228,6 +250,7 @@ public static partial class FramePacing
     public static void PostWorlds(CpuContext c, IMemory m)
     {
         EndNativeWideWorldPass(m);
+        InterpMarkGpu(20);
         RestoreRippleSpeed(m);
     }
 
@@ -244,6 +267,7 @@ public static partial class FramePacing
     public static void PostWorldsRipple(CpuContext c, IMemory m)
     {
         EndNativeWideWorldPass(m);
+        InterpMarkGpu(20);
         RestoreRippleSpeed(m);
     }
 
@@ -330,11 +354,15 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
-        // Interpolated FPS: no zone change (page loads) in a draw-only pass.
+        // Interpolated FPS, draw-only pass: the camera never gets here (PreCamUpdate).
+        // What does is level restart code, and its loops wait for this call to move
+        // the camera: skipping it hung CamUpdate's path loop. Run it, unpaced; the
+        // pass is thrown away.
         if (_interpRender)
         {
             _interpDirty = true;
-            return false;
+            InterpMark(3);
+            return true;
         }
         CamTraceLevelUpdate(c);
         EnsureFrameTime(m);

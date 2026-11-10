@@ -116,6 +116,7 @@ public static partial class FramePacing
 
     static void BeginNativeWideWorldPass(IMemory m)
     {
+        InterpMarkGpu(6);
         _nativeWideRangeOpen = false;
         _nativeWidePending.Clear();
         _nativeWideCorePending.Clear();
@@ -160,6 +161,7 @@ public static partial class FramePacing
 
     static void EndNativeWideWorldPass(IMemory m)
     {
+        InterpMarkGpu(7);
         if (!_nativeWideRangeOpen) return;
         CaptureNativeWideWorldEnd(m);
         // Read the shader inputs after the original pass has prepared them.

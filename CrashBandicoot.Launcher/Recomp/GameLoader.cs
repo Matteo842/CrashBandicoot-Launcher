@@ -24,7 +24,7 @@ public sealed class GameManifest
 /// </summary>
 public static class GameStore
 {
-    public const string PipelineVersion = "9";
+    public const string PipelineVersion = "10";
 
     public static string RootDir => AppPaths.GameDir;
 

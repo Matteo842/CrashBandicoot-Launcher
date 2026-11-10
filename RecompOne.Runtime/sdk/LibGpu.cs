@@ -19,6 +19,7 @@ public static class LibGpu
         // Crash passes its 0x800-word ordering table; each slot word links the
         // primitives filed under it before the next slot.
         uint otBase = addr;
+        Host.FramePacing.InterpMarkGpu(10);
         try
         {
             Host.FramePacing.CloseNativeWideHudRange(m);
@@ -73,6 +74,7 @@ public static class LibGpu
 
         // Next RTP batch belongs to a new frame (or pass) — allow cache regen.
         GteScreenCache.EndFrame();
+        Host.FramePacing.InterpMarkGpu(11);
         Host.FramePacing.PatchTicksPerFrame(m);
     }
 
