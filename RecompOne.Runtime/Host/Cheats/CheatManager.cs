@@ -336,7 +336,11 @@ public static class CheatManager
                 return;
             }
 
-            if (CheatConfig.GodMode)
+            // Values above InvincibleHit are the game's own timed states: 6 is the
+            // knockback after a jump on Papu Papu's head (D-pad control off, restored
+            // when its timer ends). Overwriting it left Crash without control,
+            // running into the wall for good. He is invincible during those anyway.
+            if (CheatConfig.GodMode && mem.ReadU32(crash + ObjInvincibleOff) <= InvincibleHit)
             {
                 mem.WriteU32(crash + ObjInvincibleOff, InvincibleHit);
                 mem.WriteU32(crash + ObjInvincibleStampOff, mem.ReadU32(FramesElapsedAddr));
