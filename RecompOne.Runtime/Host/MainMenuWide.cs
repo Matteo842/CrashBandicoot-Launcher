@@ -106,19 +106,9 @@ static class MainMenuWide
         _bandsReady = false;
         var a = Load();
         if (a == null) return;
-        // One readback of both title pages (512x256) for all slots.
-        const int pw = 512, ph = 256;
-        var page = new ushort[pw * ph];
-        gpu.ReadVramRect(TileX, TileY, pw, ph, page);
-        var cur = new ushort[TileWords];
-        foreach (var b in a.Bands)
-        {
-            for (int i = 0; i < TileWords; i++)
-                cur[i] = page[(b.V * 16 + i / 8) * pw + b.U * 8 + i % 8];
-            // Slots are empty on the retail menu; anything else there (a slot reused by a
-            // later disc / mod) keeps its data and the menu stays 4:3.
-            if (!IsEmptyOr(cur, b.Data)) return;
-        }
+        // No "slot empty" check: after a demo / the intro the slots still hold that level's
+        // pages, which the menu never draws. Any later upload over a slot drops the bands
+        // again (Patch -> OverlapsSlot), so the menu's own data is never drawn over.
         foreach (var b in a.Bands)
             gpu.WriteVramRect(TileX + b.U * 8, TileY + b.V * 16, 8, 16, b.Data);
         _ownerGpu = gpu;
@@ -186,17 +176,6 @@ static class MainMenuWide
         else if (u >= 32 && u <= 46 && v <= 1) { col = 30 + v; row = u - 32; }
         else return -1;
         return row < 15 ? row * 32 + col : -1;
-    }
-
-    static bool IsEmptyOr(ushort[] cur, ushort[] ours)
-    {
-        bool empty = true, same = true;
-        for (int i = 0; i < cur.Length; i++)
-        {
-            empty &= cur[i] == 0;
-            same &= cur[i] == ours[i];
-        }
-        return empty || same;
     }
 
     static uint Hash(ushort[] px, int n)
