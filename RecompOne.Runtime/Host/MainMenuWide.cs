@@ -43,11 +43,16 @@ static class MainMenuWide
     static Asset? _asset;
     static bool _loadFailed;
     static bool _bandsPending, _bandsReady;
+    // Session that holds our band tiles (a relaunch in the same process is a new Gpu / memory).
+    static Gpu? _ownerGpu;
+    static IMemory? _ownerMem;
+    // Band slots (8x16 word cells of the title pages, u 0..63 x v 0..15).
+    static bool[,]? _slot;
 
     /// <summary>Main menu backdrop with our band tiles in VRAM: the frame can be shown in 16:9.</summary>
     public static bool Showing(IMemory m)
     {
-        if (!_bandsReady) return false;
+        if (!_bandsReady || !ReferenceEquals(m, _ownerMem)) return false;
         try
         {
             uint title = m.ReadU32(TitlePtrAddr);
@@ -64,13 +69,15 @@ static class MainMenuWide
     }
 
     /// <summary>This frame draws the band tiles (16:9 view on and the main menu showing).</summary>
-    public static bool Drawing => _bandsReady && GpuHle.WideFovActive;
+    public static bool Drawing(Gpu gpu) => _bandsReady && ReferenceEquals(gpu, _ownerGpu) && GpuHle.WideFovActive;
 
     static bool Enabled => GpuHle.WideAspect > GpuHle.BaseAspect;
 
     /// <summary>HleLoadFlush: every CPU→VRAM upload before it is committed.</summary>
     public static void Patch(int x, int y, int w, int h, ushort[] px, int count)
     {
+        // Anything else uploaded over a band slot (a demo / level page) takes it back.
+        if (_bandsReady && OverlapsSlot(x, y, w, h)) _bandsReady = false;
         if (!Enabled || count < w * h) return;
         if (w == 8 && h == 16 && x >= TileX && y >= TileY && (x - TileX) % 8 == 0 && (y - TileY) % 16 == 0)
         {
@@ -94,19 +101,49 @@ static class MainMenuWide
     {
         if (!_bandsPending) return;
         _bandsPending = false;
+        // Once per menu load: every one of the 480 tile uploads would land here.
+        if (_bandsReady && ReferenceEquals(gpu, _ownerGpu)) return;
+        _bandsReady = false;
         var a = Load();
         if (a == null) return;
+        // One readback of both title pages (512x256) for all slots.
+        const int pw = 512, ph = 256;
+        var page = new ushort[pw * ph];
+        gpu.ReadVramRect(TileX, TileY, pw, ph, page);
         var cur = new ushort[TileWords];
         foreach (var b in a.Bands)
         {
+            for (int i = 0; i < TileWords; i++)
+                cur[i] = page[(b.V * 16 + i / 8) * pw + b.U * 8 + i % 8];
             // Slots are empty on the retail menu; anything else there (a slot reused by a
             // later disc / mod) keeps its data and the menu stays 4:3.
-            gpu.ReadVramRect(TileX + b.U * 8, TileY + b.V * 16, 8, 16, cur);
             if (!IsEmptyOr(cur, b.Data)) return;
         }
         foreach (var b in a.Bands)
             gpu.WriteVramRect(TileX + b.U * 8, TileY + b.V * 16, 8, 16, b.Data);
+        _ownerGpu = gpu;
+        _ownerMem = Runtime.Mem;
         _bandsReady = true;
+    }
+
+    static bool OverlapsSlot(int x, int y, int w, int h)
+    {
+        var slot = _slot;
+        if (slot == null)
+        {
+            var a = _asset;
+            if (a == null) return false;
+            slot = new bool[64, 16];
+            foreach (var b in a.Bands) slot[b.U, b.V] = true;
+            _slot = slot;
+        }
+        int u0 = Math.Max(0, (x - TileX) / 8), u1 = Math.Min(63, (x + w - 1 - TileX) / 8);
+        int v0 = Math.Max(0, (y - TileY) / 16), v1 = Math.Min(15, (y + h - 1 - TileY) / 16);
+        if (x + w <= TileX || y + h <= TileY) return false;
+        for (int u = u0; u <= u1; u++)
+            for (int v = v0; v <= v1; v++)
+                if (slot[u, v]) return true;
+        return false;
     }
 
     /// <summary>

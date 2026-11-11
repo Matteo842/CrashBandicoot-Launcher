@@ -116,7 +116,7 @@ public sealed partial class Gpu
     bool HleWideScreenQuad(ReadOnlySpan<Vert> vertices, bool semi)
     {
         // #189: the main menu's fade covers its 16:9 bands too.
-        if (!(GpuHle.NativeWideRendererActive || Host.MainMenuWide.Drawing)
+        if (!(GpuHle.NativeWideRendererActive || Host.MainMenuWide.Drawing(this))
             || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default)
             return false;
         var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
