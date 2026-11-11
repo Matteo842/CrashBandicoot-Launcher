@@ -33,7 +33,7 @@ sealed partial class Editor
     readonly List<Vector2> _snapS = [];
     readonly List<Vector3> _snapP = [];
     readonly Dictionary<long, List<int>> _snapGrid = [];
-    (Vector3, float, float, int)? _snapSignature;
+    (Vector3, float, float, float, int)? _snapSignature;
     int _docVersion;
 
     static long Key(Kind k, int i) => ((long)k << 32) | (uint)i;
@@ -494,7 +494,7 @@ sealed partial class Editor
 
     void EnsureSnapTargets(HashSet<(int, int)> exclude)
     {
-        var sig = (_cam.Pos, _cam.Pitch, _cam.Yaw, _docVersion * 31 + _drawMeshes.Count);
+        var sig = (_cam.Pos, _cam.Pitch, _cam.Yaw, _cam.Zoom, _docVersion * 31 + _drawMeshes.Count);
         if (_snapSignature == sig) return;
         BuildSnapTargets(exclude);
         _snapSignature = sig;

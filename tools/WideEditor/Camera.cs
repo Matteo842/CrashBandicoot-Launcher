@@ -13,7 +13,11 @@ sealed class Camera
 {
     public Vector3 Pos;
     public float Pitch, Yaw;
-    public const float TanY = 2f / 3f, TanX = TanY * 16f / 9f, Near = 24, Far = 200000;
+    /// <summary>Lens zoom: 1 = the game's projection (288). The main-menu painting (#189) is ~1.82.</summary>
+    public float Zoom = 1;
+    public const float GameTanY = 2f / 3f, Near = 24, Far = 200000;
+    public float TanY => GameTanY / Zoom;
+    public float TanX => TanY * 16f / 9f;
     public const float CoreFraction = 0.75f;
 
     public Vector3 Forward => new(-MathF.Cos(Pitch) * MathF.Sin(Yaw), MathF.Sin(Pitch), -MathF.Cos(Pitch) * MathF.Cos(Yaw));
@@ -22,7 +26,7 @@ sealed class Camera
 
     public Matrix4x4 View => Matrix4x4.CreateLookAt(Pos, Pos + Forward, Up);
 
-    public static Matrix4x4 Proj
+    public Matrix4x4 Proj
     {
         get
         {

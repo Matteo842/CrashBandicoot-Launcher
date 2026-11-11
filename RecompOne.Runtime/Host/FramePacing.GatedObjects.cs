@@ -503,6 +503,121 @@ public static partial class FramePacing
         }
     }
 
+    // WalOC spike log push (#227). SpikeLogTransCommon SETs
+    // collider->x = x ± 0.9m. Original: the log runs before Crash every
+    // frame, so Crash is drawn at that edge every frame. Unlocked the log is
+    // gated: the push lands once per 34 wall ticks, Crash walks back into
+    // the log on the presents between, then snaps out again. Pressed
+    // against a log while invincible he shakes at 30 Hz. Hold him at the
+    // pushed edge until the log's next 30 Hz step decides again.
+    const uint StateWalSpikeLogUpWait = 4, StateWalSpikeLogUpActive = 5;
+    const uint StateWalSpikeLogDownWait = 7;
+    static uint _spikePushLog;
+    static int _spikePushX;
+    static bool _spikePushRight;
+    static uint _spikePushTicks;
+    static bool _spikePre;
+    static int _spikePreX;
+    static bool _spikePreTouch;
+    /// <summary>|pushed x − log x| seen on a real push: the GOOL 0.9m in trans units.</summary>
+    static int _spikePushDist;
+
+    static bool IsSpikeLogTrans(IMemory m, uint obj)
+    {
+        try
+        {
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeWalO)
+                return false;
+            uint state = m.ReadU32(obj + ObjStateOff);
+            return state is StateWalSpikeLogUpWait or StateWalSpikeLogUpActive
+                or StateWalSpikeLogDownWait or StateWalSpikeLogDownActive;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Before a gated object interprets: note Crash x if it is a spike log.</summary>
+    static void BeginSpikeLogStep(IMemory m, uint obj)
+    {
+        _spikePre = false;
+        if (obj == _spikePushLog) _spikePushLog = 0;
+        if (!IsSpikeLogTrans(m, obj) || !TryReadCrash(m, out uint crash)) return;
+        try
+        {
+            _spikePreX = (int)m.ReadU32(crash + ObjTransOff);
+            // Crash's physics wrote this touch on the presents before. The
+            // log's own Bound can clear it before trans (Crash exactly on
+            // the edge does not overlap), so read it here, not after.
+            _spikePreTouch = m.ReadU32(obj + ObjColliderOff) == crash;
+            _spikePre = true;
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
+    /// <summary>After that interpret: a moved Crash x is the trans push.</summary>
+    static void NoteSpikeLogPush(IMemory m, uint obj)
+    {
+        if (!_spikePre) return;
+        _spikePre = false;
+        if (!TryReadCrash(m, out uint crash)) return;
+        try
+        {
+            int x = (int)m.ReadU32(crash + ObjTransOff);
+            int logX = (int)m.ReadU32(obj + ObjTransOff);
+            bool right = x > logX;
+            if (x != _spikePreX)
+            {
+                _spikePushDist = Math.Abs(x - logX);
+            }
+            else
+            {
+                // Held exactly on the edge, the trans has nothing to move
+                // (x < x + 0.9m is false). Still touching: keep holding, or
+                // Crash walks back in for a whole 30 Hz step and the
+                // camera following him shakes (first #227 round).
+                if (_spikePushDist == 0
+                    || !(_spikePreTouch || m.ReadU32(obj + ObjColliderOff) == crash)) return;
+                x = right ? logX + _spikePushDist : logX - _spikePushDist;
+            }
+            _spikePushLog = obj;
+            _spikePushX = x;
+            _spikePushRight = right;
+            _spikePushTicks = _guestTicks;
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
+    /// <summary>After Crash's update on every present: keep him out of the pushing log.</summary>
+    static void HoldSpikeLogPush(IMemory m)
+    {
+        uint log = _spikePushLog;
+        if (log == 0) return;
+        if (unchecked(_guestTicks - _spikePushTicks) > 2 * RefTicks || !IsSpikeLogTrans(m, log))
+        {
+            _spikePushLog = 0;
+            return;
+        }
+        if (!TryReadCrash(m, out uint crash)) return;
+        try
+        {
+            int x = (int)m.ReadU32(crash + ObjTransOff);
+            if (_spikePushRight ? x < _spikePushX : x > _spikePushX)
+                m.WriteU32(crash + ObjTransOff, unchecked((uint)_spikePushX));
+        }
+        catch
+        {
+            // unmapped
+        }
+    }
+
     static uint CurrentGateFrame(out double phase)
     {
         uint elapsed = _waterArmed

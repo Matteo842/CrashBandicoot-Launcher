@@ -512,6 +512,8 @@ public static partial class FramePacing
     const uint StateWalSpikeLogUpSpawn = 3;
     /// <summary>WalOC <c>Spike_Log_Down_Active</c>. Inclusive end of the spike-log gate.</summary>
     const uint StateWalSpikeLogDownActive = 8;
+    /// <summary>WalOC <c>Wall_Moss</c>: slippery moss, runs on real dt (#227).</summary>
+    const uint StateWalMoss = 11;
     /// <summary>
     /// RWaOC. Wall mill + slide/pusher + seesaw gate; sensitive bob Euler.
     /// Lost City / Sunset Vista TimePathProg mill/pushers gate like Slippery Climb.

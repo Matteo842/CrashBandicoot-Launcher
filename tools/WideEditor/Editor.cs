@@ -521,7 +521,7 @@ sealed partial class Editor : IDisposable
         _gfx.EnsureTarget(w, h);
         w = _gfx.Width;
         h = _gfx.Height;
-        var proj = Camera.Proj;
+        var proj = _cam.Proj;
         proj.M11 /= widen;
         proj.M22 /= widen;
         float coreFraction = Camera.CoreFraction / widen;

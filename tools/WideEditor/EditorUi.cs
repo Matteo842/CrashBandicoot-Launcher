@@ -547,7 +547,37 @@ sealed partial class Editor
             if (ImGui.Button($"{s.Name}##{s.File}")) ApplySlot(s);
             Tip($"Camera del salvataggio rapido {s.Name}", null);
         }
-        ImGui.TextDisabled($"Camera {_cam.Pos.X:0} {_cam.Pos.Y:0} {_cam.Pos.Z:0}");
+        CameraNumbers();
+    }
+
+    /// <summary>Exact camera by numbers (pitch/yaw in 4096ths like path points) and lens zoom
+    /// (#189: the main-menu painting is a zoomed shot of N. Sanity Beach).</summary>
+    void CameraNumbers()
+    {
+        const float Unit = 4096f / MathF.Tau;
+        var pos = _cam.Pos;
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputFloat3("##campos", ref pos, "%.0f")) _cam.Pos = pos;
+        Tip("Posizione della camera (X Y Z). Clic per scrivere i numeri.", null);
+        float half = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) / 2;
+        float pitch = _cam.Pitch * Unit, yaw = _cam.Yaw * Unit;
+        ImGui.SetNextItemWidth(half);
+        if (ImGui.InputFloat("##campitch", ref pitch, 0, 0, "pitch %.0f")) { _cam.Pitch = pitch / Unit; _cam.ClampPitch(); }
+        Tip("Inclinazione in 4096esimi di giro, come i punti camera del gioco (positivo = guarda in su).", null);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(half);
+        if (ImGui.InputFloat("##camyaw", ref yaw, 0, 0, "yaw %.0f")) _cam.Yaw = yaw / Unit;
+        Tip("Rotazione in 4096esimi di giro, come i punti camera del gioco.", null);
+        float reset = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.X;
+        ImGui.SetNextItemWidth(_cam.Zoom != 1 ? ImGui.GetContentRegionAvail().X - reset : -1);
+        ImGui.SliderFloat("##camzoom", ref _cam.Zoom, 1, 3, "zoom %.2f");
+        Tip("Zoom dell'obiettivo. 1 = come nel gioco. Doppio clic per scrivere il valore.\n"
+            + "Il dipinto del menu principale corrisponde a circa 1.82.", null);
+        if (_cam.Zoom != 1)
+        {
+            ImGui.SameLine();
+            if (IconButton(Icon.Refresh, "Zoom normale (1)")) _cam.Zoom = 1;
+        }
     }
 
     void GoPath()

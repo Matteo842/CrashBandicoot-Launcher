@@ -109,6 +109,7 @@ public static partial class FramePacing
         _platCarry = false;
         _padRan = false;
         _padLatchOwner = 0;
+        _spikePre = false;
         RestorePadSpin(m);
         RestoreCrashStamp(m);
         _inCrashUpdate = false;
@@ -218,6 +219,7 @@ public static partial class FramePacing
             else
             {
                 LagCrashStampForEntity(m, _obj);
+                BeginSpikeLogStep(m, _obj);
                 WriteAllTicks(m, RefTicks);
                 FlushGatedRide(m, _obj);
                 SnapshotGatedCarry(m, _obj);
@@ -325,6 +327,7 @@ public static partial class FramePacing
             CaptureGateRot(m, _obj);
             CaptureBound(m, _obj);
             PaceGatedCarry(m, _obj);
+            NoteSpikeLogPush(m, _obj);
         }
         if (_crashObj && !_objScaled && _haveObj)
             FinishPacedScale(m);
@@ -335,6 +338,8 @@ public static partial class FramePacing
             PaceSpriteAnim(m);
             PaceExtraTrans(m);
         }
+        if (_crashObj && _haveObj && IsActive(m))
+            HoldSpikeLogPush(m);
         if (IsActive(m))
             WriteAllTicks(m, _frameTicks);
     }

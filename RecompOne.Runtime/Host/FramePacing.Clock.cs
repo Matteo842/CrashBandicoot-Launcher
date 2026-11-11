@@ -203,6 +203,8 @@ public static partial class FramePacing
         _platFrac.Clear();
         _platObj = false;
         _stallFrac = 0;
+        _spikePushLog = 0;
+        _spikePushDist = 0;
         ClearGatedRide();
     }
 

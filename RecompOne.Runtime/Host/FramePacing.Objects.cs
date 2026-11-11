@@ -44,6 +44,11 @@ public static partial class FramePacing
             if (IsGatedRiverObject(m, type, cat)) return false;
             if (IsGatedTempleSolid(m, obj, type)) return false;
             if (IsGatedWalocSpikeLog(m, obj, type)) return false;
+            // WalOC Wall_Moss (#227, Native Fortress slippery moss): invisible,
+            // trans slides Crash with spd(player->x, velx), already per tick.
+            // Gated, the whole 30 Hz slide landed on one present in four and
+            // the camera following Crash stepped (staircase shake).
+            if (type == GoolTypeWalO && m.ReadU32(obj + ObjStateOff) == StateWalMoss) return true;
             if (IsHud(m, obj)) return GamePaused(m);
             uint b = m.ReadU32(obj + ObjStatusBOff);
             if ((b & FlagSolidTop) != 0
