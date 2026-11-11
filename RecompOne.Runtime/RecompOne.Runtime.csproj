@@ -13,6 +13,7 @@
       <EmbeddedResource Include="Catalog\data\*.json" />
       <!-- Hand-made 16:9 fixes from tools/WideEditor (FramePacing.NativeWideUserEdits.cs). -->
       <EmbeddedResource Include="WideEdits\*.json" />
+      <EmbeddedResource Include="Host\Assets\MainMenuWide.bin" LogicalName="RecompOne.Runtime.Host.Assets.MainMenuWide.bin" />
     </ItemGroup>
 
     <ItemGroup>

@@ -115,7 +115,9 @@ public sealed partial class Gpu
 
     bool HleWideScreenQuad(ReadOnlySpan<Vert> vertices, bool semi)
     {
-        if (!GpuHle.NativeWideRendererActive || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default)
+        // #189: the main menu's fade covers its 16:9 bands too.
+        if (!(GpuHle.NativeWideRendererActive || Host.MainMenuWide.Drawing)
+            || GpuHle.CurrentPrimitiveKind != GpuHle.PrimitiveKind.Default)
             return false;
         var a = vertices[0]; var b = vertices[1]; var c = vertices[2]; var d = vertices[3];
         // Full-screen flat overlays include the subtractive death fade. Keep
@@ -312,6 +314,7 @@ public sealed partial class Gpu
         int n = _loadW * _loadH;
         var pixels = _hleLoad;
         Host.IntroVersionSign.Patch(_loadW, _loadH, pixels, n);
+        Host.MainMenuWide.Patch(_loadX, _loadY, _loadW, _loadH, pixels, n);
         Events.VramTransfers.NotifyLoad(_loadX, _loadY, _loadW, _loadH, pixels, n);
 
         var span = pixels.AsSpan(0, n);
@@ -321,6 +324,22 @@ public sealed partial class Gpu
             WriteSoftLoadRect(span);
 
         _hleLoadActive = false;
+        Host.MainMenuWide.WriteBands(this);
+    }
+
+    /// <summary>Host writes into VRAM outside a game upload (#189 main-menu band tiles).</summary>
+    internal void WriteVramRect(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
+    {
+        if (HleOn) { GpuHle.Backend!.WriteVram(x, y, w, h, px); return; }
+        for (int i = 0; i < w * h; i++)
+            Vram[((y + i / w) & (VramHeight - 1)) * VramWidth + ((x + i % w) & (VramWidth - 1))] = px[i];
+    }
+
+    internal void ReadVramRect(int x, int y, int w, int h, Span<ushort> px)
+    {
+        if (HleOn) { GpuHle.Backend!.ReadVram(x, y, w, h, px); return; }
+        for (int i = 0; i < w * h; i++)
+            px[i] = Vram[((y + i / w) & (VramHeight - 1)) * VramWidth + ((x + i % w) & (VramWidth - 1))];
     }
 
     void WriteSoftLoadRect(ReadOnlySpan<ushort> px)

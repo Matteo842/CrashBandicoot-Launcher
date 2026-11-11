@@ -260,6 +260,12 @@ public sealed partial class Gpu
         if (Hle.GpuHle.CurrentPrimitiveKind == Hle.GpuHle.PrimitiveKind.Hud
             && TryNativeWideHudShift(x, x + w, out int hudShift))
             x += hudShift;
+        if (HleOn && tex && Host.MainMenuWide.Drawing
+            && Host.MainMenuWide.IsFirstTile(x, y, w, h, CurTPage(), _drawOffsetX - 256, _drawOffsetY - 120))
+        {
+            Hle.GpuHle.Backend!.SetDrawEnv(CurEnv());
+            Host.MainMenuWide.DrawBands(Hle.GpuHle.Backend!, _drawOffsetX - 256, _drawOffsetY - 120);
+        }
         if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
 
         for (int dy = 0; dy < h; dy++)

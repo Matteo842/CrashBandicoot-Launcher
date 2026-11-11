@@ -129,10 +129,10 @@ public static class GpuHle
             uint lid = m.ReadU32(Catalog.LevelIdAddr);
             uiOrCinema = Catalog.Levels.IsUiOrCinema(lid);
             wideAnyway = uiOrCinema && WideAspect > 0f
-                && (IsWideCinema(lid) || Host.FramePacing.IslandMapShowing(m));
+                && (IsWideCinema(lid) || Host.FramePacing.IslandMapShowing(m) || Host.MainMenuWide.Showing(m));
         }
 
-        // Gameplay, the island map and the intro/ending (#189); menus/title keep clean 4:3 with black pillars.
+        // Gameplay, the island map, the main menu and the intro/ending (#189); other menus keep 4:3 with black pillars.
         WideFovActive = WideAspect > 0f && (!uiOrCinema || wideAnyway);
         if (!WideFovActive)
             NativeWideRendererActive = false;
