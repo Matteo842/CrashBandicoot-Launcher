@@ -18,7 +18,9 @@ public static partial class FramePacing
         public readonly List<int> Hidden = [];
         public readonly HashSet<int> Removed = [];
         public readonly Dictionary<int, (int Source, int Turn)> Retexture = [];
-        public readonly List<(int Polygon, Vector3 Center)> HiddenRepairs = [];
+        // Switched-off automatic repairs, by polygon (the editor's camera clean-up can switch
+        // off thousands, so the lookup must not scan them all for each repair).
+        public readonly Dictionary<int, List<Vector3>> HiddenRepairs = [];
     }
 
     static Dictionary<NativeWideSceneryKey, NativeWideUserMesh> _nativeWideUserEdits = [];
@@ -115,8 +117,9 @@ public static partial class FramePacing
                 foreach (var h in off.EnumerateArray())
                 {
                     var c = h.GetProperty("c");
-                    user.HiddenRepairs.Add((h.GetProperty("poly").GetInt32(),
-                        new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle()) - origin));
+                    int poly = h.GetProperty("poly").GetInt32();
+                    if (!user.HiddenRepairs.TryGetValue(poly, out var centers)) user.HiddenRepairs[poly] = centers = [];
+                    centers.Add(new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle()) - origin);
                 }
             edits[key] = user;
         }
@@ -323,11 +326,11 @@ public static partial class FramePacing
         foreach (var repair in repairs)
         {
             bool off = false;
-            if (user.HiddenRepairs.Count > 0)
+            if (user.HiddenRepairs.TryGetValue(repair.Polygon, out var centers))
             {
                 var center = (Position(repair.A) + Position(repair.B) + Position(repair.C)) / 3;
-                foreach (var (polygon, at) in user.HiddenRepairs)
-                    if (polygon == repair.Polygon && Vector3.DistanceSquared(center, at) < 4) { off = true; break; }
+                foreach (var at in centers)
+                    if (Vector3.DistanceSquared(center, at) < 4) { off = true; break; }
             }
             if (!off) result.Add(repair);
         }

@@ -510,14 +510,22 @@ sealed partial class Editor : IDisposable
         _gfx.Depth(depth, depth);
     }
 
-    void RenderScene()
+    void RenderScene() => RenderScene((int)(_view.W * _fbScale), (int)(_view.H * _fbScale), 1);
+
+    /// <summary><paramref name="widen"/> &gt; 1: camera sweep render (field of view widened,
+    /// only the id buffer matters, nothing shown).</summary>
+    void RenderScene(int w, int h, float widen)
     {
         if (L == null) return;
-        int w = (int)(_view.W * _fbScale), h = (int)(_view.H * _fbScale);
+        bool sweep = widen != 1;
         _gfx.EnsureTarget(w, h);
         w = _gfx.Width;
         h = _gfx.Height;
-        _gfx.Begin(_cam.View, Camera.Proj, _cam.Pos, Vector3.Zero);
+        var proj = Camera.Proj;
+        proj.M11 /= widen;
+        proj.M22 /= widen;
+        float coreFraction = Camera.CoreFraction / widen;
+        _gfx.Begin(_cam.View, proj, _cam.Pos, Vector3.Zero);
         _gfx.Light(_flatLight, _viewBright);
         int tint = (_tintAuto ? 1 : 0) | (_tintUser ? 2 : 0) | (!_gameView && _markHidden ? 4 : 0);
 
@@ -528,7 +536,7 @@ sealed partial class Editor : IDisposable
         // (in the game view only in the side bands).
         if (_gameView)
         {
-            int cw = (int)MathF.Round(w * Camera.CoreFraction), cx = (w - cw) / 2;
+            int cw = (int)MathF.Round(w * coreFraction), cx = (w - cw) / 2;
             foreach (var (x, bw) in new[] { (0, cx), (cx + cw, w - cx - cw) })
             {
                 _gfx.Scissor(x, 0, bw, h);
@@ -541,7 +549,7 @@ sealed partial class Editor : IDisposable
 
         if (_gameView)
         {
-            int coreW = (int)MathF.Round(w * Camera.CoreFraction), coreX = (w - coreW) / 2;
+            int coreW = (int)MathF.Round(w * coreFraction), coreX = (w - coreW) / 2;
             _gfx.Scissor(coreX, 0, coreW, h);
             _gfx.State(tint, false, -1);
             bool userCore = _showUser && AnyUserCore;
@@ -555,7 +563,7 @@ sealed partial class Editor : IDisposable
             // The game sorts these by distance among its own polygons; true depth here
             // is the editor's approximation of that order.
             if (userCore) Passes(DrawUserCore);
-            if (_ghostCore && _showUser)
+            if (_ghostCore && _showUser && !sweep)
             {
                 _gfx.Ghost(true);
                 Passes(DrawUserBandOnly);
@@ -581,6 +589,11 @@ sealed partial class Editor : IDisposable
             _gfx.ClearDepth();
             _gfx.State(tint, false, 0);
             Passes(() => { DrawRetail(false); DrawExtras(); });
+        }
+        if (sweep)
+        {
+            _gfx.End();
+            return;
         }
         if (_wire)
         {
@@ -644,6 +657,11 @@ sealed partial class Editor : IDisposable
                 case Screen.Loading:
                     LoadingScreen();
                     FinishLoad();
+                    break;
+                case Screen.Edit when _sweep != null:
+                    Layout();
+                    RebuildBuffers();
+                    SweepFrame();
                     break;
                 case Screen.Edit:
                     Layout();

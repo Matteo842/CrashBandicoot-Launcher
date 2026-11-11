@@ -190,6 +190,7 @@ sealed partial class Editor
             if (ImGui.MenuItem("Deseleziona", null, false, any)) _sel.Clear();
             if (ImGui.MenuItem("Inquadra", "F", false, any)) FrameSelection();
             if (ImGui.MenuItem("Seleziona collegati", "L", false, any)) SelectLinked();
+            if (ImGui.MenuItem("Mai visti dalla camera...")) StartSweep();
             ImGui.SeparatorText("Selezionabili");
             ImGui.MenuItem("Originali", null, ref _pickRetail);
             ImGui.MenuItem("Automatici", null, ref _pickAuto);

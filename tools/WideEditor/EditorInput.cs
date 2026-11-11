@@ -969,10 +969,11 @@ sealed partial class Editor
     void SetRepairsOff(bool off)
     {
         BeginChange();
+        var wasOff = RepairOffTest();
         foreach (var key in _sel.Where(k => KindOf(k) == Kind.Auto))
         {
             var t = _auto!.Tris[IndexOf(key)];
-            bool hidden = _doc.IsRepairHidden(t);
+            bool hidden = wasOff(t);
             if (off && !hidden) _doc.HiddenRepairs.Add(new(t.Mesh.Name, t.Poly, t.Center));
             if (!off && hidden)
                 _doc.HiddenRepairs.RemoveAll(h => h.Poly == t.Poly && h.Mesh == t.Mesh.Name

@@ -234,6 +234,7 @@ sealed class Gfx : IDisposable
     uint _pages;
     uint _fbo, _color, _id, _pos, _depth;
     public int Width { get; private set; }
+    public bool SweepIds;
     public int Height { get; private set; }
 
     public Gfx(GL gl)
@@ -415,6 +416,8 @@ sealed class Gfx : IDisposable
     /// <summary>Opaque pass (pass 0) or one PS1 blend mode (pass 1, abr 0-3).</summary>
     public void Pass(int pass, int abr = 0)
     {
+        // Camera sweep: see-through pixels keep the id of what is under them.
+        if (SweepIds) _gl.ColorMask(1, pass == 0, pass == 0, pass == 0, pass == 0);
         _gl.Uniform1(U("uPass"), pass);
         _gl.Uniform1(U("uAbr"), abr);
         if (pass == 0)
