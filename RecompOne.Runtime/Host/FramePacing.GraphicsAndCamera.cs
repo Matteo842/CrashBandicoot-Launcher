@@ -21,6 +21,7 @@ public static partial class FramePacing
         RestoreSvtx(m);
         RestoreNativeWideObjectFrustum(m);
         WidenNativeWideObjectFrustum(c, m);
+        WidenNativeWideEpilogueBackground(c, m);
         BeginNativeWideObjectRepair(c, m);
         BeginNativeWideCoreDepthObject(c, m);
         TrackHogRidePose(c, m);

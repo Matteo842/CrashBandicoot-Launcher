@@ -379,7 +379,7 @@ public class ViewConfig
     }
 
     /// <summary>
-    /// Interpolated high FPS (prototype): the game logic stays the original 30 FPS
+    /// "Exact 30 FPS logic, interpolated picture": the game logic stays the original 30 FPS
     /// one and only the picture is drawn at the selected frame rate, between the
     /// last two logic frames. Off by default: delta-time logic as before.
     /// </summary>

@@ -101,6 +101,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _muted;
     ThemeCheck? _fullscreen;
     ThemeCheck? _widescreen;
+    ThemeCheck? _interpolatedFps;
     ComboBox? _frameRate;
     ComboBox? _internalRes;
     ComboBox? _renderer;
@@ -304,6 +305,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_muted, state, "muted");
         SetCheck(_fullscreen, state, "fullscreen");
         SetCheck(_widescreen, state, "widescreen");
+        SetCheck(_interpolatedFps, state, "interpolatedFps");
         if (state.TryGetProperty("frameRate", out var fr) && fr.TryGetInt32(out var fps))
             SetCombo(_frameRate, fps);
         if (state.TryGetProperty("internalResolution", out var ir) && ir.TryGetInt32(out var scale))
@@ -1589,6 +1591,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += rowGap;
         AddHint("Gameplay, bonus, level end and map; title and menus stay 30. 60–240: same speed as 30, unique frames. PAL speed: 25 FPS, 17% slower, like a PAL TV. Keys 1–5 switch modes.");
 
+        _interpolatedFps = MakeCheck("Exact 30 FPS logic, interpolated picture");
+        _interpolatedFps.Location = new Point(12, y);
+        page.Controls.Add(_interpolatedFps);
+        y += 52;
+        AddHint("With 60–240 FPS: the game logic runs at 30 like the original (tested identical to the PS1), only the picture is interpolated. About 33 ms more input lag.");
+
         AddLabel("Internal resolution");
         _internalRes = MakeCombo(new Point(controlX, y), [
             (1, "Native (1x)"), (2, "2x"), (4, "4x"), (8, "8x (4K)"),
@@ -1743,6 +1751,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 muted = _muted?.Checked ?? false,
                 fullscreen = _fullscreen?.Checked ?? false,
                 widescreen = _widescreen?.Checked ?? false,
+                interpolatedFps = _interpolatedFps?.Checked ?? false,
                 frameRate = _frameRate?.SelectedItem is Kv frKv ? frKv.Value : 0,
                 internalResolution = _internalRes?.SelectedItem is Kv irKv ? irKv.Value : 4,
                 textureFilter = _texFilter?.SelectedItem is Kv tfKv ? tfKv.Value : 0,

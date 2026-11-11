@@ -63,6 +63,7 @@ public static partial class FramePacing
 
     static void RestoreNativeWideObjectFrustum(IMemory? m)
     {
+        RestoreNativeWideEpilogueBackground(m);
         if (!_wideFrustumPatched) return;
         uint obj = _wideFrustumObj;
         uint saved = _wideFrustumSaved;

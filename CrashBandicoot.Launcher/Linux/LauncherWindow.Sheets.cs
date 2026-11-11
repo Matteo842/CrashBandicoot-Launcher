@@ -271,6 +271,7 @@ sealed partial class LauncherWindow
             [(0, "Original (30 FPS)"), (60, "60 FPS"), (120, "120 FPS"), (240, "240 FPS"), (-1, "Uncapped"),
                 (25, "25 FPS (PAL speed)")],
             view.FrameRate));
+        var interpolatedFps = Nav(new ThemeCheck("Exact 30 FPS logic, interpolated picture") { Checked = view.InterpolatedFps });
         var internalRes = Nav(MakeCombo([(1, "Native (1x)"), (2, "2x"), (4, "4x"), (8, "8x (4K)")],
             view.InternalResolution));
 
@@ -313,6 +314,8 @@ sealed partial class LauncherWindow
                     Hint("Native 16:9 gameplay with a wider view. Crates and other objects stay visible in the extra view. Menus, map, and cutscenes stay 4:3."),
                     Row(Label("Frame rate", 202), frameRate, 14),
                     Hint("Gameplay, bonus, level end and map; title and menus stay 30. 60–240: same speed as 30, unique frames. PAL speed: 25 FPS, 17% slower, like a PAL TV. Keys 1–5 switch modes."),
+                    WithMargin(interpolatedFps, new Thickness(0, 0, 0, 14)),
+                    Hint("With 60–240 FPS: the game logic runs at 30 like the original (tested identical to the PS1), only the picture is interpolated. About 33 ms more input lag."),
                     Row(Label("Internal resolution", 202), internalRes, 14),
                     Hint("Applies on next game start. Use 8x on 4K monitors.", 8),
                 },
@@ -391,6 +394,7 @@ sealed partial class LauncherWindow
             view.Fullscreen = fullscreen.Checked;
             view.Widescreen = widescreen.Checked;
             view.FrameRate = ComboValue(frameRate, 0);
+            view.InterpolatedFps = interpolatedFps.Checked;
             view.InternalResolution = ComboValue(internalRes, 4);
             view.TextureFilter = ComboValue(texFilter, 0);
             view.TextureFilterStrength = strength.Value / 100f;

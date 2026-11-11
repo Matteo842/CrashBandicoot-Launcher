@@ -1,10 +1,69 @@
 using System.Numerics;
 using RecompOne.Runtime.Memory;
+using RecompOne.Runtime.Context;
+using RecompOne.Runtime.Hle;
 
 namespace RecompOne.Runtime.Host;
 
 public static partial class FramePacing
 {
+    // The 100% ending's epilogue (#189, The Great Hall's y__IZ) shows each boss
+    // in front of a stone wall: WinGC Background_Stance, a FLAG_2D model
+    // (Obg0V) at scale 0.6 with a random tilt, sized for the 4:3 screen with
+    // about 8% to spare on each side (x -20..529 of 512). The 16:9 bands showed
+    // black beside it. While it is drawn in widescreen its scale grows by the
+    // 16:9 / 4:3 ratio, so the wall keeps the same spare on the wider screen;
+    // nothing else of the scene changes.
+    const uint NativeWideEpilogueLevel = 44;
+    const int NativeWideEpilogueScale = 2458, NativeWideEpilogueScaleSlop = 64;
+
+    static uint _wideEpilogueObj;
+    static int _wideEpilogueX, _wideEpilogueY, _wideEpilogueZ;
+
+    static void WidenNativeWideEpilogueBackground(CpuContext c, IMemory m)
+    {
+        if (!GpuHle.WideFovActive || GpuHle.WideAspect <= GpuHle.BaseAspect) return;
+        uint obj = c.A2;
+        if ((obj & 0xFF000000u) != 0x80000000u) obj = _obj;
+        if ((obj & 0xFF000000u) != 0x80000000u) return;
+        try
+        {
+            if (m.ReadU32(Catalogs.Catalog.LevelIdAddr) != NativeWideEpilogueLevel) return;
+            if ((m.ReadU32(obj + ObjStatusBOff) & Flag2D) == 0) return;
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeWinG) return;
+            int x = (int)m.ReadU32(obj + ObjScaleOff), y = (int)m.ReadU32(obj + ObjScaleOff + 4),
+                z = (int)m.ReadU32(obj + ObjScaleOff + 8);
+            if (Math.Abs(x - NativeWideEpilogueScale) > NativeWideEpilogueScaleSlop || y != x || z != x) return;
+            float grow = GpuHle.WideAspect / GpuHle.BaseAspect;
+            _wideEpilogueObj = obj;
+            (_wideEpilogueX, _wideEpilogueY, _wideEpilogueZ) = (x, y, z);
+            for (uint i = 0; i < 3; i++)
+                m.WriteU32(obj + ObjScaleOff + i * 4, (uint)(int)MathF.Round(x * grow));
+        }
+        catch
+        {
+            RestoreNativeWideEpilogueBackground(m);
+        }
+    }
+
+    static void RestoreNativeWideEpilogueBackground(IMemory? m)
+    {
+        uint obj = _wideEpilogueObj;
+        if (obj == 0) return;
+        _wideEpilogueObj = 0;
+        if (m == null) return;
+        try
+        {
+            m.WriteU32(obj + ObjScaleOff, (uint)_wideEpilogueX);
+            m.WriteU32(obj + ObjScaleOff + 4, (uint)_wideEpilogueY);
+            m.WriteU32(obj + ObjScaleOff + 8, (uint)_wideEpilogueZ);
+        }
+        catch
+        {
+            // object or overlay gone
+        }
+    }
+
     // The ending's skies (#189): sk3VW behind the blimp, sk4VW behind the
     // credits. Both are camera-centred grids, columns every 18° around the
     // camera and rows at fixed heights, culled to the 4:3 view: sk3VW lost its

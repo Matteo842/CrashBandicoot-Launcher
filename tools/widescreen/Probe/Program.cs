@@ -65,6 +65,8 @@ ConfigManager.View.GraphicsApi = ViewConfig.GraphicsApiOpenGl;
 CheatConfig.GodMode = false; CheatConfig.Fly = false;
 // LEVELSELECT=1: every map node open (walk the whole island map, #189).
 CheatConfig.LevelSelect = Environment.GetEnvironmentVariable("LEVELSELECT") == "1";
+bool gemStamp = Environment.GetEnvironmentVariable("GEMSTAMP") == "1";
+int flyStop = int.TryParse(Environment.GetEnvironmentVariable("FLYSTOP"), out int fs) ? fs : 0;
 uint mapLevel = uint.TryParse(Environment.GetEnvironmentVariable("MAPLEVEL"), out uint ml) ? ml : 0;
 bool mapLevelSet = false;
 // PACELOG=1 writes state/logs/pacing.txt (unlock arm, land-lock gates).
@@ -187,6 +189,9 @@ int[] CrashPos(IMemory m)
 }
 
 // OBJLOG=<gool type> logs that type's live objects per frame: entity id, spawn, state, anim frame, x/y/z.
+// OBJDUMP=1: every object as [gool type, state, status_b, scale x, y, z].
+bool objDump = Environment.GetEnvironmentVariable("OBJDUMP") == "1";
+var goolClass = typeof(FramePacing).GetMethod("TryReadGoolClass", BindingFlags.Static | BindingFlags.NonPublic)!;
 int objLogType = int.TryParse(Environment.GetEnvironmentVariable("OBJLOG"), out int olt) ? olt : -1;
 List<int[]> LiveObjects(IMemory m)
 {
@@ -198,6 +203,13 @@ List<int[]> LiveObjects(IMemory m)
             if (m.ReadU32(obj) == 2) Walk(m.ReadU32(obj + 4), depth + 1);
             else
             {
+                if (objDump)
+                {
+                    var args = new object[] { m, obj, 0u, 0u };
+                    bool ok = (bool)goolClass.Invoke(null, args)!;
+                    found.Add([ok ? (int)(uint)args[2] : -1, (int)m.ReadU32(obj + 0x2C), (int)m.ReadU32(obj + 0xCC),
+                        (int)m.ReadU32(obj + 0x98), (int)m.ReadU32(obj + 0x9C), (int)m.ReadU32(obj + 0xA0)]);
+                }
                 uint entity = m.ReadU32(obj + 0x110);
                 if ((entity & 0xFFE00000u) == 0x80000000u && m.ReadU8(entity + 18) == objLogType)
                     found.Add([m.ReadU16(entity + 8), m.ReadU8(entity + 19), (int)m.ReadU32(obj + 0x2C),
@@ -244,7 +256,7 @@ object Describe(IMemory m)
         render = renders, frame = frames, zone = zoneName, crash = CrashPos(m),
         cam = new[] { (int)m.ReadU32(0x80057864u) >> 8, (int)m.ReadU32(0x80057868u) >> 8, (int)m.ReadU32(0x8005786Cu) >> 8 },
         proj = (int)m.ReadU32(0x800578D0u), matrix = mat, worlds, cpu = FramePacing.LastNativeWideCpuMs,
-        objs = objLogType >= 0 ? LiveObjects(m) : null,
+        objs = objLogType >= 0 || objDump ? LiveObjects(m) : null,
     };
 }
 
@@ -293,6 +305,9 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
         original(c, m); renders++;
         TriLog.Stop();
         if (stateFile != null && !stateRequested && frames >= stateAt) { SaveStates.RequestLoad(1); stateRequested = true; }
+        // FLYSTOP=<frame>: the flight ends there and Crash falls and lands on his own
+        // (cutscene triggers that need him grounded, e.g. Tawna in the Great Hall).
+        if (path != null && flyStop > 0 && frames >= flyStop) { flying = false; path = null; }
         if (path != null && frames >= int.Parse(path[1]))
         {
             flying = true;
@@ -312,6 +327,9 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
                     at = (at.X + (w.X - at.X) * t, at.Y + (w.Y - at.Y) * t, at.Z + (w.Z - at.Z) * t);
                     time -= Math.Min(d, len) / w.S;
                 }
+                // GEMSTAMP=1: the Great Hall's gem path cameras follow only while a gem
+                // platform carries Crash (gem_stamp = frames_elapsed, as in #87).
+                if (gemStamp) m.WriteU32(0x80061990u, m.ReadU32(0x80060E04u));
                 // A small velocity keeps StopAtZone re-homing Crash's zone.
                 m.WriteU32(crash + 0xCC, m.ReadU32(crash + 0xCC) & ~0x20u);
                 m.WriteU32(crash + 0xA4, (uint)(int)(dir.X * 0x8000)); m.WriteU32(crash + 0xA8, (uint)(int)(dir.Y * 0x8000));
