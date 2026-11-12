@@ -236,7 +236,10 @@ public static partial class FramePacing
         {
             uint obj = c.A2;
             if ((obj & 0xFF000000u) == 0x80000000u && obj == m.ReadU32(CrashPtrAddr))
+            {
                 PatchHogRideMesh(c, m, obj, c.A0, blend: false);
+                PatchWarpMesh(c, m, obj, c.A0, blend: false);
+            }
         }
         catch
         {

@@ -635,6 +635,7 @@ public static partial class FramePacing
         if (CrashDeathInitFrame(m, _obj))
         {
             _crashLandAcc = 0;
+            _crashLandSteps++;
             return true;
         }
         _crashLandAcc += _exactTicks;
@@ -646,9 +647,60 @@ public static partial class FramePacing
             return false;
         }
         _crashLandAcc -= RefTicks;
+        _crashLandSteps++;
         if (_crashObj)
             LogDeathFade(m, _obj);
         return true;
+    }
+
+    /// <summary>Land-locked Crash steps (one per 34 wall ticks); drives the warp mesh blend.</summary>
+    static uint _crashLandSteps;
+    const uint WarpInStateNtscU = 40;
+    static uint _warpMeshFrom, _warpMeshTo, _warpMeshToEntry, _warpMeshStep, _warpMeshSeenStep;
+
+    /// <summary>
+    /// #224: Warp_In is <c>playframesback(WILLY_WARP_IN, 20)</c>: the whole
+    /// spin is vertex animation and Crash does not move. Land-locked, every
+    /// 34 wall ticks he takes one step and the skip presents redraw the same
+    /// frame, and Crash's mesh is never blended outside the hog ride (#207),
+    /// so the warp-in played at 30 FPS while the rest of the level ran
+    /// unlocked. Same trailing blend as <see cref="PatchHogRideMesh"/>: the
+    /// previous drawn frame into the current one by the land-lock phase
+    /// (<c>_crashLandAcc</c>), at most one original frame behind. Warp_Out is
+    /// the mirror. A pose held past its own step is drawn as authored.
+    /// Display only.
+    /// </summary>
+    static void PatchWarpMesh(CpuContext c, IMemory m, uint obj, uint drawn, bool blend = true)
+    {
+        if ((drawn & 0xFF000000u) != 0x80000000u) return;
+        // NTSC-U Warp_In is index 40 (StateDeathWarthog in the gooc numbering), not 41.
+        uint state = m.ReadU32(obj + ObjStateOff);
+        if ((state != WarpInStateNtscU && state != StateWarpOut)
+            || (m.ReadU32(obj + ObjStateFlagsOff) & FlagStateDeathCine) != 0)
+        {
+            _warpMeshTo = 0;
+            return;
+        }
+        uint step = _crashLandSteps;
+        if (drawn != _warpMeshTo)
+        {
+            // Only blend from the frame drawn on the step right before, while its entry still holds it.
+            bool previous = _warpMeshTo != 0 && _warpMeshSeenStep + 1 >= step
+                && IsEntryFrame(m, _warpMeshToEntry, _warpMeshTo);
+            _warpMeshFrom = previous ? _warpMeshTo : drawn;
+            _warpMeshTo = drawn;
+            _warpMeshToEntry = TrySvtxEntry(c, m, obj, out uint en, out _) ? en : 0;
+            _warpMeshStep = step;
+        }
+        _warpMeshSeenStep = step;
+        if (!blend || _warpMeshFrom == drawn || step != _warpMeshStep) return;
+        if (GamePaused(m)) return;
+        double t = _crashLandAcc / RefTicks;
+        if (t < 0) t = 0;
+        if (t >= 0.99) return;
+        int n = SvtxVertCount(m, drawn);
+        if (n <= 0 || n > SvtxVertMax || n != SvtxVertCount(m, _warpMeshFrom)) return;
+        LerpSvtxFrame(m, drawn, _warpMeshFrom, drawn, n, t);
     }
 
     /// <summary>

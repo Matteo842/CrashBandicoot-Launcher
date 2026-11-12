@@ -59,6 +59,8 @@ ConfigManager.Game.CdPath = disc; ConfigManager.Game.Muted = true;
 // WIDE=0 runs the original 4:3 view (retail comparison frames).
 ConfigManager.View.Widescreen = Environment.GetEnvironmentVariable("WIDE") != "0"; ConfigManager.View.InternalResolution = int.TryParse(Environment.GetEnvironmentVariable("RES"), out int res) ? res : 2;
 ConfigManager.View.Fullscreen = false; ConfigManager.View.FrameRate = fps;
+// VSYNC=0: no vsync, so --fps above the monitor rate really presents that often.
+if (Environment.GetEnvironmentVariable("VSYNC") == "0") ConfigManager.View.VSync = false;
 ConfigManager.View.HideTopBar = true;
 // Frames are read back from the OpenGL backend (Windows Auto now starts on Vulkan).
 ConfigManager.View.GraphicsApi = ViewConfig.GraphicsApiOpenGl;
@@ -188,6 +190,14 @@ int[] CrashPos(IMemory m)
     return [(int)m.ReadU32(crash + 0x80) >> 8, (int)m.ReadU32(crash + 0x84) >> 8, (int)m.ReadU32(crash + 0x88) >> 8];
 }
 
+var landAcc = typeof(FramePacing).GetField("_crashLandAcc", BindingFlags.Static | BindingFlags.NonPublic)!;
+int crashMeshHash = 0;
+int CrashWord(IMemory m, uint off)
+{
+    uint crash = m.ReadU32(CrashPointer);
+    return (crash & 0xFF000000u) == 0x80000000u ? (int)m.ReadU32(crash + off) : -1;
+}
+
 // OBJLOG=<gool type> logs that type's live objects per frame: entity id, spawn, state, anim frame, x/y/z.
 // OBJDUMP=1: every object as [gool type, state, status_b, scale x, y, z].
 bool objDump = Environment.GetEnvironmentVariable("OBJDUMP") == "1";
@@ -254,6 +264,7 @@ object Describe(IMemory m)
     return new
     {
         render = renders, frame = frames, zone = zoneName, crash = CrashPos(m),
+        st = CrashWord(m, 0x2C), anim = CrashWord(m, 0x10C), acc = Math.Round((double)landAcc.GetValue(null)!, 2), mesh = crashMeshHash,
         cam = new[] { (int)m.ReadU32(0x80057864u) >> 8, (int)m.ReadU32(0x80057868u) >> 8, (int)m.ReadU32(0x8005786Cu) >> 8 },
         proj = (int)m.ReadU32(0x800578D0u), matrix = mat, worlds, cpu = FramePacing.LastNativeWideCpuMs,
         objs = objLogType >= 0 || objDump ? LiveObjects(m) : null,
@@ -283,6 +294,43 @@ using var noCanopy = Environment.GetEnvironmentVariable("NOCANOPY") == "1"
 using var noSky = Environment.GetEnvironmentVariable("NOSKY") == "1"
     ? new Hook(typeof(FramePacing).GetMethod("NativeWideSkyArc", BindingFlags.Static | BindingFlags.NonPublic)!,
         typeof(NoFix).GetMethod(nameof(NoFix.NoArc))!)
+    : null;
+
+// NOWARPBLEND=1 turns off the #224 warp-in mesh blend (before/after pairs).
+using var noWarpBlend = Environment.GetEnvironmentVariable("NOWARPBLEND") == "1"
+    ? new Hook(typeof(FramePacing).GetMethod("PatchWarpMesh", BindingFlags.Static | BindingFlags.NonPublic)!,
+        (Action<Action<CpuContext, IMemory, uint, uint, bool>, CpuContext, IMemory, uint, uint, bool>)
+        ((original, c, m, obj, drawn, blend) => { }))
+    : null;
+// WARPSNAP=1 captures only while Crash is in Warp_In (NTSC-U 40) / Warp_Out (32), plus 4 renders after.
+bool warpSnap = Environment.GetEnvironmentVariable("WARPSNAP") == "1";
+int warpTail = 0;
+bool CrashWarping(IMemory m)
+{
+    uint crash = m.ReadU32(CrashPointer);
+    if ((crash & 0xFF000000u) != 0x80000000u) return false;
+    uint st = m.ReadU32(crash + 0x2C);
+    if (st is 40 or 41 or 32) warpTail = 4;
+    else if (warpTail > 0) warpTail--;
+    else return false;
+    return true;
+}
+
+// Hash of Crash's mesh as drawn (after the pacing patch) on the last draw: shows whether
+// a present drew a new pose (#224).
+using var meshHook = warpSnap
+    ? new Hook(typeof(FramePacing).GetMethod(nameof(FramePacing.PreGfxTransformMesh))!,
+        (Func<Func<CpuContext, IMemory, bool>, CpuContext, IMemory, bool>)((original, c, m) =>
+        {
+            bool run = original(c, m);
+            if (c.A2 == m.ReadU32(CrashPointer) && (c.A0 & 0xFF000000u) == 0x80000000u)
+            {
+                var h = new HashCode();
+                for (uint i = 0; i < 1024; i += 4) h.Add(m.ReadU32(c.A0 + i));
+                crashMeshHash = h.ToHashCode();
+            }
+            return run;
+        }))
     : null;
 
 // TRILOG=<render> writes every triangle the backend gets during that render to tris<render>.txt.
@@ -341,11 +389,15 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
                 if ((zone & 0xFF000000u) == 0x80000000u) m.WriteU32(crash + 0x28, zone);
             }
         }
-        if (renders % snapEvery == 0 && frames >= snapFrom && GpuHle.Backend is GlBackend backend)
+        if (renders % snapEvery == 0 && frames >= snapFrom && (!warpSnap || CrashWarping(m))
+            && GpuHle.Backend is GlBackend backend)
         {
             var env = Runtime.Gpu!.CurrentHleDrawEnv;
             backend.PresentDisplay(env.ClipX0, env.ClipY0, env.ClipX1 - env.ClipX0 + 1, env.ClipY1 - env.ClipY0 + 1);
-            Capture(backend, Path.Combine(output, $"r{renders:D5}.png"));
+            // WARPSNAP keeps pixels in memory: PNG encoding per present slowed the
+            // presents it was measuring to under 30 FPS (no skip presents left).
+            if (warpSnap) Deferred.Grab(backend, Path.Combine(output, $"r{renders:D5}.png"));
+            else Capture(backend, Path.Combine(output, $"r{renders:D5}.png"));
             frameLog.Add(Describe(m));
             Save();
         }
@@ -364,15 +416,36 @@ try { assembly.GetType("Recompiled.Entry")!.GetMethod("Run")!.Invoke(null, [new 
 catch (TargetInvocationException ex) when (ex.InnerException is Finished) { }
 catch (Finished) { }
 catch (Exception ex) { File.WriteAllText(Path.Combine(output, "error.txt"), ex.ToString()); }
-finally { Save(); Runtime.Shutdown(); }
+finally { Save(); Deferred.Flush(); Runtime.Shutdown(); }
 
 static void Capture(GlBackend backend, string file)
 {
-    const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
-    int width = (int)typeof(GlBackend).GetField("_presentW", fields)!.GetValue(backend)!;
-    int height = (int)typeof(GlBackend).GetField("_presentH", fields)!.GetValue(backend)!;
-    var pixels = new int[width * height];
-    if (!backend.ReadPresentArgb(pixels)) return;
+    if (!Deferred.Read(backend, out int[] pixels, out int width, out int height)) return;
+    Deferred.Write(pixels, width, height, file);
+}
+
+static class Deferred
+{
+    static readonly List<(int[] Pixels, int W, int H, string File)> _shots = [];
+    public static void Grab(GlBackend backend, string file)
+    {
+        if (Read(backend, out int[] pixels, out int w, out int h)) _shots.Add((pixels, w, h, file));
+    }
+    public static void Flush()
+    {
+        foreach (var s in _shots) Write(s.Pixels, s.W, s.H, s.File);
+        _shots.Clear();
+    }
+    public static bool Read(GlBackend backend, out int[] pixels, out int width, out int height)
+    {
+        const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+        width = (int)typeof(GlBackend).GetField("_presentW", fields)!.GetValue(backend)!;
+        height = (int)typeof(GlBackend).GetField("_presentH", fields)!.GetValue(backend)!;
+        pixels = new int[width * height];
+        return backend.ReadPresentArgb(pixels);
+    }
+    public static void Write(int[] pixels, int width, int height, string file)
+    {
     var rgba = new byte[pixels.Length * 4];
     for (int i = 0; i < pixels.Length; i++)
     {
@@ -383,6 +456,7 @@ static void Capture(GlBackend backend, string file)
     }
     using var stream = File.Create(file);
     new ImageWriter().WritePng(rgba, width, height, ColorComponents.RedGreenBlueAlpha, stream);
+    }
 }
 
 sealed class Finished : Exception { }

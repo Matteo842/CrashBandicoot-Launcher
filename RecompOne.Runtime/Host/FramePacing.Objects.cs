@@ -1176,6 +1176,9 @@ public static partial class FramePacing
         if (crash)
         {
             PatchHogRideMesh(c, m, obj, drawn);
+            // Hog ride and warp states never overlap; only one patches the frame.
+            if (!_svtxPatched)
+                PatchWarpMesh(c, m, obj, drawn);
             return;
         }
         if (IsRigidWorldPlat(m, obj)) return;
