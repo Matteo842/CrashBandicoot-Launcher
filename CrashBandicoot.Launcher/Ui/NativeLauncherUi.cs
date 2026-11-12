@@ -1997,8 +1997,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             title.Location = new Point(marginX, 22);
             hint.Location = new Point(marginX, 88);
             hint.Width = Math.Max(280, card.ClientSize.Width - marginX * 2);
+            // #233: hint wraps on narrow windows; grow it and push the list down.
+            hint.Height = Math.Max(36, TextRenderer.MeasureText(hint.Text, hint.Font, new Size(hint.Width, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + 4);
 
-            int listTop = 132;
+            int listTop = Math.Max(132, hint.Bottom + 8);
             list.Location = new Point(28, listTop);
             list.Size = new Size(
                 Math.Max(320, card.ClientSize.Width - 56),
@@ -2012,6 +2015,8 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             RebuildList();
         }
 
+        // #233: the AutoSize title box reaches past y 88 and painted over the hint; send it behind everything.
+        title.SendToBack();
         card.Resize += (_, _) => LayoutModsSheet();
         OpenSheetFill(card);
         LayoutModsSheet();
@@ -2231,8 +2236,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             BackColor = Color.FromArgb(40, 255, 138, 0),
             Padding = new Padding(10, 4, 10, 4),
         });
-        card.Controls.Add(Section("What went wrong", problem ?? "", new Point(36, 148), 540));
-        card.Controls.Add(Section("How to fix it", fix ?? "", new Point(36, 228), 540));
+        // #233: stack top-down; the path label used to sit under "How to fix it".
+        var wrong = Section("What went wrong", problem ?? "", new Point(36, 148), 540);
+        card.Controls.Add(wrong);
+        var howTo = Section("How to fix it", fix ?? "", new Point(36, wrong.Bottom + 12), 540);
+        card.Controls.Add(howTo);
+        int y = howTo.Bottom + 8;
 
         var paths = new List<string>();
         if (data.TryGetProperty("cuePath", out var cp) && cp.GetString() is { Length: > 0 } cue)
@@ -2246,25 +2255,29 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 Text = string.Join("\n", paths),
                 ForeColor = Color.FromArgb(180, NativeTheme.Sand),
                 Font = NativeTheme.MakeNunito(11),
-                Location = new Point(28, 244),
-                Size = new Size(500, 40),
+                Location = new Point(36, y),
+                Size = new Size(540, 40),
+                UseMnemonic = false,
                 BackColor = Color.Transparent,
             });
+            y += 40 + 8;
         }
+        int btnY = Math.Max(310, y + 4);
 
         var pick = MakePrimaryBtn("Select disc");
         pick.Size = new Size(180, 42);
-        pick.Location = new Point(36, 310);
+        pick.Location = new Point(36, btnY);
         pick.Click += (_, _) =>
         {
             CloseSheet();
             Emit(new { type = "pickDisc" });
         };
         var close = MakeGhostBtn("Close");
-        close.Location = new Point(230, 310);
+        close.Location = new Point(230, btnY);
         close.Click += (_, _) => CloseSheet();
         card.Controls.Add(pick);
         card.Controls.Add(close);
+        card.Height = Math.Max(card.Height, pick.Bottom + 40);
         OpenSheet(card);
     }
 
@@ -2277,24 +2290,35 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
         var card = MakeCard(560, 340);
         card.Controls.Add(MakeTitle(title));
-        card.Controls.Add(Section("Why this matters", message, new Point(36, 110), 540));
-        card.Controls.Add(Section("What to do", fix, new Point(36, 195), 540));
+        // #233: stack top-down so wrapped sections push the rest down (the path label sat under "What to do").
+        var why = Section("Why this matters", message, new Point(36, 110), 540);
+        card.Controls.Add(why);
+        var what = Section("What to do", fix, new Point(36, why.Bottom + 17), 540);
+        card.Controls.Add(what);
+        int y = what.Bottom + 10;
         if (!string.IsNullOrEmpty(path))
         {
+            var pathText = "Current folder  " + path;
+            var pathFont = NativeTheme.MakeNunito(13);
+            int pathH = TextRenderer.MeasureText(pathText, pathFont, new Size(540, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + 4;
             card.Controls.Add(new Label
             {
-                Text = "Current folder  " + path,
+                Text = pathText,
                 ForeColor = Color.FromArgb(180, NativeTheme.Sand),
-                Font = NativeTheme.MakeNunito(13),
-                Location = new Point(36, 250),
-                Size = new Size(540, 30),
+                Font = pathFont,
+                Location = new Point(36, y),
+                Size = new Size(540, pathH),
+                UseMnemonic = false,
                 BackColor = Color.Transparent,
             });
+            y += pathH + 6;
         }
         var got = MakePrimaryBtn("Got it");
-        got.Location = new Point(36, 285);
+        got.Location = new Point(36, Math.Max(285, y));
         got.Click += (_, _) => CloseSheet();
         card.Controls.Add(got);
+        card.Height = Math.Max(card.Height, got.Bottom + 40);
         OpenSheet(card);
     }
 
@@ -2325,10 +2349,14 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     Panel Section(string heading, string body, Point loc, int width)
     {
+        // #233: messages wrap to 3+ lines; a fixed 2-line body clipped them.
+        var bodyFont = NativeTheme.MakeNunito(13);
+        int bodyH = Math.Max(36, TextRenderer.MeasureText(body, bodyFont, new Size(width - 24, int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + 4);
         var p = new Panel
         {
             Location = loc,
-            Size = new Size(width, 68),
+            Size = new Size(width, 28 + bodyH + 4),
             BackColor = Color.FromArgb(70, 0, 0, 0),
         };
         p.Controls.Add(new Label
@@ -2344,9 +2372,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         {
             Text = body,
             ForeColor = Color.FromArgb(230, NativeTheme.Sand),
-            Font = NativeTheme.MakeNunito(13),
+            Font = bodyFont,
             Location = new Point(12, 28),
-            Size = new Size(width - 24, 36),
+            Size = new Size(width - 24, bodyH),
+            UseMnemonic = false,
             BackColor = Color.Transparent,
         });
         return p;
