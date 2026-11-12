@@ -353,7 +353,7 @@ public static partial class FramePacing
             ClampAnimFrame(m, c.A0);
             HoldAnimPose(m, c.A0);
         }
-        ApplyGatedDisplayPose(m, c.A0);
+        ApplyGatedDisplayPose(c, m, c.A0);
         // Display lerp may have moved a flying icon; the shift follows that pose.
         NoteNativeWideHudAnchor(m, c.A0);
         // Crash look is patched in PreGfxTransformMesh on the real SVTX

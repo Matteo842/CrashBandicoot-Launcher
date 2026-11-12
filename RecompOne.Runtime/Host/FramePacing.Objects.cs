@@ -757,7 +757,7 @@ public static partial class FramePacing
     /// t = wall ticks since that step / 34. Ripper Roo TNT yaw/path is this
     /// rot+trans lerp; BoxsC TNT is a single CVTX frame (no mesh ping-pong).
     /// </summary>
-    static void ApplyGatedDisplayPose(IMemory m, uint obj)
+    static void ApplyGatedDisplayPose(CpuContext c, IMemory m, uint obj)
     {
         if (_dispRotApplied || _dispTransApplied || _svtxPatched)
             RestoreGatedDisplayRot(m, _dispRotObj);
@@ -773,6 +773,8 @@ public static partial class FramePacing
         // CardC save menu text, block icons and arrow snap like at 30 FPS.
         if (IsCardUi(m, obj)) return;
         if (_exactTicks >= RefTicks - 0.01) return;
+        // Invincibility mask rides Crash's current pose, not the 30 Hz lerp (#226).
+        if (ApplyDoctorMaskPose(c, m, obj)) return;
 
         if (!TryGetGatePhase(m, obj, out double acc)) return;
         double t = acc / RefTicks;
