@@ -1138,16 +1138,25 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// <c>troty += 15deg</c> is per present. 12-bit 15deg is ~171; 8.8 15deg
-    /// is 3840, which AngDelta treats as a wrap to -256 and then <c>&amp; 0xFFF</c>
-    /// corrupts 8.8. Linear when the raw step is larger than 180° 12-bit.
+    /// <c>troty += 15deg</c> is per present (12-bit: spawn <c>troty = 180deg</c>
+    /// reads 2048). Keep dt/34 of the shortest-arc step, written in the
+    /// guest's own winding: the result is <c>to</c> minus the part not kept,
+    /// never masked. The pitch target 0xB8 is signed (calcpath -atan2, about
+    /// -68): the old <c>&amp; 0xFFF</c> turned it into ~4028, the next present
+    /// saw a 4096 jump, lerped it linearly and the value cycled through
+    /// 700..2900. The death state (no trans) rotates 0x8C toward it, so at
+    /// high FPS Crash fell off the hog sideways (#235).
     /// </summary>
     static int KeepHogSteer(int from, int to, ref double frac)
     {
-        long raw = (long)to - from;
-        if (raw > 0x800 || raw < -0x800)
-            return KeepHogDelta(from, to, ref frac, ang: false);
-        return KeepHogDelta(from, to, ref frac, ang: true);
+        if (IsGoolPtr(from) || IsGoolPtr(to)) return to;
+        int d = AngDelta(from, to);
+        if (d == 0) return to;
+        if (_exactTicks <= 0) return to - d;
+        double step = d * _exactTicks / RefTicks + frac;
+        int kept = (int)Math.Truncate(step);
+        frac = step - kept;
+        return to - (d - kept);
     }
 
     static int KeepHogDelta(int from, int to, ref double frac, bool ang)
