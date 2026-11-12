@@ -381,6 +381,8 @@ public static partial class FramePacing
             return true;
         if (_crashObj)
             SyncRiddenBound(m);
+        if (_crashObj && !_crashAir)
+            LiftOntoDropPlatTop(m);
         WriteCrashOrObjectTicks(m);
         if (_crashObj)
             PrepareCrashTurn(m);

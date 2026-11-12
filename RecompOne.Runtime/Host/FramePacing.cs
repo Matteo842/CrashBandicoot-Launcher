@@ -533,6 +533,10 @@ public static partial class FramePacing
     const uint GoolTypePoPl = 11u;
     /// <summary>PoPlC <c>Power_Platform_Drop</c> (idle; trans sees collider → Touched).</summary>
     const uint StatePoPlDrop = 1;
+    /// <summary>PoPlC <c>Power_Platform_Drop_Fall</c>, last of the drop states (Touched 2, Wait 3).</summary>
+    const uint StatePoPlDropFall = 4;
+    /// <summary>PoPlC <c>Platform_Drop_Hidden</c>: invisible solid until touched, then Touched (2).</summary>
+    const uint StatePoPlDropHidden = 9;
     /// <summary>PoPlC <c>Platform_Path_Spawn</c> / Wait / Active / Auto. Drop is 1–4.</summary>
     const uint StatePoPlSpawn = 5;
     const uint StatePoPlWait = 6;

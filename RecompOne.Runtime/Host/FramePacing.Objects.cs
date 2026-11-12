@@ -594,10 +594,11 @@ public static partial class FramePacing
         try
         {
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
-            if ((statusB & FlagInvisible) != 0 && IsBonusClip(m, obj))
+            if ((statusB & FlagInvisible) != 0 && (IsBonusClip(m, obj) || IsHiddenDropPlat(m, obj)))
             {
                 // Nothing to draw, but the original computes its bound every
                 // update: keep the invisible wall in object_bounds (#212).
+                // Hidden drop pillars (#231) are a floor before they show.
                 RegisterGatedBound(m, obj, statusB);
                 return;
             }

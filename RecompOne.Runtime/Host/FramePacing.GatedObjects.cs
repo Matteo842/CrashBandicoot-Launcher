@@ -101,6 +101,23 @@ public static partial class FramePacing
         catch { return false; }
     }
 
+    /// <summary>
+    /// PoPlC <c>Platform_Drop_Hidden</c> (#231, Jaws of Darkness pillar rows):
+    /// FLAG_INVISIBLE | COLLIDABLE | SOLID_ALL until Crash touches it. Without
+    /// its bound on skip presents Crash lost the floor in the gap between two
+    /// pillars, dropped and was pushed back by the pillar's side.
+    /// </summary>
+    static bool IsHiddenDropPlat(IMemory m, uint obj)
+    {
+        if ((obj & 0xFF000000u) != 0x80000000u) return false;
+        try
+        {
+            return TryReadGoolClass(m, obj, out uint type, out _) && type == GoolTypePoPl
+                && m.ReadU32(obj + ObjStateOff) == StatePoPlDropHidden;
+        }
+        catch { return false; }
+    }
+
     static bool IsPoObSpring(IMemory m, uint obj)
     {
         if ((obj & 0xFF000000u) != 0x80000000u) return false;
@@ -752,6 +769,55 @@ public static partial class FramePacing
             WriteBoundSnap(m, slot, snap);
             TranslateGatedRideBound(m, _rideObj, slot, fromSnap: true);
             return;
+        }
+    }
+
+    /// <summary>
+    /// #231 Jaws of Darkness pillar rows: PlotObjWalls skips Crash's own
+    /// <c>collider</c> as a wall only while his feet are at or above its top
+    /// (and a PoPlC only within 400 units of its centre). The 30 Hz floor snap
+    /// puts the feet exactly on the top. Unlocked, a bouncing drop pillar's
+    /// bound moves every present and FinishPacedScale keeps dt/34 of the snap,
+    /// so the feet sat 0.1–1.4 units under the top. At a pillar edge the
+    /// pillar he stands on became a wall around him and StopAtWalls held him
+    /// in place until it stopped bouncing (130 ms at 60, 250 ms at 120).
+    /// Grounded on a drop pillar (states 1–4) and under its published top by
+    /// at most <see cref="EmbedSlop"/>: put the feet back on the top.
+    /// </summary>
+    static void LiftOntoDropPlatTop(IMemory m)
+    {
+        try
+        {
+            uint crash = _obj;
+            if ((m.ReadU32(crash + ObjStatusAOff) & FlagGroundLand) == 0) return;
+            uint plat = m.ReadU32(crash + ObjColliderOff);
+            if ((plat & 0xFF000000u) != 0x80000000u) return;
+            if (!TryReadGoolClass(m, plat, out uint type, out _) || type != GoolTypePoPl) return;
+            if (m.ReadU32(plat + ObjStateOff) is < StatePoPlDrop or > StatePoPlDropFall) return;
+            int cx = (int)m.ReadU32(crash + ObjTransOff);
+            int cy = (int)m.ReadU32(crash + ObjTransOff + 4);
+            int cz = (int)m.ReadU32(crash + ObjTransOff + 8);
+            int feet = cy + Math.Min((int)m.ReadU32(crash + ObjBoundOff + 4), (int)m.ReadU32(crash + ObjBoundOff + 16));
+            int x1 = cx + (int)m.ReadU32(crash + ObjBoundOff), x2 = cx + (int)m.ReadU32(crash + ObjBoundOff + 12);
+            int z1 = cz + (int)m.ReadU32(crash + ObjBoundOff + 8), z2 = cz + (int)m.ReadU32(crash + ObjBoundOff + 20);
+            int count = Math.Clamp((int)m.ReadU32(ObjectBoundCountAddr), 0, ObjectBoundMax);
+            for (int i = 0; i < count; i++)
+            {
+                uint slot = ObjectBoundsAddr + (uint)i * 28u;
+                if (m.ReadU32(slot + 24) != plat) continue;
+                int top = Math.Max((int)m.ReadU32(slot + 4), (int)m.ReadU32(slot + 16));
+                int gap = top - feet;
+                if (gap <= 0 || gap > EmbedSlop) return;
+                if (x2 <= (int)m.ReadU32(slot) || x1 >= (int)m.ReadU32(slot + 12)
+                    || z2 <= (int)m.ReadU32(slot + 8) || z1 >= (int)m.ReadU32(slot + 20))
+                    return;
+                m.WriteU32(crash + ObjTransOff + 4, (uint)(cy + gap));
+                return;
+            }
+        }
+        catch
+        {
+            // object freed
         }
     }
 
