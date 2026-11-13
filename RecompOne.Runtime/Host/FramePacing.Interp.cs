@@ -665,14 +665,18 @@ public static partial class FramePacing
                 return true;
             }
             InterpVec9 cur = InterpReadCamera(m);
+            CamPoint curPoint = ReadCamPoint(m);
             if (_interpCamStamp == _interpStep)
             {
                 // Second matrix update of the same step: only the end pose moves.
                 _interpCamTo = cur;
+                _interpPointTo = curPoint;
                 return false;
             }
             bool had = _interpCamStamp == _interpStep - 1;
             _interpCamFrom = had ? _interpCamTo : cur;
+            _interpPointFrom = had ? _interpPointTo : curPoint;
+            _interpPointTo = curPoint;
             if (had) InterpLogCamStep(_interpCamFrom, cur);
             _interpCamHasFrom = had && !InterpCamCut(_interpCamTo, cur);
             _interpCamTo = cur;

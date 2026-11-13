@@ -244,6 +244,7 @@ public static partial class FramePacing
     public static bool PreWorlds(CpuContext c, IMemory m)
     {
         PatchMapSkyList(c, m);
+        PatchLagSlst(c, m);
         CommitWaterDrawCount(m);
         BeginNativeWideWorldPass(m);
         return true;
@@ -252,6 +253,7 @@ public static partial class FramePacing
     public static void PostWorlds(CpuContext c, IMemory m)
     {
         RestoreMapSkyList(m);
+        RestoreLagSlst(m);
         EndNativeWideWorldPass(m);
         InterpMarkGpu(20);
         RestoreRippleSpeed(m);
@@ -262,6 +264,7 @@ public static partial class FramePacing
         // A0 == 0 is init: fill tri_wave from period, no present.
         if (c.A0 == 0) return true;
         PatchMapSkyList(c, m);
+        PatchLagSlst(c, m);
         CommitWaterDrawCount(m);
         ZeroRippleSpeed(m);
         BeginNativeWideWorldPass(m);
@@ -271,6 +274,7 @@ public static partial class FramePacing
     public static void PostWorldsRipple(CpuContext c, IMemory m)
     {
         RestoreMapSkyList(m);
+        RestoreLagSlst(m);
         EndNativeWideWorldPass(m);
         InterpMarkGpu(20);
         RestoreRippleSpeed(m);
@@ -359,6 +363,7 @@ public static partial class FramePacing
     /// </summary>
     public static bool PreLevelUpdate(CpuContext c, IMemory m)
     {
+        RestoreLagSlst(m);
         // Interpolated FPS, draw-only pass: the camera never gets here (PreCamUpdate).
         // What does is level restart code, and its loops wait for this call to move
         // the camera: skipping it hung CamUpdate's path loop. Run it, unpaced; the

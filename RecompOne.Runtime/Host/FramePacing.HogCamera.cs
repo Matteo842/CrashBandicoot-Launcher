@@ -92,6 +92,7 @@ public static partial class FramePacing
         try
         {
             ReadCamPose(m, _hogPoseFrom);
+            _hogPointFrom = ReadCamPoint(m);
         }
         catch
         {
@@ -107,6 +108,7 @@ public static partial class FramePacing
         try
         {
             ReadCamPose(m, _hogPoseTo);
+            _hogPointTo = ReadCamPoint(m);
             _hogPoseValid = true;
         }
         catch
@@ -158,6 +160,7 @@ public static partial class FramePacing
                 _hogPoseShown[i] = _hogPoseTo[i] - (int)Math.Round(d * (1 - s));
             }
             WriteCamPose(m, _hogPoseShown);
+            _hogPoseS = s;
             _hogPosePatched = true;
         }
         catch

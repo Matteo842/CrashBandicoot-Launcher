@@ -31,6 +31,7 @@ public static partial class FramePacing
         _crashDidScale = false;
         // Worlds are drawn; objects use GfxUpdateMatrices' cam_trans_prev copy.
         RestoreHogCamPose(m);
+        RestoreLagSlst(m);
         if (UnstickPause(m))
             c.A0 = 1;
         NotePauseClock(m);
