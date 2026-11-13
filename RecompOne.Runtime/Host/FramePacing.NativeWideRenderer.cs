@@ -31,6 +31,8 @@ public static partial class FramePacing
     static readonly List<NativeWideTriangle> _nativeWideCorePending = new(512);
     static readonly List<NativeWideTriangle> _nativeWideCoreOpaque = new(512);
     static readonly List<NativeWideTriangle> _nativeWideCoreTransparent = new(64);
+    // Semi-transparent island map polygons the core fill leaves out (#221).
+    static readonly List<NativeWideTriangle> _nativeWideCoreDropped = new(64);
     // Wide Editor triangles marked "also in the 4:3 core", by ordering-table slot:
     // LibGpu.DrawOTag draws each after the retail primitives of its slot.
     readonly record struct NativeWideUserCoreTriangle(int Slot, NativeWideTriangle Triangle);
@@ -550,6 +552,14 @@ public static partial class FramePacing
         _nativeWideCoreTransparent.Clear();
         bool beachSky = NativeWideBeachSky(m, worlds, drawWorldCount);
         bool underBackdrop = NativeWideFillsUnderBackdrop(m) || beachSky;
+        // Island map (#221): the core shows only the zone's draw list (SLST),
+        // built for the 4:3 view, while the bands draw the whole mesh. Near the
+        // core edge the list could lack polygons the bands continue (a strip of
+        // sea through a far island). The zone's own opaque polygons fill the
+        // core too, under the game's image, which paints over them wherever it
+        // draws. Semi-transparent ones are left out: the game draws them again.
+        bool mapCore = IslandMapShowing(m);
+        _nativeWideCoreDropped.Clear();
         NativeWideUserEditsRefresh(m.ReadU32(Catalog.LevelIdAddr));
         NativeWideEditorCameraSync(m);
         Span<NativeWideClipVertex> repairVertices = stackalloc NativeWideClipVertex[3];
@@ -626,7 +636,8 @@ public static partial class FramePacing
             // Neighbour meshes also fill the 4:3 core (#105); the zone's own
             // meshes are drawn there by the game itself, except a few
             // polygons whose depth objects are tested against (#178).
-            bool fillCore = world.Neighbor && world.Only == null;
+            bool ownMapCore = mapCore && !world.Neighbor;
+            bool fillCore = (world.Neighbor || ownMapCore) && world.Only == null;
             int[]? coreOccluders = fillCore || world.Only != null ? null : NativeWideCoreOccluders(m, world);
             bool worldSides = NativeWideWorldTouchesSides(world, near, projection, gpu.DrawOffsetX + screenX,
                 viewCenterX, coreHalf);
@@ -671,7 +682,7 @@ public static partial class FramePacing
                         gpu.DrawOffsetX, gpu.DrawOffsetY,
                         viewCenterX, viewCenterY, coreHalf, wideHalf, halfHeight,
                         flags with { WideMode = WidePrimitiveMode.WorldCore }, noCull,
-                        _nativeWideCoreOpaque, _nativeWideCoreTransparent);
+                        _nativeWideCoreOpaque, ownMapCore ? _nativeWideCoreDropped : _nativeWideCoreTransparent);
             }
         }
 

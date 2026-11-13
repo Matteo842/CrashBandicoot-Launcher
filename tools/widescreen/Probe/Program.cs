@@ -63,6 +63,8 @@ ConfigManager.View.Fullscreen = false; ConfigManager.View.FrameRate = fps;
 if (Environment.GetEnvironmentVariable("VSYNC") == "0") ConfigManager.View.VSync = false;
 // INTERP=1: "Exact 30 FPS logic" (30 Hz steps + interpolated draw passes).
 if (Environment.GetEnvironmentVariable("INTERP") == "1") ConfigManager.View.InterpolatedFps = true;
+// DEJITTER=1 / DEJITTER=0: force the Dejitter setting (subpixel world vertices).
+if (Environment.GetEnvironmentVariable("DEJITTER") is "0" or "1") ConfigManager.View.Dejitter = Environment.GetEnvironmentVariable("DEJITTER") == "1";
 ConfigManager.View.HideTopBar = true;
 // Frames are read back from the OpenGL backend (Windows Auto now starts on Vulkan).
 ConfigManager.View.GraphicsApi = ViewConfig.GraphicsApiOpenGl;
