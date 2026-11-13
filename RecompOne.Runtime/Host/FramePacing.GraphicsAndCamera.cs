@@ -243,6 +243,7 @@ public static partial class FramePacing
 
     public static bool PreWorlds(CpuContext c, IMemory m)
     {
+        PatchMapSkyList(c, m);
         CommitWaterDrawCount(m);
         BeginNativeWideWorldPass(m);
         return true;
@@ -250,6 +251,7 @@ public static partial class FramePacing
 
     public static void PostWorlds(CpuContext c, IMemory m)
     {
+        RestoreMapSkyList(m);
         EndNativeWideWorldPass(m);
         InterpMarkGpu(20);
         RestoreRippleSpeed(m);
@@ -259,6 +261,7 @@ public static partial class FramePacing
     {
         // A0 == 0 is init: fill tri_wave from period, no present.
         if (c.A0 == 0) return true;
+        PatchMapSkyList(c, m);
         CommitWaterDrawCount(m);
         ZeroRippleSpeed(m);
         BeginNativeWideWorldPass(m);
@@ -267,6 +270,7 @@ public static partial class FramePacing
 
     public static void PostWorldsRipple(CpuContext c, IMemory m)
     {
+        RestoreMapSkyList(m);
         EndNativeWideWorldPass(m);
         InterpMarkGpu(20);
         RestoreRippleSpeed(m);

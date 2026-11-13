@@ -61,6 +61,8 @@ ConfigManager.View.Widescreen = Environment.GetEnvironmentVariable("WIDE") != "0
 ConfigManager.View.Fullscreen = false; ConfigManager.View.FrameRate = fps;
 // VSYNC=0: no vsync, so --fps above the monitor rate really presents that often.
 if (Environment.GetEnvironmentVariable("VSYNC") == "0") ConfigManager.View.VSync = false;
+// INTERP=1: "Exact 30 FPS logic" (30 Hz steps + interpolated draw passes).
+if (Environment.GetEnvironmentVariable("INTERP") == "1") ConfigManager.View.InterpolatedFps = true;
 ConfigManager.View.HideTopBar = true;
 // Frames are read back from the OpenGL backend (Windows Auto now starts on Vulkan).
 ConfigManager.View.GraphicsApi = ViewConfig.GraphicsApiOpenGl;
@@ -335,7 +337,11 @@ using var meshHook = warpSnap
 
 // TRILOG=<render> writes every triangle the backend gets during that render to tris<render>.txt.
 int triLogRender = int.TryParse(Environment.GetEnvironmentVariable("TRILOG"), out int tlr) ? tlr : -1;
-using var triHook = triLogRender >= 0
+// WEDGE=1 (#221): on the island map, keep tris<render>.txt + w<render>.png for renders where a
+// triangle covers the top-left corner of the frame (only the sky fill belongs there). At most 12.
+bool wedge = Environment.GetEnvironmentVariable("WEDGE") == "1";
+int wedgeKept = 0;
+using var triHook = triLogRender >= 0 || wedge
     ? new Hook(typeof(GlBackend).GetMethod(nameof(GlBackend.DrawTri))!, (TriLog.Hook)TriLog.Draw)
     : null;
 using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
@@ -350,7 +356,23 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
             else { m.WriteU32(0x800618DCu, mapLevel); m.WriteU32(0x8006194Cu, mapLevel); }
         }
         if (renders + 1 == triLogRender) TriLog.Start(Path.Combine(output, $"tris{renders + 1:D5}.txt"));
+        else if (wedge && FramePacing.IslandMapShowing(m)) TriLog.StartProbe();
         original(c, m); renders++;
+        if (wedge && TriLog.Probing)
+        {
+            string buf = TriLog.TakeBuffer();
+            // Kept when NO opaque triangle covers the corner: the sky band left a gap there.
+            if (!TriLog.Hit && frames >= 1500) File.AppendAllText(Path.Combine(output, "wedge.txt"), $"{renders} {frames} prog={m.ReadU32(0x80057920u):X} path={m.ReadU32(0x8005791Cu):X} len={m.ReadU16(m.ReadU32(0x8005791Cu) + 0x1Eu)} mode={m.ReadU16(m.ReadU32(0x8005791Cu) + 0x20u)} zone={m.ReadU32(0x80057914u):X}" + Environment.NewLine);
+            if (!TriLog.Hit && frames >= 1500 && wedgeKept < 12 && GpuHle.Backend is GlBackend wb)
+            {
+                wedgeKept++;
+                File.WriteAllText(Path.Combine(output, $"tris{renders:D5}.txt"), buf);
+                var wenv = Runtime.Gpu!.CurrentHleDrawEnv;
+                wb.PresentDisplay(wenv.ClipX0, wenv.ClipY0, wenv.ClipX1 - wenv.ClipX0 + 1, wenv.ClipY1 - wenv.ClipY0 + 1);
+                Capture(wb, Path.Combine(output, $"w{renders:D5}.png"));
+                frameLog.Add(Describe(m));
+            }
+        }
         TriLog.Stop();
         if (stateFile != null && !stateRequested && frames >= stateAt) { SaveStates.RequestLoad(1); stateRequested = true; }
         // FLYSTOP=<frame>: the flight ends there and Crash falls and lands on his own
@@ -472,14 +494,36 @@ static class TriLog
 {
     public delegate void Orig(GlBackend self, in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f);
     public delegate void Hook(Orig orig, GlBackend self, in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f);
-    static StreamWriter? _out;
+    static TextWriter? _out;
     static int _n;
-    public static void Start(string file) { _out = new StreamWriter(file); _n = 0; }
-    public static void Stop() { _out?.Dispose(); _out = null; }
+    // WEDGE mode (#221): every render buffered, kept only if a triangle covers (PX, PY).
+    static bool _probe;
+    public static bool Hit { get; private set; }
+    public static void Start(string file) { _out = new StreamWriter(file); _n = 0; _probe = false; }
+    public static bool Probing => _probe && _out != null;
+    public static void StartProbe() { _out = new StringWriter(); _n = 0; _probe = true; Hit = false; }
+    public static void Stop() { _out?.Dispose(); _out = null; _probe = false; }
+    public static string TakeBuffer() { string s = _out?.ToString() ?? ""; _out = null; _probe = false; return s; }
+    static bool Covers(in HleVertex a, in HleVertex b, in HleVertex c, float x, float y)
+    {
+        float d1 = (x - b.X) * (a.Y - b.Y) - (a.X - b.X) * (y - b.Y);
+        float d2 = (x - c.X) * (b.Y - c.Y) - (b.X - c.X) * (y - c.Y);
+        float d3 = (x - a.X) * (c.Y - a.Y) - (c.X - a.X) * (y - a.Y);
+        bool neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+        return !(neg && pos);
+    }
     public static void Draw(Orig orig, GlBackend self, in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
-        _out?.WriteLine($"{_n++} {f.WideMode} ot={GpuHle.CurrentOtSlot} tex={f.Textured} semi={f.SemiTrans} tp={f.TPage:X} clut={f.Clut:X} "
-            + $"{a.X:F1},{a.Y:F1},{a.Z:F0} {b.X:F1},{b.Y:F1},{b.Z:F0} {c.X:F1},{c.Y:F1},{c.Z:F0} uv {a.U},{a.V} {b.U},{b.V} {c.U},{c.V}");
+        bool hit = false;
+        if (_probe && !f.SemiTrans)
+        {
+            var env = Runtime.Gpu!.CurrentHleDrawEnv;
+            hit = Covers(a, b, c, env.ClipX0 + 2, env.ClipY0 + 8);
+        }
+        if (hit) Hit = true;
+        _out?.WriteLine($"{_n++}{(hit ? " HIT" : "")} {f.WideMode} ot={GpuHle.CurrentOtSlot} kind={GpuHle.CurrentPrimitiveKind} tex={f.Textured} semi={f.SemiTrans} tp={f.TPage:X} clut={f.Clut:X} "
+            + $"{a.X:F1},{a.Y:F1},{a.Z:F0} {b.X:F1},{b.Y:F1},{b.Z:F0} {c.X:F1},{c.Y:F1},{c.Z:F0} uv {a.U},{a.V} {b.U},{b.V} {c.U},{c.V} "
+            + $"rgb {a.R},{a.G},{a.B} {b.R},{b.G},{b.B} {c.R},{c.G},{c.B}");
         orig(self, a, b, c, f);
     }
 }
