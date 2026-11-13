@@ -72,6 +72,31 @@ public static partial class FramePacing
         }
     }
 
+    /// <summary>title struct pointer (gp + 0x2E4) and its current state.</summary>
+    const uint TitleStructPtrAddr = 0x800566E0u;
+    const uint TitleStructStateOff = 0x35D0u;
+
+    /// <summary>
+    /// #189: the options menu (title state 6, zone 0f_pZ), the game over screen
+    /// (12, 0b_pZ) and the password/load menus (13/14, 0e_pZ) load a 3D world
+    /// zone like the map (TitleLoadScreen type 1), so they get the 16:9 view
+    /// too. The main menu (5) and the Naughty Dog logo (8) are 2D pictures.
+    /// </summary>
+    public static bool TitleMenuWorldShowing(IMemory m)
+    {
+        try
+        {
+            if (m.ReadU32(Catalog.LevelIdAddr) != LidTitleMap) return false;
+            uint title = m.ReadU32(TitleStructPtrAddr);
+            if ((title & 0xFF000000u) != 0x80000000u) return false;
+            return m.ReadU32(title + TitleStructStateOff) is 6u or 12u or 13u or 14u;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// The map allows pause, and CoreLoop tests <c>pads[0].tapped</c> for Start
     /// every loop; the pause menu reads it every present. A gated IsldC would

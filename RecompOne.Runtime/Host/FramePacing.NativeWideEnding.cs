@@ -13,7 +13,9 @@ public static partial class FramePacing
     // about 8% to spare on each side (x -20..529 of 512). The 16:9 bands showed
     // black beside it. While it is drawn in widescreen its scale grows by the
     // 16:9 / 4:3 ratio, so the wall keeps the same spare on the wider screen;
-    // nothing else of the scene changes.
+    // nothing else of the scene changes. The game over and password screens
+    // (title states 12-14 on lid 25) draw the same wall as GamOC / CardC
+    // Background_Stance, widened the same way.
     const uint NativeWideEpilogueLevel = 44;
     const int NativeWideEpilogueScale = 2458, NativeWideEpilogueScaleSlop = 64;
 
@@ -28,9 +30,10 @@ public static partial class FramePacing
         if ((obj & 0xFF000000u) != 0x80000000u) return;
         try
         {
-            if (m.ReadU32(Catalogs.Catalog.LevelIdAddr) != NativeWideEpilogueLevel) return;
+            bool epilogue = m.ReadU32(Catalogs.Catalog.LevelIdAddr) == NativeWideEpilogueLevel;
+            if (!epilogue && !TitleMenuWorldShowing(m)) return;
             if ((m.ReadU32(obj + ObjStatusBOff) & Flag2D) == 0) return;
-            if (!TryReadGoolClass(m, obj, out uint type, out _) || type != GoolTypeWinG) return;
+            if (!TryReadGoolClass(m, obj, out uint type, out _) || (epilogue ? type != GoolTypeWinG : type is not (GoolTypeGamO or GoolTypeCard))) return;
             int x = (int)m.ReadU32(obj + ObjScaleOff), y = (int)m.ReadU32(obj + ObjScaleOff + 4),
                 z = (int)m.ReadU32(obj + ObjScaleOff + 8);
             if (Math.Abs(x - NativeWideEpilogueScale) > NativeWideEpilogueScaleSlop || y != x || z != x) return;

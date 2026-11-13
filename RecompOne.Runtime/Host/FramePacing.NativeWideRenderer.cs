@@ -148,7 +148,7 @@ public static partial class FramePacing
         uint level = m.ReadU32(Catalog.LevelIdAddr);
         uint shaderFlags = NativeWideGuestPointer(zone) ? m.ReadU32(zone + 0x2FCu) : 0;
         bool supported = GpuHle.WideFovActive
-            && (NativeWideLevelSupported(level) || IslandMapShowing(m))
+            && (NativeWideLevelSupported(level) || IslandMapShowing(m) || TitleMenuWorldShowing(m))
             && NativeWideGuestPointer(zone);
         GpuHle.NativeWideRendererActive = supported;
         _nativeWideShader = (shaderFlags & 0x400u) != 0 ? NativeWideShader.Lamp

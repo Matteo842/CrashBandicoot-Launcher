@@ -75,6 +75,10 @@ bool gemStamp = Environment.GetEnvironmentVariable("GEMSTAMP") == "1";
 int flyStop = int.TryParse(Environment.GetEnvironmentVariable("FLYSTOP"), out int fs) ? fs : 0;
 uint mapLevel = uint.TryParse(Environment.GetEnvironmentVariable("MAPLEVEL"), out uint ml) ? ml : 0;
 bool mapLevelSet = false;
+// TITLESTATE=<n>: once the main menu (title state 5) shows, request title state n
+// (6 options, 12 game over, 13/14 password/load; #189 menu worlds).
+uint titleStateReq = uint.TryParse(Environment.GetEnvironmentVariable("TITLESTATE"), out uint tsr) ? tsr : 0;
+int titleMenuRenders = 0;
 // PACELOG=1 writes state/logs/pacing.txt (unlock arm, land-lock gates).
 if (Environment.GetEnvironmentVariable("PACELOG") == "1") ConfigManager.View.SetBool("Diagnostics.FramePacing", true);
 // CAMTRACE=1 writes state/logs/camtrace.txt (one line per CamFollow: progress, LevelUpdate branch, cam_speed).
@@ -356,6 +360,12 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
         {
             if (FramePacing.IslandMapShowing(m)) mapLevelSet = true;
             else { m.WriteU32(0x800618DCu, mapLevel); m.WriteU32(0x8006194Cu, mapLevel); }
+        }
+        if (titleStateReq != 0 && titleMenuRenders >= 0 && m.ReadU32(RecompOne.Runtime.Catalogs.Catalog.LevelIdAddr) == 25u)
+        {
+            uint ts = m.ReadU32(0x800566E0u);
+            if ((ts & 0xFF000000u) == 0x80000000u && m.ReadU32(ts + 0x35D0u) == 5u && ++titleMenuRenders > 60)
+            { m.WriteU32(0x800618D4u, titleStateReq); titleMenuRenders = -1; }
         }
         if (renders + 1 == triLogRender) TriLog.Start(Path.Combine(output, $"tris{renders + 1:D5}.txt"));
         else if (wedge && FramePacing.IslandMapShowing(m)) TriLog.StartProbe();
