@@ -1827,7 +1827,11 @@ public static partial class FramePacing
         if ((flags & 0x80000u) != 0 || (flags & 0x2000u) == 0) return null;
         int rows = (int)m.ReadU32(zone + 0x2E0u);
         if (rows is <= 0 or > 512) return null;
-        static uint Rgb(IMemory m, uint at) => m.ReadU8(at) | (uint)m.ReadU8(at + 1) << 8 | (uint)m.ReadU8(at + 2) << 16;
+        // The game's fill reaches the GPU as 15-bit colour (5 bits per channel,
+        // FillRect): the bands must use the same, or the island map's sea showed
+        // 55,80,117 beside the core's 49,82,115 (#221).
+        static uint Ch(uint v) => (uint)Math.Round((v >> 3) * 255 / 31.0);
+        static uint Rgb(IMemory m, uint at) => Ch(m.ReadU8(at)) | Ch(m.ReadU8(at + 1)) << 8 | Ch(m.ReadU8(at + 2)) << 16;
         return (Rgb(m, NativeWideFillColorAddr), rows, lower ? Rgb(m, zone + 0x310u) : (uint?)null);
     }
 
