@@ -517,6 +517,13 @@ public static partial class FramePacing
 
     static int InterpLerp(int a, int b, double t) => a + (int)Math.Round(((long)b - a) * t);
 
+    /// <summary>
+    /// Scale axis. A sign change is a mirror SET (Crash's stance and jump do
+    /// <c>scalex = -scalex</c>), not a motion: a lerp would pass through 0 and
+    /// draw the model as a flat sliver (#238), so it snaps like a big turn.
+    /// </summary>
+    static int InterpScale(int a, int b, double t) => (a ^ b) < 0 ? b : InterpLerp(a, b, t);
+
     /// <summary>12-bit angle, shortest way round. A jump over a quarter turn is not a motion.</summary>
     static int InterpAngle(int a, int b, double t)
     {
@@ -586,9 +593,9 @@ public static partial class FramePacing
                 m.WriteU32(obj + ObjRotOff, (uint)InterpAngle(p.From.Rx, p.To.Rx, t));
                 m.WriteU32(obj + ObjRotOff + 4, (uint)InterpAngle(p.From.Ry, p.To.Ry, t));
                 m.WriteU32(obj + ObjRotOff + 8, (uint)InterpAngle(p.From.Rz, p.To.Rz, t));
-                m.WriteU32(obj + ObjScaleOff, (uint)InterpLerp(p.From.Sx, p.To.Sx, t));
-                m.WriteU32(obj + ObjScaleOff + 4, (uint)InterpLerp(p.From.Sy, p.To.Sy, t));
-                m.WriteU32(obj + ObjScaleOff + 8, (uint)InterpLerp(p.From.Sz, p.To.Sz, t));
+                m.WriteU32(obj + ObjScaleOff, (uint)InterpScale(p.From.Sx, p.To.Sx, t));
+                m.WriteU32(obj + ObjScaleOff + 4, (uint)InterpScale(p.From.Sy, p.To.Sy, t));
+                m.WriteU32(obj + ObjScaleOff + 8, (uint)InterpScale(p.From.Sz, p.To.Sz, t));
             }
             uint statusB = m.ReadU32(obj + ObjStatusBOff);
             uint seq = m.ReadU32(obj + ObjAnimSeqOff);

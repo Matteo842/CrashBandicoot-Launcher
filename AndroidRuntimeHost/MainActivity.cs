@@ -110,7 +110,12 @@ public sealed class MainActivity : Activity
             this, ApplyGameDisplayMode, () => GpuLabDialog.Show(this));
         _launcher.ModsRequested += () => ModsDialog.Show(this, PickModZip);
         _launcher.CheatsRequested += () => CheatDialog.Show(this);
-        SetContentView(_launcher);
+        // #237: the footer ("Select disc") is drawn at the very bottom of the view.
+        // Android 15 lays apps out edge-to-edge, so a visible nav bar covered it.
+        // Pad the launcher by the system-bar insets and follow the Fullscreen
+        // setting here too (bars hidden by default, like in game).
+        SetContentView(WrapInSystemBarInsets(_launcher));
+        ApplyGameDisplayMode();
 
         if (_disc != null)
             ShowDiscReady();
@@ -342,16 +347,49 @@ public sealed class MainActivity : Activity
 
     internal void ApplyGameDisplayMode()
     {
-        if (!_gameUiVisible) return;
+        if (!_gameUiVisible && _launcher == null) return;
         if (ConfigManager.View.Fullscreen) EnterImmersiveGameMode();
         else LeaveImmersiveGameMode();
-        AndroidDisplayPacing.ApplyWindow(this, AndroidGraphics.PresentHz(ConfigManager.View.FrameRate));
+        if (_gameUiVisible)
+            AndroidDisplayPacing.ApplyWindow(this, AndroidGraphics.PresentHz(ConfigManager.View.FrameRate));
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
     {
         base.OnWindowFocusChanged(hasFocus);
-        if (hasFocus && _gameUiVisible) ApplyGameDisplayMode();
+        if (hasFocus) ApplyGameDisplayMode();
+    }
+
+    View WrapInSystemBarInsets(View content)
+    {
+        var frame = new FrameLayout(this);
+        frame.SetBackgroundColor(Color.Rgb(6, 16, 24));
+        frame.AddView(content, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        frame.SetOnApplyWindowInsetsListener(new SystemBarInsetsPadding());
+        return frame;
+    }
+
+    sealed class SystemBarInsetsPadding : Java.Lang.Object, View.IOnApplyWindowInsetsListener
+    {
+        public WindowInsets OnApplyWindowInsets(View v, WindowInsets insets)
+        {
+            // Hidden (immersive) bars report zero insets, so fullscreen keeps the
+            // whole screen; visible bars push the launcher clear of them.
+            if (OperatingSystem.IsAndroidVersionAtLeast(30))
+            {
+                var i = insets.GetInsets(WindowInsets.Type.SystemBars() | WindowInsets.Type.DisplayCutout());
+                v.SetPadding(i.Left, i.Top, i.Right, i.Bottom);
+            }
+            else
+            {
+#pragma warning disable CA1422
+                v.SetPadding(insets.SystemWindowInsetLeft, insets.SystemWindowInsetTop,
+                    insets.SystemWindowInsetRight, insets.SystemWindowInsetBottom);
+#pragma warning restore CA1422
+            }
+            return insets;
+        }
     }
 
     public override void OnConfigurationChanged(Configuration newConfig)
