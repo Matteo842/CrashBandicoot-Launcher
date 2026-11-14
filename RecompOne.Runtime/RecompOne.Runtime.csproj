@@ -13,7 +13,11 @@
       <EmbeddedResource Include="Catalog\data\*.json" />
       <!-- Hand-made 16:9 fixes from tools/WideEditor (FramePacing.NativeWideUserEdits.cs). -->
       <EmbeddedResource Include="WideEdits\*.json" />
-      <EmbeddedResource Include="Host\Assets\MainMenuWide.bin" LogicalName="RecompOne.Runtime.Host.Assets.MainMenuWide.bin" />
+      <!-- #189: 16:9 main menu backdrop, made by artifacts/issue189/mainmenu/mkasset.py.
+           Committed (see .gitignore) so release builds embed it; if the file is missing,
+           MainMenuWide.Load() finds no resource and the 16:9 main menu simply stays off. -->
+      <EmbeddedResource Include="Host\Assets\MainMenuWide.bin" LogicalName="RecompOne.Runtime.Host.Assets.MainMenuWide.bin"
+                        Condition="Exists('Host\Assets\MainMenuWide.bin')" />
     </ItemGroup>
 
     <ItemGroup>
