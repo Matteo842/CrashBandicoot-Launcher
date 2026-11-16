@@ -4,6 +4,8 @@
 
 # Crash Bandicoot Launcher
 
+<a href="https://recomplauncher.com/game/crashbandicoot-launcher"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 *Unofficial fan project.*
 
 **The 1996 classic, running natively on PC and Android. In widescreen, at 240 FPS, in 4K.**
