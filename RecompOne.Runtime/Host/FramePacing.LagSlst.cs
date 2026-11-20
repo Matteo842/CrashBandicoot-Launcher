@@ -83,13 +83,13 @@ public static partial class FramePacing
             if (spare == cur) spare = m.ReadU32(MapSparePolyIdsBAddr);
             if (spare == cur || !NativeWideGuestPointer(cur) || !NativeWideGuestPointer(spare)) return;
 
-            // More than one step ping-pongs through the real list's buffer: keep its bytes.
+            // Keep the real list's bytes. SlstUpdate reorders its source list in
+            // place (#240: a one-step decode left the real list reordered, the
+            // next LevelUpdate applied its deltas to it and holes piled up), and
+            // more than one step also ping-pongs through the real buffer.
             int bytes = 4 + Math.Min((int)m.ReadU16(cur), 0x2000) * 2;
-            if (steps > 1)
-            {
-                if (_lagSlstSaved.Length < bytes) _lagSlstSaved = new byte[bytes];
-                for (int i = 0; i < bytes; i++) _lagSlstSaved[i] = m.ReadU8(cur + (uint)i);
-            }
+            if (_lagSlstSaved.Length < bytes) _lagSlstSaved = new byte[bytes];
+            for (int i = 0; i < bytes; i++) _lagSlstSaved[i] = m.ReadU8(cur + (uint)i);
             uint src = cur, dst = spare;
             var saved = c.Snapshot();
             try
@@ -116,8 +116,7 @@ public static partial class FramePacing
                 _lagSlstBytes = bytes;
                 return;
             }
-            if (steps > 1)
-                for (int i = 0; i < bytes; i++) m.WriteU8(cur + (uint)i, _lagSlstSaved[i]);
+            for (int i = 0; i < bytes; i++) m.WriteU8(cur + (uint)i, _lagSlstSaved[i]);
             m.WriteU32(MapCurPolyIdsAddr, spare);
             _lagSlstCur = cur;
         }
