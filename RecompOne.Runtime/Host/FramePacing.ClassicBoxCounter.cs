@@ -47,12 +47,18 @@ public static partial class FramePacing
     const double ClassicDigitHeight = 32;
     const double ClassicMainScale = 0.6;
     const double ClassicSmallScale = 0.6;
-    // FONT_NUMBERS has no '/': the italic '7' with its top bar cut off (quad and UVs)
-    // leaves only its diagonal stroke. The cut part is drawn taller so the stroke
-    // matches the digits' height.
-    const char ClassicSlashGlyph = '7';
-    const double ClassicSlashCut = 0.36;
-    const double ClassicSlashAdvance = 20;
+    // FONT_NUMBERS has no '/'. Two digit glyphs are drawn only to get two primitives
+    // already linked at the HUD's OT slot with the digit box on screen; both are then
+    // rewritten as POLY_G4 parallelograms: a dark outline and, on top, a fill with the
+    // digits' orange-to-red gradient (newer primitive in a slot draws first).
+    const double ClassicSlashAdvance = 22;
+    const double ClassicSlashThick = 0.2, ClassicSlashLeft = 0.1, ClassicSlashRight = 0.85;
+    const double ClassicSlashTop = 0.1, ClassicSlashBottom = 0.06;
+    // Thin rim like the digits' own outline: mostly on the sides, barely on the ends.
+    const double ClassicSlashOutlineX = 0.04, ClassicSlashOutlineY = 0.015;
+    static readonly (byte R, byte G, byte B) ClassicSlashTopColor = (255, 176, 24);
+    static readonly (byte R, byte G, byte B) ClassicSlashBottomColor = (226, 40, 0);
+    static readonly (byte R, byte G, byte B) ClassicSlashOutlineColor = (24, 6, 0);
     // GPU context (c1 context.cur) and its prims tail; one POLY_GT4 is 0x34 bytes.
     const uint GpuContextPtrAddr = 0x8005840Cu;
     const uint GpuContextTailOff = 0x78u;
@@ -166,14 +172,13 @@ public static partial class FramePacing
             DrawClassicText(c, m, obj, textAnim, fake, number, textX, textY, 0,
                 (int)(scaleX * ClassicMainScale), (int)(scaleY * ClassicMainScale), scaleZ, status);
             double x = textX + number.Length * mainAdv;
-            double slashScale = ClassicSmallScale / (1 - ClassicSlashCut);
             uint tail = PrimsTailAddr(m);
             uint before = tail != 0 ? m.ReadU32(tail) : 0;
-            DrawClassicText(c, m, obj, textAnim, fake, ClassicSlashGlyph.ToString(), x - 2,
-                bottom + ClassicDigitHeight * slashScale, 0,
-                (int)(scaleX * ClassicSmallScale), (int)(scaleY * slashScale), scaleZ, status);
-            if (tail != 0 && m.ReadU32(tail) == before + PolyGt4Size)
-                CutClassicSlash(m, before, ClassicSlashCut);
+            DrawClassicText(c, m, obj, textAnim, fake, "88", x,
+                bottom + ClassicDigitHeight * ClassicSmallScale, 0,
+                (int)(scaleX * ClassicSmallScale), (int)(scaleY * ClassicSmallScale), scaleZ, status);
+            if (tail != 0 && m.ReadU32(tail) == before + 2 * PolyGt4Size)
+                MakeClassicSlash(m, before, before + PolyGt4Size);
             x += ClassicSlashAdvance;
             DrawClassicText(c, m, obj, textAnim, fake, total, x,
                 bottom + ClassicDigitHeight * ClassicSmallScale, 0,
@@ -195,47 +200,54 @@ public static partial class FramePacing
     }
 
     /// <summary>
-    /// Trim the top <paramref name="cut"/> of a glyph POLY_GT4 (GfxTransformFontChar):
-    /// each top corner moves toward the bottom corner of its column, in screen xy and
-    /// in texture uv alike, so the texture is cropped, not squashed.
+    /// Turn two glyph POLY_GT4s (GfxTransformFontChar) into the slash: the newer one
+    /// (<paramref name="outline"/>, drawn first) a dark parallelogram, the older one
+    /// (<paramref name="fill"/>) the gradient stroke inside it. Geometry comes from the
+    /// first glyph's screen box, so it follows the digits' size and position.
     /// </summary>
-    static void CutClassicSlash(IMemory m, uint poly, double cut)
+    static void MakeClassicSlash(IMemory m, uint fill, uint outline)
     {
-        uint code = m.ReadU32(poly + 4) >> 24;
-        if ((code & 0xFC) != 0x3C) return;
-        Span<int> xs = stackalloc int[4], ys = stackalloc int[4], us = stackalloc int[4], vs = stackalloc int[4];
-        for (int i = 0; i < 4; i++)
+        if (((m.ReadU32(fill + 4) >> 24) & 0xFC) != 0x3C || ((m.ReadU32(outline + 4) >> 24) & 0xFC) != 0x3C)
+            return;
+        int x0 = int.MaxValue, x1 = int.MinValue, y0 = int.MaxValue, y1 = int.MinValue;
+        for (uint i = 0; i < 4; i++)
         {
-            uint xy = m.ReadU32(poly + 8 + (uint)i * 12);
-            xs[i] = (short)(xy & 0xFFFF);
-            ys[i] = (short)(xy >> 16);
-            uint uv = m.ReadU32(poly + 12 + (uint)i * 12);
-            us[i] = (int)(uv & 0xFF);
-            vs[i] = (int)((uv >> 8) & 0xFF);
+            uint xy = m.ReadU32(fill + 8 + i * 12);
+            int x = (short)(xy & 0xFFFF), y = (short)(xy >> 16);
+            x0 = Math.Min(x0, x); x1 = Math.Max(x1, x);
+            y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
         }
-        // Screen y grows down: the two smallest y are the top corners.
-        Span<int> order = stackalloc int[4] { 0, 1, 2, 3 };
-        for (int a = 0; a < 4; a++)
-            for (int b = a + 1; b < 4; b++)
-                if (ys[order[b]] < ys[order[a]]) (order[a], order[b]) = (order[b], order[a]);
-        int t0 = order[0], t1 = order[1], b0 = order[2], b1 = order[3];
-        // Pair each top corner with the bottom corner nearer in x (same glyph edge).
-        if (Math.Abs(xs[t0] - xs[b0]) + Math.Abs(xs[t1] - xs[b1]) > Math.Abs(xs[t0] - xs[b1]) + Math.Abs(xs[t1] - xs[b0]))
-            (b0, b1) = (b1, b0);
-        Span<int> tops = stackalloc int[2] { t0, t1 }, bots = stackalloc int[2] { b0, b1 };
-        for (int k = 0; k < 2; k++)
-        {
-            int t = tops[k], b = bots[k];
-            int x = (int)Math.Round(xs[t] + (xs[b] - xs[t]) * cut);
-            int y = (int)Math.Round(ys[t] + (ys[b] - ys[t]) * cut);
-            int u = (int)Math.Round(us[t] + (us[b] - us[t]) * cut);
-            int v = (int)Math.Round(vs[t] + (vs[b] - vs[t]) * cut);
-            uint xyAddr = poly + 8 + (uint)t * 12;
-            m.WriteU32(xyAddr, ((uint)(ushort)y << 16) | (ushort)x);
-            uint uvAddr = poly + 12 + (uint)t * 12;
-            uint old = m.ReadU32(uvAddr);
-            m.WriteU32(uvAddr, (old & 0xFFFF0000u) | ((uint)(v & 0xFF) << 8) | (uint)(u & 0xFF));
-        }
+        double w = x1 - x0, h = y1 - y0;
+        if (w < 2 || h < 2) return;
+        double t = w * ClassicSlashThick, o = w * ClassicSlashOutlineX, oy = h * ClassicSlashOutlineY;
+        double xl = x0 + w * ClassicSlashLeft, xr = x0 + w * ClassicSlashRight;
+        double yt = y0 + h * ClassicSlashTop, yb = y1 - h * ClassicSlashBottom;
+        // Quad order: top-left, top-right, bottom-left, bottom-right.
+        WriteClassicG4(m, outline,
+            (xr - t - o, yt - oy), (xr + o, yt - oy), (xl - o, yb + oy), (xl + t + o, yb + oy),
+            ClassicSlashOutlineColor, ClassicSlashOutlineColor);
+        WriteClassicG4(m, fill,
+            (xr - t, yt), (xr, yt), (xl, yb), (xl + t, yb),
+            ClassicSlashTopColor, ClassicSlashBottomColor);
+    }
+
+    static void WriteClassicG4(IMemory m, uint poly,
+        (double X, double Y) tl, (double X, double Y) tr, (double X, double Y) bl, (double X, double Y) br,
+        (byte R, byte G, byte B) top, (byte R, byte G, byte B) bottom)
+    {
+        static uint Rgb((byte R, byte G, byte B) c) => (uint)c.R | ((uint)c.G << 8) | ((uint)c.B << 16);
+        static uint Xy((double X, double Y) p) =>
+            ((uint)(ushort)(short)Math.Round(p.Y) << 16) | (ushort)(short)Math.Round(p.X);
+        // Keep the OT link, POLY_G4 is 8 words after the tag (the GT4 had 12).
+        m.WriteU32(poly, (m.ReadU32(poly) & 0x00FFFFFFu) | (8u << 24));
+        m.WriteU32(poly + 4, 0x38000000u | Rgb(top));
+        m.WriteU32(poly + 8, Xy(tl));
+        m.WriteU32(poly + 12, Rgb(top));
+        m.WriteU32(poly + 16, Xy(tr));
+        m.WriteU32(poly + 20, Rgb(bottom));
+        m.WriteU32(poly + 24, Xy(bl));
+        m.WriteU32(poly + 28, Rgb(bottom));
+        m.WriteU32(poly + 32, Xy(br));
     }
 
     static void DrawClassicText(CpuContext c, IMemory m, uint obj, uint textAnim, uint fake,
