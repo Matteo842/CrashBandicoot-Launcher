@@ -68,6 +68,11 @@ public static partial class FramePacing
     // a crate is 1 m (GOOL 0x19000) with its origin on the bottom face.
     const double ClassicCratePixels = 26;
     const double ClassicCrateModelSize = 0x19000 >> 8;
+    // gool_object.size: OT bias. RGteTransformSvtx: z_idx = (size + 0x800 - proj/2)
+    // - z_sum/32, limited to 0..0x7FF, higher drawn later. Aim near the front end with
+    // room for the crate's own depth either way.
+    const uint ObjSizeOff = 0x138u;
+    const int ClassicCrateOtSlot = 0x7C0;
 
     static readonly Stopwatch _classicClock = Stopwatch.StartNew();
     static double _classicLast;
@@ -319,6 +324,10 @@ public static partial class FramePacing
         m.WriteU32(obj + ObjScaleOff, 0x1000);
         m.WriteU32(obj + ObjScaleOff + 4, 0x1000);
         m.WriteU32(obj + ObjScaleOff + 8, 0x1000);
+        // In front of all scenery, like a HUD icon (a crate is convex: its own faces
+        // need no sorting once back faces are culled).
+        int zSum32 = (int)(3 * rz / 32);
+        m.WriteU32(obj + ObjSizeOff, (uint)(ClassicCrateOtSlot + zSum32 - 0x800 + proj / 2));
         CallClassicTransform(c, m, obj);
     }
 
