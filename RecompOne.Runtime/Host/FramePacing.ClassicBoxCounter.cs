@@ -31,18 +31,36 @@ public static partial class FramePacing
     const uint VtxAnimSize = 8;
     // DispC Display_Show: seek 10.0 per 30 Hz frame, 1.5 s, then Display_Hide y += 4.0.
     const double ClassicShowSpeed = 300, ClassicHideSpeed = 120, ClassicHoldSeconds = 1.5;
-    const double ClassicSpinSeconds = 2.0;
+    // Crash 1 crate models have no back or bottom face (the camera never sees them):
+    // sway around the scene crates' own heading and tilt the top toward the camera.
+    const double ClassicSwaySeconds = 3.0;
+    const double ClassicSwayDegrees = 30;
+    const double ClassicViewDegrees = 6;
+    // rot.x pitch direction that brings the top toward a camera on the crate's -z side;
+    // flip if the crate shows its bottom.
+    const int ClassicTiltSign = -1;
 
     // Layout in DispC 2D units (screen pixels of the 512-wide frame, y up).
-    // FONT_NUMBERS digits are 400 font units wide ('1' 350) at the fruit text's scale.
-    const double ClassicDigitAdvance = 16;
-    const double ClassicSmallScale = 0.72;
-    const double ClassicSlashAdvance = 9;
-    const int ClassicSlashAngle = -0xA0; // 12-bit angle, about 14 degrees
-    const double ClassicCrateHalf = 15;
+    // At the fruit text's own scale a FONT_NUMBERS digit advances ~42 and is ~32 tall,
+    // hanging down from the text y.
+    const double ClassicDigitAdvance = 42;
+    const double ClassicDigitHeight = 32;
+    const double ClassicMainScale = 0.6;
+    const double ClassicSmallScale = 0.6;
+    // FONT_NUMBERS has no '/': the italic '7' with its top bar cut off (quad and UVs)
+    // leaves only its diagonal stroke. The cut part is drawn taller so the stroke
+    // matches the digits' height.
+    const char ClassicSlashGlyph = '7';
+    const double ClassicSlashCut = 0.36;
+    const double ClassicSlashAdvance = 20;
+    // GPU context (c1 context.cur) and its prims tail; one POLY_GT4 is 0x34 bytes.
+    const uint GpuContextPtrAddr = 0x8005840Cu;
+    const uint GpuContextTailOff = 0x78u;
+    const uint PolyGt4Size = 0x34u;
+    const double ClassicCrateHalf = 13;
     // Crate model: on-screen height and the box's own size in camera units (world >> 8):
     // a crate is 1 m (GOOL 0x19000) with its origin on the bottom face.
-    const double ClassicCratePixels = 30;
+    const double ClassicCratePixels = 26;
     const double ClassicCrateModelSize = 0x19000 >> 8;
 
     static readonly Stopwatch _classicClock = Stopwatch.StartNew();
@@ -96,7 +114,7 @@ public static partial class FramePacing
             else if (!paused)
                 _classicY = Math.Min(hiddenY, _classicY + ClassicHideSpeed * dt);
             if (!paused)
-                _classicSpin = (_classicSpin + dt / ClassicSpinSeconds) % 1.0;
+                _classicSpin = (_classicSpin + dt / ClassicSwaySeconds) % 1.0;
 
             // Ride the fruit counter down when it shows (Triangle, fruit, lives).
             double y = Math.Min(_classicY, fruitY);
@@ -123,13 +141,16 @@ public static partial class FramePacing
         {
             string number = run.Broken.ToString();
             string total = run.Total.ToString();
+            double mainAdv = ClassicDigitAdvance * ClassicMainScale;
+            double smallAdv = ClassicDigitAdvance * ClassicSmallScale;
             double width = ClassicCrateHalf * 2 + (HudTextDx - ClassicCrateHalf)
-                + number.Length * ClassicDigitAdvance + ClassicSlashAdvance
-                + total.Length * ClassicDigitAdvance * ClassicSmallScale;
+                + number.Length * mainAdv + ClassicSlashAdvance + total.Length * smallAdv;
             double crateX = -width / 2 + ClassicCrateHalf;
             double textX = crateX + HudTextDx;
             double textY = y + HudTextDy;
-            int scaleX = (int)_classicSave[(ObjScaleOff - 0) / 4];
+            // Glyphs hang down from the text y: line the bottoms up.
+            double bottom = textY - ClassicDigitHeight * ClassicMainScale;
+            int scaleX = (int)_classicSave[ObjScaleOff / 4];
             int scaleY = (int)_classicSave[(ObjScaleOff + 4) / 4];
             int scaleZ = (int)_classicSave[(ObjScaleOff + 8) / 4];
             uint status = _classicSave[ObjStatusBOff / 4];
@@ -140,15 +161,22 @@ public static partial class FramePacing
             c.SP = sp;
 
             if (boxAnim != 0)
-                DrawClassicCrate(c, m, obj, boxAnim, crateX, y, status);
+                DrawClassicCrate(c, m, obj, boxAnim, crateX, bottom + ClassicDigitHeight * ClassicMainScale / 2, status);
 
             DrawClassicText(c, m, obj, textAnim, fake, number, textX, textY, 0,
-                scaleX, scaleY, scaleZ, status);
-            double x = textX + number.Length * ClassicDigitAdvance;
-            DrawClassicText(c, m, obj, textAnim, fake, "1", x + 1, textY, ClassicSlashAngle,
-                (int)(scaleX * 0.8), (int)(scaleY * 0.8), scaleZ, status);
+                (int)(scaleX * ClassicMainScale), (int)(scaleY * ClassicMainScale), scaleZ, status);
+            double x = textX + number.Length * mainAdv;
+            double slashScale = ClassicSmallScale / (1 - ClassicSlashCut);
+            uint tail = PrimsTailAddr(m);
+            uint before = tail != 0 ? m.ReadU32(tail) : 0;
+            DrawClassicText(c, m, obj, textAnim, fake, ClassicSlashGlyph.ToString(), x - 2,
+                bottom + ClassicDigitHeight * slashScale, 0,
+                (int)(scaleX * ClassicSmallScale), (int)(scaleY * slashScale), scaleZ, status);
+            if (tail != 0 && m.ReadU32(tail) == before + PolyGt4Size)
+                CutClassicSlash(m, before, ClassicSlashCut);
             x += ClassicSlashAdvance;
-            DrawClassicText(c, m, obj, textAnim, fake, total, x, textY, 0,
+            DrawClassicText(c, m, obj, textAnim, fake, total, x,
+                bottom + ClassicDigitHeight * ClassicSmallScale, 0,
                 (int)(scaleX * ClassicSmallScale), (int)(scaleY * ClassicSmallScale), scaleZ, status);
         }
         finally
@@ -157,6 +185,56 @@ public static partial class FramePacing
             c.Restore(saved);
             for (uint i = 0; i < ClassicGhostBytes / 4; i++)
                 m.WriteU32(obj + i * 4, _classicSave[i]);
+        }
+    }
+
+    static uint PrimsTailAddr(IMemory m)
+    {
+        uint ctx = m.ReadU32(GpuContextPtrAddr);
+        return NativeWideGuestPointer(ctx) ? ctx + GpuContextTailOff : 0;
+    }
+
+    /// <summary>
+    /// Trim the top <paramref name="cut"/> of a glyph POLY_GT4 (GfxTransformFontChar):
+    /// each top corner moves toward the bottom corner of its column, in screen xy and
+    /// in texture uv alike, so the texture is cropped, not squashed.
+    /// </summary>
+    static void CutClassicSlash(IMemory m, uint poly, double cut)
+    {
+        uint code = m.ReadU32(poly + 4) >> 24;
+        if ((code & 0xFC) != 0x3C) return;
+        Span<int> xs = stackalloc int[4], ys = stackalloc int[4], us = stackalloc int[4], vs = stackalloc int[4];
+        for (int i = 0; i < 4; i++)
+        {
+            uint xy = m.ReadU32(poly + 8 + (uint)i * 12);
+            xs[i] = (short)(xy & 0xFFFF);
+            ys[i] = (short)(xy >> 16);
+            uint uv = m.ReadU32(poly + 12 + (uint)i * 12);
+            us[i] = (int)(uv & 0xFF);
+            vs[i] = (int)((uv >> 8) & 0xFF);
+        }
+        // Screen y grows down: the two smallest y are the top corners.
+        Span<int> order = stackalloc int[4] { 0, 1, 2, 3 };
+        for (int a = 0; a < 4; a++)
+            for (int b = a + 1; b < 4; b++)
+                if (ys[order[b]] < ys[order[a]]) (order[a], order[b]) = (order[b], order[a]);
+        int t0 = order[0], t1 = order[1], b0 = order[2], b1 = order[3];
+        // Pair each top corner with the bottom corner nearer in x (same glyph edge).
+        if (Math.Abs(xs[t0] - xs[b0]) + Math.Abs(xs[t1] - xs[b1]) > Math.Abs(xs[t0] - xs[b1]) + Math.Abs(xs[t1] - xs[b0]))
+            (b0, b1) = (b1, b0);
+        Span<int> tops = stackalloc int[2] { t0, t1 }, bots = stackalloc int[2] { b0, b1 };
+        for (int k = 0; k < 2; k++)
+        {
+            int t = tops[k], b = bots[k];
+            int x = (int)Math.Round(xs[t] + (xs[b] - xs[t]) * cut);
+            int y = (int)Math.Round(ys[t] + (ys[b] - ys[t]) * cut);
+            int u = (int)Math.Round(us[t] + (us[b] - us[t]) * cut);
+            int v = (int)Math.Round(vs[t] + (vs[b] - vs[t]) * cut);
+            uint xyAddr = poly + 8 + (uint)t * 12;
+            m.WriteU32(xyAddr, ((uint)(ushort)y << 16) | (ushort)x);
+            uint uvAddr = poly + 12 + (uint)t * 12;
+            uint old = m.ReadU32(uvAddr);
+            m.WriteU32(uvAddr, (old & 0xFFFF0000u) | ((uint)(v & 0xFF) << 8) | (uint)(u & 0xFF));
         }
     }
 
@@ -222,15 +300,35 @@ public static partial class FramePacing
         m.WriteU32(obj + ObjTransOff, (uint)(camx + (int)Math.Round(ux * 256)));
         m.WriteU32(obj + ObjTransOff + 4, (uint)(camy + (int)Math.Round(uy * 256)));
         m.WriteU32(obj + ObjTransOff + 8, (uint)(camz + (int)Math.Round(uz * 256)));
-        // Spin about the world Y axis, facing the camera's own heading.
-        int camYaw = (int)m.ReadU32(NativeWideCamTransPrevAddr + 16);
-        m.WriteU32(obj + ObjRotOff, 0);
-        m.WriteU32(obj + ObjRotOff + 4, (uint)((camYaw + (int)(_classicSpin * 4096)) & 0xFFF));
-        m.WriteU32(obj + ObjRotOff + 8, 0);
+        ClassicCrateAngles(ux, uy, uz, out int ax, out int ay, out int az);
+        m.WriteU32(obj + ObjRotOff, (uint)ax);
+        m.WriteU32(obj + ObjRotOff + 4, (uint)ay);
+        m.WriteU32(obj + ObjRotOff + 8, (uint)az);
         m.WriteU32(obj + ObjScaleOff, 0x1000);
         m.WriteU32(obj + ObjScaleOff + 4, 0x1000);
         m.WriteU32(obj + ObjScaleOff + 8, 0x1000);
         CallClassicTransform(c, m, obj);
+    }
+
+    /// <summary>
+    /// Crate rot: sway on rot.y (heading, 0 = how the level's crates face the camera),
+    /// pitch on rot.x so the camera looks down on the top by <see cref="ClassicViewDegrees"/>.
+    /// </summary>
+    static void ClassicCrateAngles(double ux, double uy, double uz, out int ax, out int ay, out int az)
+    {
+        // Box to camera, world space (y up).
+        double len = Math.Sqrt(ux * ux + uy * uy + uz * uz);
+        double dx = -ux / len, dy = -uy / len, dz = -uz / len;
+        double hl = Math.Sqrt(dx * dx + dz * dz);
+        double elevation = Math.Asin(Math.Clamp(dy, -1, 1));
+        double tilt = ClassicViewDegrees * Math.PI / 180 - elevation;
+        // Pitch only helps when the camera is in front or behind (z); none from the side.
+        double toward = hl > 1e-6 ? -dz / hl : 0;
+        double sway = Math.Sin(_classicSpin * 2 * Math.PI) * ClassicSwayDegrees * Math.PI / 180;
+        static int A12(double rad) => (int)Math.Round(rad * 4096 / (2 * Math.PI)) & 0xFFF;
+        ax = A12(ClassicTiltSign * toward * tilt);
+        ay = A12(sway);
+        az = 0;
     }
 
     static bool InvertRot(ReadOnlySpan<short> r, double x, double y, double z,
