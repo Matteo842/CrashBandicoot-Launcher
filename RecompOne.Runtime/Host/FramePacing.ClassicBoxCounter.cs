@@ -47,15 +47,19 @@ public static partial class FramePacing
     const double ClassicDigitHeight = 32;
     const double ClassicMainScale = 0.6;
     const double ClassicSmallScale = 0.6;
-    // FONT_NUMBERS has no '/'. Two digit glyphs are drawn only to get two primitives
-    // already linked at the HUD's OT slot with the digit box on screen; both are then
-    // rewritten as POLY_G4 parallelograms: a dark outline and, on top, a fill with the
-    // digits' orange-to-red gradient (newer primitive in a slot draws first).
+    // The digits hang lower than the crate's middle by this much (2D units, y up).
+    const double ClassicTextDrop = 4;
+    // FONT_NUMBERS has no '/', so it is drawn as a glyph of our own on the native pixel
+    // grid, like the digits' blocky texels: one flat quad per pixel row of the stroke,
+    // a 1-pixel dark rim and the digits' orange-to-red gradient row by row. The quads
+    // are digit glyphs the game drew (already linked at the HUD's OT slot), rewritten as
+    // POLY_F4: a full-size '8' measures the digit box, then a string of tiny '8's
+    // supplies the rest. In one OT slot the newest primitive draws first, so the rim
+    // goes to the newest ones and the fill to the oldest.
     const double ClassicSlashAdvance = 22;
     const double ClassicSlashThick = 0.2, ClassicSlashLeft = 0.1, ClassicSlashRight = 0.85;
     const double ClassicSlashTop = 0.1, ClassicSlashBottom = 0.06;
-    // Thin rim like the digits' own outline: mostly on the sides, barely on the ends.
-    const double ClassicSlashOutlineX = 0.04, ClassicSlashOutlineY = 0.015;
+    const int ClassicSlashMaxRows = 100;
     static readonly (byte R, byte G, byte B) ClassicSlashTopColor = (255, 176, 24);
     static readonly (byte R, byte G, byte B) ClassicSlashBottomColor = (226, 40, 0);
     static readonly (byte R, byte G, byte B) ClassicSlashOutlineColor = (24, 6, 0);
@@ -161,6 +165,9 @@ public static partial class FramePacing
             double textY = y + HudTextDy;
             // Glyphs hang down from the text y: line the bottoms up.
             double bottom = textY - ClassicDigitHeight * ClassicMainScale;
+            double crateY = bottom + ClassicDigitHeight * ClassicMainScale / 2;
+            textY -= ClassicTextDrop;
+            bottom -= ClassicTextDrop;
             int scaleX = (int)_classicSave[ObjScaleOff / 4];
             int scaleY = (int)_classicSave[(ObjScaleOff + 4) / 4];
             int scaleZ = (int)_classicSave[(ObjScaleOff + 8) / 4];
@@ -172,22 +179,18 @@ public static partial class FramePacing
             c.SP = sp;
 
             if (boxAnim != 0)
-                DrawClassicCrate(c, m, obj, boxAnim, crateX, bottom + ClassicDigitHeight * ClassicMainScale / 2, status);
+                DrawClassicCrate(c, m, obj, boxAnim, crateX, crateY, status);
 
             DrawClassicText(c, m, obj, textAnim, fake, number, textX, textY, 0,
                 (int)(scaleX * ClassicMainScale), (int)(scaleY * ClassicMainScale), scaleZ, status);
             double x = textX + number.Length * mainAdv;
+            double smallY = bottom + ClassicDigitHeight * ClassicSmallScale;
+            int sx = (int)(scaleX * ClassicSmallScale), sy = (int)(scaleY * ClassicSmallScale);
             uint tail = PrimsTailAddr(m);
-            uint before = tail != 0 ? m.ReadU32(tail) : 0;
-            DrawClassicText(c, m, obj, textAnim, fake, "88", x,
-                bottom + ClassicDigitHeight * ClassicSmallScale, 0,
-                (int)(scaleX * ClassicSmallScale), (int)(scaleY * ClassicSmallScale), scaleZ, status);
-            if (tail != 0 && m.ReadU32(tail) == before + 2 * PolyGt4Size)
-                MakeClassicSlash(m, before, before + PolyGt4Size);
+            if (tail != 0)
+                DrawClassicSlash(c, m, obj, textAnim, fake, tail, x, smallY, sx, sy, scaleZ, status);
             x += ClassicSlashAdvance;
-            DrawClassicText(c, m, obj, textAnim, fake, total, x,
-                bottom + ClassicDigitHeight * ClassicSmallScale, 0,
-                (int)(scaleX * ClassicSmallScale), (int)(scaleY * ClassicSmallScale), scaleZ, status);
+            DrawClassicText(c, m, obj, textAnim, fake, total, x, smallY, 0, sx, sy, scaleZ, status);
         }
         finally
         {
@@ -204,55 +207,95 @@ public static partial class FramePacing
         return NativeWideGuestPointer(ctx) ? ctx + GpuContextTailOff : 0;
     }
 
-    /// <summary>
-    /// Turn two glyph POLY_GT4s (GfxTransformFontChar) into the slash: the newer one
-    /// (<paramref name="outline"/>, drawn first) a dark parallelogram, the older one
-    /// (<paramref name="fill"/>) the gradient stroke inside it. Geometry comes from the
-    /// first glyph's screen box, so it follows the digits' size and position.
-    /// </summary>
-    static void MakeClassicSlash(IMemory m, uint fill, uint outline)
+    static void DrawClassicSlash(CpuContext c, IMemory m, uint obj, uint textAnim, uint fake,
+        uint tail, double x, double y, int sx, int sy, int sz, uint status)
     {
-        if (((m.ReadU32(fill + 4) >> 24) & 0xFC) != 0x3C || ((m.ReadU32(outline + 4) >> 24) & 0xFC) != 0x3C)
-            return;
+        uint first = m.ReadU32(tail);
+        DrawClassicText(c, m, obj, textAnim, fake, "8", x, y, 0, sx, sy, sz, status);
+        if (m.ReadU32(tail) == first + PolyGt4Size && TryClassicSlashRows(m, first, out var rows))
+        {
+            int need = rows.Count * 2 + 2;
+            DrawClassicText(c, m, obj, textAnim, fake, new string('8', need - 1), x, y, 0,
+                Math.Max(1, sx / 64), Math.Max(1, sy / 64), sz, status);
+            if (m.ReadU32(tail) == first + (uint)need * PolyGt4Size)
+            {
+                WriteClassicSlash(m, first, rows);
+                return;
+            }
+        }
+        // Anything short of the full set: hide what was drawn rather than show an '8'.
+        uint end = m.ReadU32(tail);
+        for (uint p = first; p < end && end - first < 0x10000; p += PolyGt4Size)
+            WriteClassicF4(m, p, 0, 0, 0, 0, default);
+    }
+
+    /// <summary>
+    /// Slash rows on the native pixel grid from the measuring '8' (a POLY_GT4 from
+    /// GfxTransformFontChar): for each pixel row, the stroke's left x, right x
+    /// (exclusive) and y.
+    /// </summary>
+    static bool TryClassicSlashRows(IMemory m, uint glyph, out List<(int L, int R, int Y)> rows)
+    {
+        rows = new List<(int L, int R, int Y)>();
+        if (((m.ReadU32(glyph + 4) >> 24) & 0xFC) != 0x3C) return false;
         int x0 = int.MaxValue, x1 = int.MinValue, y0 = int.MaxValue, y1 = int.MinValue;
         for (uint i = 0; i < 4; i++)
         {
-            uint xy = m.ReadU32(fill + 8 + i * 12);
+            uint xy = m.ReadU32(glyph + 8 + i * 12);
             int x = (short)(xy & 0xFFFF), y = (short)(xy >> 16);
             x0 = Math.Min(x0, x); x1 = Math.Max(x1, x);
             y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
         }
         double w = x1 - x0, h = y1 - y0;
-        if (w < 2 || h < 2) return;
-        double t = w * ClassicSlashThick, o = w * ClassicSlashOutlineX, oy = h * ClassicSlashOutlineY;
-        double xl = x0 + w * ClassicSlashLeft, xr = x0 + w * ClassicSlashRight;
-        double yt = y0 + h * ClassicSlashTop, yb = y1 - h * ClassicSlashBottom;
-        // Quad order: top-left, top-right, bottom-left, bottom-right.
-        WriteClassicG4(m, outline,
-            (xr - t - o, yt - oy), (xr + o, yt - oy), (xl - o, yb + oy), (xl + t + o, yb + oy),
-            ClassicSlashOutlineColor, ClassicSlashOutlineColor);
-        WriteClassicG4(m, fill,
-            (xr - t, yt), (xr, yt), (xl, yb), (xl + t, yb),
-            ClassicSlashTopColor, ClassicSlashBottomColor);
+        if (w < 3 || h < 3) return false;
+        int thick = Math.Max(2, (int)Math.Round(w * ClassicSlashThick));
+        double leftTop = x0 + w * ClassicSlashRight - thick, leftBottom = x0 + w * ClassicSlashLeft;
+        int yt = (int)Math.Round(y0 + h * ClassicSlashTop), yb = (int)Math.Round(y1 - h * ClassicSlashBottom) - 1;
+        if (yb <= yt || yb - yt + 1 > ClassicSlashMaxRows) return false;
+        for (int y = yt; y <= yb; y++)
+        {
+            double f = (double)(y - yt) / (yb - yt);
+            int l = (int)Math.Round(leftTop + (leftBottom - leftTop) * f);
+            rows.Add((l, l + thick, y));
+        }
+        return true;
     }
 
-    static void WriteClassicG4(IMemory m, uint poly,
-        (double X, double Y) tl, (double X, double Y) tr, (double X, double Y) bl, (double X, double Y) br,
-        (byte R, byte G, byte B) top, (byte R, byte G, byte B) bottom)
+    /// <summary>
+    /// Rewrite the 2n+2 consecutive glyph primitives from <paramref name="first"/>:
+    /// the n oldest become the gradient fill rows, the n+2 newest (drawn first) the
+    /// 1-pixel rim: each row one pixel wider on both sides, plus a row above and below.
+    /// </summary>
+    static void WriteClassicSlash(IMemory m, uint first, List<(int L, int R, int Y)> rows)
     {
-        static uint Rgb((byte R, byte G, byte B) c) => (uint)c.R | ((uint)c.G << 8) | ((uint)c.B << 16);
-        static uint Xy((double X, double Y) p) =>
-            ((uint)(ushort)(short)Math.Round(p.Y) << 16) | (ushort)(short)Math.Round(p.X);
-        // Keep the OT link, POLY_G4 is 8 words after the tag (the GT4 had 12).
-        m.WriteU32(poly, (m.ReadU32(poly) & 0x00FFFFFFu) | (8u << 24));
-        m.WriteU32(poly + 4, 0x38000000u | Rgb(top));
-        m.WriteU32(poly + 8, Xy(tl));
-        m.WriteU32(poly + 12, Rgb(top));
-        m.WriteU32(poly + 16, Xy(tr));
-        m.WriteU32(poly + 20, Rgb(bottom));
-        m.WriteU32(poly + 24, Xy(bl));
-        m.WriteU32(poly + 28, Rgb(bottom));
-        m.WriteU32(poly + 32, Xy(br));
+        int n = rows.Count;
+        for (int i = 0; i < n; i++)
+        {
+            var (l, r, y) = rows[i];
+            double f = n > 1 ? (double)i / (n - 1) : 0;
+            var col = (
+                (byte)Math.Round(ClassicSlashTopColor.R + (ClassicSlashBottomColor.R - ClassicSlashTopColor.R) * f),
+                (byte)Math.Round(ClassicSlashTopColor.G + (ClassicSlashBottomColor.G - ClassicSlashTopColor.G) * f),
+                (byte)Math.Round(ClassicSlashTopColor.B + (ClassicSlashBottomColor.B - ClassicSlashTopColor.B) * f));
+            WriteClassicF4(m, first + (uint)i * PolyGt4Size, l, y, r, y + 1, col);
+            WriteClassicF4(m, first + (uint)(n + i) * PolyGt4Size, l - 1, y, r + 1, y + 1, ClassicSlashOutlineColor);
+        }
+        var top = rows[0];
+        var bottom = rows[n - 1];
+        WriteClassicF4(m, first + (uint)(2 * n) * PolyGt4Size, top.L - 1, top.Y - 1, top.R + 1, top.Y, ClassicSlashOutlineColor);
+        WriteClassicF4(m, first + (uint)(2 * n + 1) * PolyGt4Size, bottom.L - 1, bottom.Y + 1, bottom.R + 1, bottom.Y + 2, ClassicSlashOutlineColor);
+    }
+
+    /// <summary>A glyph POLY_GT4 rewritten in place as a flat POLY_F4 rectangle (OT link kept).</summary>
+    static void WriteClassicF4(IMemory m, uint poly, int x0, int y0, int x1, int y1, (byte R, byte G, byte B) col)
+    {
+        static uint Xy(int x, int y) => ((uint)(ushort)(short)y << 16) | (ushort)(short)x;
+        m.WriteU32(poly, (m.ReadU32(poly) & 0x00FFFFFFu) | (5u << 24));
+        m.WriteU32(poly + 4, 0x28000000u | col.R | ((uint)col.G << 8) | ((uint)col.B << 16));
+        m.WriteU32(poly + 8, Xy(x0, y0));
+        m.WriteU32(poly + 12, Xy(x1, y0));
+        m.WriteU32(poly + 16, Xy(x0, y1));
+        m.WriteU32(poly + 20, Xy(x1, y1));
     }
 
     static void DrawClassicText(CpuContext c, IMemory m, uint obj, uint textAnim, uint fake,
