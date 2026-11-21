@@ -471,6 +471,7 @@ public static partial class FramePacing
         ResetWaterClock();
         _fadeAcc = 0;
         _fadeHold = false;
+        _hogGridResidue = -1;
         _fadeDoneSeen = false;
         _fadeDoneHold = false;
         _deathReenterLog = 0;
