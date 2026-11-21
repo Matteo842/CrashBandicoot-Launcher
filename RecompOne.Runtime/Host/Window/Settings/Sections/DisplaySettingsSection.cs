@@ -76,13 +76,21 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Curved CRT TV look by Mattias Gustavsson");
 
+        bool classicBoxes = ConfigManager.View.ClassicBoxCounter;
+        if (ImGui.Checkbox("Classic box counter", ref classicBoxes))
+        {
+            ConfigManager.View.ClassicBoxCounter = classicBoxes;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Crash 2 style: crate + boxes broken / needed, with the HUD (Triangle)");
+
         bool boxes = ConfigManager.View.BoxCounter;
-        if (ImGui.Checkbox("Box counter", ref boxes))
+        if (ImGui.Checkbox("Corner box counter", ref boxes))
         {
             ConfigManager.View.BoxCounter = boxes;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Boxes broken / boxes needed for the gem, in the corner");
+        ImGui.TextDisabled("Boxes broken / boxes needed for the gem, always in the corner");
 
         bool gemHints = ConfigManager.View.GemHints;
         if (ImGui.Checkbox("Gem hints", ref gemHints))

@@ -291,7 +291,8 @@ sealed partial class LauncherWindow
         var startPauseMenu = Nav(new ThemeCheck("Pause menu on Start") { Checked = view.StartPauseMenu });
         var saveLives = Nav(new ThemeCheck("Save lives to memory card") { Checked = view.SaveLives });
         var analogMovement = Nav(new ThemeCheck("Analog movement (left stick)") { Checked = view.AnalogMovement });
-        var boxCounter = Nav(new ThemeCheck("Box counter") { Checked = view.BoxCounter });
+        var classicBoxCounter = Nav(new ThemeCheck("Classic box counter") { Checked = view.ClassicBoxCounter });
+        var boxCounter = Nav(new ThemeCheck("Corner box counter") { Checked = view.BoxCounter });
         var gemHints = Nav(new ThemeCheck("Gem hints") { Checked = view.GemHints });
         var singleBoxDrop = Nav(new ThemeCheck("Japanese box drop (one box)") { Checked = view.SingleBoxDrop });
         var pityMask = Nav(new ThemeCheck("Pity mask") { Checked = view.PityMask });
@@ -359,8 +360,10 @@ sealed partial class LauncherWindow
                     Hint("Load Game restores the lives you had when you saved, like Crash 2 and 3. Off: every load starts with 4 lives, as in the original."),
                     WithMargin(analogMovement, new Thickness(0, 0, 0, 14)),
                     Hint("The gamepad left stick steers Crash in any direction, not only the 8 of the D-pad. D-pad and keyboard are unchanged."),
+                    WithMargin(classicBoxCounter, new Thickness(0, 0, 0, 14)),
+                    Hint("Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters (hold Triangle) and when a box breaks."),
                     WithMargin(boxCounter, new Thickness(0, 0, 0, 14)),
-                    Hint("Shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint."),
+                    Hint("Always shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint."),
                     WithMargin(gemHints, new Thickness(0, 0, 0, 14)),
                     Hint("On the map, a card shows what each level's gem needs: all boxes without dying, and which colored gem opens its gem path. In levels: a reminder at the start, which gem an inactive gem platform needs, and a notice when a death loses the gem."),
                     WithMargin(singleBoxDrop, new Thickness(0, 0, 0, 14)),
@@ -406,6 +409,7 @@ sealed partial class LauncherWindow
             view.SaveLives = saveLives.Checked;
             view.AnalogMovement = analogMovement.Checked;
             view.BoxCounter = boxCounter.Checked;
+            view.ClassicBoxCounter = classicBoxCounter.Checked;
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;

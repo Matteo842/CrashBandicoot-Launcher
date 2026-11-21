@@ -113,9 +113,14 @@ static class SettingsDialog
             "A gamepad left stick steers Crash in any direction, not only the 8 of the D-pad. Touch controls and D-pad are unchanged.",
             bodyFont));
 
-        var boxCounter = AddSwitch(activity, card, "Box counter", view.BoxCounter, bodyBold);
+        var classicBoxCounter = AddSwitch(activity, card, "Classic box counter", view.ClassicBoxCounter, bodyBold);
         card.AddView(Hint(activity,
-            "Shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint.",
+            "Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters and when a box breaks.",
+            bodyFont));
+
+        var boxCounter = AddSwitch(activity, card, "Corner box counter", view.BoxCounter, bodyBold);
+        card.AddView(Hint(activity,
+            "Always shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint.",
             bodyFont));
 
         var gemHints = AddSwitch(activity, card, "Gem hints", view.GemHints, bodyBold);
@@ -198,6 +203,7 @@ static class SettingsDialog
             view.SaveLives = saveLives.Checked;
             view.AnalogMovement = analogMovement.Checked;
             view.BoxCounter = boxCounter.Checked;
+            view.ClassicBoxCounter = classicBoxCounter.Checked;
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;

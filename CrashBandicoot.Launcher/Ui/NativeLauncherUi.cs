@@ -115,6 +115,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _saveLives;
     ThemeCheck? _analogMovement;
     ThemeCheck? _boxCounter;
+    ThemeCheck? _classicBoxCounter;
     ThemeCheck? _gemHints;
     ThemeCheck? _singleBoxDrop;
     ThemeCheck? _pityMask;
@@ -328,6 +329,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_saveLives, state, "saveLives");
         SetCheck(_analogMovement, state, "analogMovement");
         SetCheck(_boxCounter, state, "boxCounter");
+        SetCheck(_classicBoxCounter, state, "classicBoxCounter");
         SetCheck(_gemHints, state, "gemHints");
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
         SetCheck(_pityMask, state, "pityMask");
@@ -1707,11 +1709,17 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 52;
         AddHint("The gamepad left stick steers Crash in any direction, not only the 8 of the D-pad. D-pad and keyboard are unchanged.");
 
-        _boxCounter = MakeCheck("Box counter");
+        _classicBoxCounter = MakeCheck("Classic box counter");
+        _classicBoxCounter.Location = new Point(12, y);
+        page.Controls.Add(_classicBoxCounter);
+        y += 52;
+        AddHint("Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters (hold Triangle) and when a box breaks.");
+
+        _boxCounter = MakeCheck("Corner box counter");
         _boxCounter.Location = new Point(12, y);
         page.Controls.Add(_boxCounter);
         y += 52;
-        AddHint("Shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint.");
+        AddHint("Always shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint.");
 
         _gemHints = MakeCheck("Gem hints");
         _gemHints.Location = new Point(12, y);
@@ -1764,6 +1772,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 saveLives = _saveLives?.Checked ?? true,
                 analogMovement = _analogMovement?.Checked ?? false,
                 boxCounter = _boxCounter?.Checked ?? false,
+                classicBoxCounter = _classicBoxCounter?.Checked ?? true,
                 gemHints = _gemHints?.Checked ?? false,
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
                 pityMask = _pityMask?.Checked ?? false,

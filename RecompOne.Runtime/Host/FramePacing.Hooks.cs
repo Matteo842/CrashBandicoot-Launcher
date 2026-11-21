@@ -63,7 +63,7 @@ public static partial class FramePacing
             _spawnBudget = SpawnBurstMax + SpawnBurstMax / 2;
     }
 
-    static bool OnCallPre(uint addr, CpuContext c, IMemory m) => addr switch
+    static bool OnCallPre(uint addr, CpuContext c, IMemory m) => _classicGhost || addr switch
     {
         NsInitAddr => PreNsInit(c, m),
         GoolUpdateObjectsAddr => PreUpdateObjects(c, m),
@@ -266,6 +266,8 @@ public static partial class FramePacing
 
     static void OnCallPost(uint addr, CpuContext c, IMemory m)
     {
+        // #243 classic box counter: borrowed HUD object, nothing to pace or restore.
+        if (_classicGhost) return;
         switch (addr)
         {
             case NsInitAddr:
@@ -347,6 +349,7 @@ public static partial class FramePacing
 
     public static bool PreTransform(CpuContext c, IMemory m)
     {
+        if (_classicGhost) return true;
         if (!DrawBoxDropObject(m, c.A0)) return false;
         NoteNativeWideHudTransform(m, c.A0);
         if (IsActive(m))
@@ -423,6 +426,8 @@ public static partial class FramePacing
         // The last HUD object's range must end before GpuUpdate allocates its
         // own primitives (fade quads) into the same prims buffer.
         CloseNativeWideHudRange(m);
+        // #243: after the HUD range, so the shift of the side counters leaves it alone.
+        DrawClassicBoxCounter(c, m);
         // After the whole object tree: skip-frame plat acc matches the
         // drawn lerp. FinishPacedScale may have used last present's t.
         RideAfterCrash(m);

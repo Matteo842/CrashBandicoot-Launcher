@@ -444,6 +444,17 @@ public class ViewConfig
     }
 
     /// <summary>
+    /// Classic box counter (#243), Crash 2/3 style: a spinning crate and broken/total
+    /// in the game's own HUD digits at the top centre. It shows with the fruit/lives HUD
+    /// (Triangle) and when a box breaks. On by default.
+    /// </summary>
+    public bool ClassicBoxCounter
+    {
+        get => GetBool("ClassicBoxCounter", true);
+        set => SetBool("ClassicBoxCounter", value);
+    }
+
+    /// <summary>
     /// Gem hints (#131): what the selected level's gem needs on the map, a reminder
     /// at level start, the gem an inactive gem platform needs, and a notice when a
     /// death loses the gem. Off by default.
