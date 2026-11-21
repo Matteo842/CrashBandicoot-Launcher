@@ -1085,10 +1085,45 @@ public static partial class FramePacing
             long d = (long)to - from;
             if (d == 0 || d > Teleport || d < -Teleport) continue;
             if (IsGoolPtr(from) || IsGoolPtr(to)) continue;
+            if (i == HogLateralMem && (to == HogLateralMax || to == -HogLateralMax))
+            {
+                m.WriteU32(o + ObjMemOff + (uint)i * 4u, (uint)KeepHogLateralToEdge(from, to));
+                continue;
+            }
             if (d < HogMemMinStep && d > -HogMemMinStep) continue;
             m.WriteU32(o + ObjMemOff + (uint)i * 4u,
                 (uint)KeepHogDelta(from, to, ref _hogMemFrac[i], ang: false));
         }
+    }
+
+    /// <summary>WillC mem 17 (ComboBounce): the hog's lateral offset from the path.</summary>
+    const int HogLateralMem = 17;
+    /// <summary>WillyWarthogMoveLeft/Right clamp, ±480.0.</summary>
+    const int HogLateralMax = 480 * 256;
+    /// <summary><c>spd(ComboBounce, 1440.0)</c> per 34-tick step.</summary>
+    const double HogLateralStep = 1440.0 * 256 * RefTicks / 1024;
+
+    /// <summary>
+    /// The guest's step that ends on the ±480 clamp is only the rest of the
+    /// way to the edge. Keeping dt/34 of that rest every present slowed the
+    /// hog down as it neared the edge (462, 474, 477, 480 over three frames
+    /// where the PS1 goes 434 → 480 in one): the quick full swing past the
+    /// second spiked totem in Hog Wild failed at 240 FPS. Move at the real
+    /// rate and stop on the edge.
+    /// </summary>
+    static int KeepHogLateralToEdge(int from, int to)
+    {
+        long d = (long)to - from;
+        if (d == 0 || _exactTicks <= 0) return from;
+        double step = HogLateralStep * _exactTicks / RefTicks + _hogMemFrac[HogLateralMem];
+        int kept = (int)Math.Truncate(step);
+        if (kept >= Math.Abs(d))
+        {
+            _hogMemFrac[HogLateralMem] = 0;
+            return to;
+        }
+        _hogMemFrac[HogLateralMem] = step - kept;
+        return from + (d > 0 ? kept : -kept);
     }
 
     /// <summary>

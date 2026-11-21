@@ -667,6 +667,9 @@ public static partial class FramePacing
     static double _fadeAcc;
     static bool _fadeHold;
     static uint _fadeStepSaved;
+    /// <summary>Fade done sentinel (-2) pacing, see HoldFadeDone.</summary>
+    static bool _fadeDoneSeen, _fadeDoneHold;
+    static uint _fadeDoneFrame;
     static int _deathReenterLog;
     static int _deathFadeLog;
     static long _simTs;

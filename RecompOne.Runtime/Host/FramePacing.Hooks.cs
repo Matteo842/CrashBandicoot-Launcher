@@ -376,6 +376,8 @@ public static partial class FramePacing
         // Snapshot ran on the previous state, so re-read the ride flag.
         if (_crashObj)
             _crashHog = CrashOnWarthog(m, _obj);
+        if (_crashObj)
+            BeginHogWallSubstep(m);
         // Death is already a 30 Hz GoolObjectUpdate. Do not 34+scale or
         // skip physics on that step (that stacked to ~4 Hz Force_Fall).
         if (_crashObj && IsLandLockedState(m, _obj))
@@ -409,6 +411,8 @@ public static partial class FramePacing
     {
         AnalogMovement.PostPhysics(m);
         RestoreCrashTurnSpeed(m);
+        if (_crashObj)
+            _hogWallSubstep = false;
         if (_crashObj && IsActive(m))
             FinishPacedScale(m);
     }
@@ -467,6 +471,8 @@ public static partial class FramePacing
         ResetWaterClock();
         _fadeAcc = 0;
         _fadeHold = false;
+        _fadeDoneSeen = false;
+        _fadeDoneHold = false;
         _deathReenterLog = 0;
         _deathFadeLog = 0;
         _svtxLog = 0;

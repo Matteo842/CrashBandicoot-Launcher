@@ -741,9 +741,14 @@ public static partial class FramePacing
     static void PaceFade(IMemory m)
     {
         RestoreFadeStep(m);
-        if (!IsActive(m)) return;
+        if (!IsActive(m))
+        {
+            _fadeDoneSeen = false;
+            return;
+        }
         try
         {
+            HoldFadeDone(m);
             _fadeAcc += _exactTicks;
             if (_fadeAcc >= RefTicks)
             {
@@ -766,10 +771,56 @@ public static partial class FramePacing
 
     static void RestoreFadeStep(IMemory m)
     {
+        RestoreFadeDone(m);
         if (!_fadeHold) return;
         _fadeHold = false;
         try { m.WriteU32(FadeStepAddr, _fadeStepSaved); }
         catch { /* overlay swap */ }
+    }
+
+    /// <summary>
+    /// The PS1 GpuUpdate turns the -2 sentinel into -1 one frame after the
+    /// fade reached black: frame N writes -2, frame N+1 writes -1, and
+    /// Death_Fall (which runs before GpuUpdate) sees -1 and respawns in
+    /// frame N+2. Unlocked, -2 became -1 on the very next present and
+    /// Crash, interpreted every present, respawned in frame N: the hog
+    /// death was 8.3 frames instead of 10 and each respawn put the next
+    /// ride ~2 frames ahead of the original (oracle, Hog Wild). Keep -2
+    /// until frames_elapsed reaches N+2; both values draw the same black.
+    /// </summary>
+    static void HoldFadeDone(IMemory m)
+    {
+        int fc = (int)m.ReadU32(FadeCounterAddr);
+        if (fc != -2)
+        {
+            if (fc != -1) _fadeDoneSeen = false;
+            return;
+        }
+        if (_fadeDoneSeen && m.ReadU32(FramesElapsedAddr) - _fadeDoneFrame < 2)
+            _fadeDoneHold = true;
+    }
+
+    /// <summary>After GpuUpdate: note the frame -2 appeared in, or put the held -2 back.</summary>
+    static void RestoreFadeDone(IMemory m)
+    {
+        try
+        {
+            int fc = (int)m.ReadU32(FadeCounterAddr);
+            if (_fadeDoneHold)
+            {
+                _fadeDoneHold = false;
+                if (fc == -1) m.WriteU32(FadeCounterAddr, unchecked((uint)-2));
+            }
+            else if (fc == -2 && !_fadeDoneSeen && IsActive(m))
+            {
+                _fadeDoneSeen = true;
+                _fadeDoneFrame = m.ReadU32(FramesElapsedAddr);
+            }
+        }
+        catch
+        {
+            // overlay swap
+        }
     }
 
     static void LogDeathFade(IMemory m, uint obj)
@@ -820,6 +871,11 @@ public static partial class FramePacing
             uint crash = m.ReadU32(CrashPtrAddr);
             if (obj != crash || (obj & 0xFF000000u) != 0x80000000u) return true;
             if (IsScreenMain(m, obj)) return true;
+            if (SkipHogWallKill(c, m, obj))
+            {
+                c.V0 = GoolSuccess;
+                return false;
+            }
             uint next = c.A1;
             uint cur = m.ReadU32(obj + ObjStateOff);
             if (cur != next) return true;
