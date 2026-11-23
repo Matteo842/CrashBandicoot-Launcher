@@ -6,14 +6,22 @@
 #      manual "2.2" commit. Nothing is committed if the sources already say it.
 #   2. Builds the arm64 native libraries that some packages lack: linux-arm64
 #      (libcimgui.so, libnfd.so) and win-arm64 (nfd.dll, rabbitizer.dll).
-#   3. Builds the five release files with publish_release.py, in parallel:
-#        CrashBandicoot.exe, CrashBandicoot-arm64.exe, CrashBandicoot-Linux,
-#        CrashBandicoot-Linux-arm64, CrashBandicoot-<version>.apk
+#   3. Builds the five release files with publish_release.py, in parallel.
+#      The desktop programs go in archives with recomplauncher.json beside
+#      them (RecompLauncher, issue #245), packed by tools/release_hashes.py:
+#        CrashBandicoot-<version>-Windows-x64.zip    (CrashBandicoot.exe)
+#        CrashBandicoot-<version>-Windows-arm64.zip  (CrashBandicoot-arm64.exe)
+#        CrashBandicoot-<version>-Linux-x64.tar.gz   (CrashBandicoot-Linux)
+#        CrashBandicoot-<version>-Linux-arm64.tar.gz (CrashBandicoot-Linux-arm64)
+#        CrashBandicoot-<version>.apk
 #   4. Puts them in a DRAFT release, tag <version> (no "v", the official-build
-#      check looks the tag up by version). Write the notes, then press Publish.
-#   5. On Publish, sends CrashBandicoot.exe to VirusTotal and adds its badge
-#      under the title of the release notes. To redo only this step, run the
-#      workflow with the version and "Only VirusTotal" ticked.
+#      check looks the tag up by version), with the SHA-256 of each program in
+#      the notes: GitHub's asset digests are the archives', and the check reads
+#      every "sha256:" in the release. Write the notes, then press Publish.
+#   5. On Publish, writes the program hashes into the notes again (in case they
+#      were edited away), sends CrashBandicoot.exe to VirusTotal and adds its
+#      badge under the title of the release notes. To redo only this step, run
+#      the workflow with the version and "Only VirusTotal" ticked.
 #
 # Running it again for a version that is still a draft rebuilds the files and
 # replaces them. A version that is already published is refused.
@@ -521,15 +529,17 @@ jobs:
       - name: Build
         run: python publish_release.py --platform ${{ matrix.platform }}
 
-      - name: Pick the release file
+      - name: Pack the release file
         shell: bash
+        env:
+          V: ${{ inputs.version }}
         run: |
           mkdir dist
           case "${{ matrix.platform }}" in
-            windows)       cp publish-single/CrashBandicoot.exe dist/CrashBandicoot.exe ;;
-            windows-arm64) cp publish-win-arm64/CrashBandicoot.exe dist/CrashBandicoot-arm64.exe ;;
-            linux)         cp publish-linux/CrashBandicoot dist/CrashBandicoot-Linux ;;
-            linux-arm64)   cp publish-linux-arm64/CrashBandicoot dist/CrashBandicoot-Linux-arm64 ;;
+            windows)       python tools/release_hashes.py pack windows "$V" publish-single/CrashBandicoot.exe dist ;;
+            windows-arm64) python tools/release_hashes.py pack windows-arm64 "$V" publish-win-arm64/CrashBandicoot.exe dist ;;
+            linux)         python tools/release_hashes.py pack linux "$V" publish-linux/CrashBandicoot dist ;;
+            linux-arm64)   python tools/release_hashes.py pack linux-arm64 "$V" publish-linux-arm64/CrashBandicoot dist ;;
             android)       cp publish-android/CrashBandicoot-*.apk dist/ ;;
           esac
           ls -l dist
@@ -548,6 +558,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+          sparse-checkout: tools/release_hashes.py
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v8
         with:
           pattern: release-*
@@ -572,6 +589,10 @@ jobs:
           else
             gh release create "$V" dist/* --draft --title "$V" --target "$SHA" --generate-notes
           fi
+          # The official-build check needs the programs' hashes, not the archives'.
+          gh release view "$V" --json body --jq .body > notes.md
+          python3 tools/release_hashes.py notes dist notes.md
+          gh release edit "$V" --notes-file notes.md
           echo "Draft release: $(gh release view "$V" --json url --jq .url)"
 
   virustotal:
@@ -590,6 +611,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/release_hashes.py
+          sparse-checkout-cone-mode: false
+
       - name: Scan CrashBandicoot.exe and add the badge
         run: |
           set -euo pipefail
@@ -620,7 +647,15 @@ jobs:
             exit 1
           }
 
-          gh release download "$TAG" -p CrashBandicoot.exe -D /tmp/vt --clobber
+          # Archives since #245; releases before it have the bare exe.
+          mkdir -p /tmp/rel /tmp/vt
+          gh release download "$TAG" -p '*.zip' -p '*.tar.gz' -D /tmp/rel --clobber || true
+          WINZIP=$(ls /tmp/rel/*-Windows-x64.zip 2>/dev/null | head -n1 || true)
+          if [ -n "$WINZIP" ]; then
+            unzip -o -j "$WINZIP" CrashBandicoot.exe -d /tmp/vt
+          else
+            gh release download "$TAG" -p CrashBandicoot.exe -D /tmp/vt --clobber
+          fi
           SHA256=$(sha256sum "$EXE" | awk '{print $1}')
           echo "CrashBandicoot.exe $TAG: sha256 $SHA256, $(stat -c%s "$EXE") bytes"
 
@@ -684,6 +719,11 @@ jobs:
           with open("/tmp/notes.md", "w", encoding="utf-8") as fh:
               fh.write(body)
           PY
+
+          # Program hashes back in, in case the notes were rewritten before Publish.
+          if compgen -G '/tmp/rel/*.zip' >/dev/null || compgen -G '/tmp/rel/*.tar.gz' >/dev/null; then
+            python3 tools/release_hashes.py notes /tmp/rel /tmp/notes.md
+          fi
 
           gh release edit "$TAG" --notes-file /tmp/notes.md
           echo "Badge added to release $TAG."

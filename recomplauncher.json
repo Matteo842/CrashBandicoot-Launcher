@@ -1,0 +1,36 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Crash Bandicoot",
+  "repo": "Matteo842/CrashBandicoot-Launcher",
+  "inputs": [
+    {
+      "id": "game",
+      "role": "game",
+      "label": "Your Crash Bandicoot disc, USA release (SCUS-94900): the .cue (with its .bin) or a .chd.",
+      "formats": [
+        { "type": "file", "extensions": ["cue", "chd"] }
+      ],
+      "check": { "ids": ["SCUS-94900"] }
+    }
+  ],
+  "prepare": {
+    "program": ["CrashBandicoot.exe", "CrashBandicoot-arm64.exe", "CrashBandicoot-Linux", "CrashBandicoot-Linux-arm64"],
+    "args": ["--prepare", "{input:game}"],
+    "label": "Building the game from your disc"
+  },
+  "start": {
+    "program": ["CrashBandicoot.exe", "CrashBandicoot-arm64.exe", "CrashBandicoot-Linux", "CrashBandicoot-Linux-arm64"],
+    "args": ["--run", "{input:game}"]
+  },
+  "saves": ["{install}/save"],
+  "folders": {
+    "saves": [{ "path": "{install}/save" }],
+    "logs": [{ "path": "{install}/logs" }]
+  },
+  "looks": { "graphics": "opengl" },
+  "system": {
+    "windows": { "version": "10" },
+    "linux": { "glibc": "2.34" }
+  }
+}

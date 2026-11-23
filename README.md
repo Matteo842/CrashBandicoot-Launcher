@@ -48,8 +48,8 @@ You need your own dump of **Crash Bandicoot (USA)**, serial **SCUS-94900**, as a
 
 ### Windows
 
-1. Download `CrashBandicoot.exe` from [**Releases**](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest). On a Windows on ARM PC (for example a Snapdragon X laptop), download `CrashBandicoot-arm64.exe` instead.
-2. Run it and click **Select disc** to choose your `.chd` or `.cue`.
+1. Download `CrashBandicoot-<version>-Windows-x64.zip` from [**Releases**](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest) and extract it. On a Windows on ARM PC (for example a Snapdragon X laptop), download `CrashBandicoot-<version>-Windows-arm64.zip` instead. To update, extract the new `CrashBandicoot.exe` over the old one: your saves and settings stay in its folder.
+2. Run `CrashBandicoot.exe` and click **Select disc** to choose your `.chd` or `.cue`.
 3. Click **START GAME**.
 
 The first launch builds the game on your PC, which takes a moment. Later launches start straight away. If the game window doesn't open, check the [System requirements](#system-requirements).
@@ -60,9 +60,9 @@ Install the `.apk` from [Releases](https://github.com/Matteo842/CrashBandicoot-L
 
 ### Linux
 
-1. Download `CrashBandicoot-Linux` from [**Releases**](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest). On a Raspberry Pi 4/5 or another 64-bit ARM computer, download `CrashBandicoot-Linux-arm64` instead.
-2. Mark it as executable once, because browsers drop that permission: right-click it, **Properties → Permissions → Allow executing file as program** (or `chmod +x CrashBandicoot-Linux`).
-3. Double-click it. The launcher opens.
+1. Download `CrashBandicoot-<version>-Linux-x64.tar.gz` from [**Releases**](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest) and extract it. On a Raspberry Pi 4/5 or another 64-bit ARM computer, download `CrashBandicoot-<version>-Linux-arm64.tar.gz` instead. The archive keeps the program executable.
+2. If it still won't start, mark it as executable: right-click it, **Properties → Permissions → Allow executing file as program** (or `chmod +x CrashBandicoot-Linux`).
+3. Double-click `CrashBandicoot-Linux`. The launcher opens.
 4. Click **Select disc** to choose your `.chd` or `.cue`, then click **START GAME**. A disc in the same folder as the program is picked up on its own.
 
 It's the same launcher as on Windows, with Settings, Controls, Mods and Cheats, usable with mouse, keyboard or gamepad. The first launch builds the game from your disc, which takes a minute or two. While you play, the launcher steps aside, and it comes back when you close the game. In **About** (the **i** button) you can add it to your applications menu, which also makes it show up in Steam's *Add a Non-Steam Game* list.

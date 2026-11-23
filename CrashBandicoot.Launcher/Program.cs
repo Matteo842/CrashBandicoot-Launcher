@@ -52,8 +52,16 @@ internal static class Program
             {
                 var cue = Path.GetFullPath(args[1]);
                 Console.WriteLine($"[CrashBandicoot] preparing from {cue}");
+                // RecompLauncher (#245) runs this windowless and reads "progress <0..1> <text>" lines.
+                bool recompLauncher = Environment.GetEnvironmentVariable("RECOMPLAUNCHER") == "1";
                 var progress = new Progress<PipelineProgress>(p =>
-                    Console.WriteLine($"  [{p.Fraction * 100,3:0}%] {p.Stage}: {p.Detail}"));
+                {
+                    if (recompLauncher)
+                        Console.WriteLine(FormattableString.Invariant(
+                            $"progress {Math.Clamp(p.Fraction, 0, 1):0.###} {p.Stage}: {p.Detail}"));
+                    else
+                        Console.WriteLine($"  [{p.Fraction * 100,3:0}%] {p.Stage}: {p.Detail}");
+                });
                 var dll = RecompPipeline.EnsureReady(cue, progress);
                 Console.WriteLine($"[CrashBandicoot] ready: {dll}");
                 return 0;
