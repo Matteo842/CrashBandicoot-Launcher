@@ -47,6 +47,8 @@ sealed partial class Editor
         public List<UserTri> Add = [];
         public (float Reach, bool TexOnly)? AddKey;
         public int OtherMesh;
+        // Additions copied from the user's own triangles at the twin (work already done there).
+        public HashSet<VKey> Mine = [];
     }
 
     sealed class TwinSearch
@@ -68,6 +70,10 @@ sealed partial class Editor
         // Pieces the user picked, from any twin, by centre: kept when switching twin or reach.
         public Dictionary<VKey, UserTri> Chosen = [];
         public List<int> Hover = [];
+        // The user's own triangles (sky excluded): their centres and their corners.
+        public List<UserTri> User = [];
+        public Dictionary<(int, int, int), List<int>> UserGrid = [];
+        public Dictionary<(int, int, int), List<int>> UserCorners = [];
     }
 
     TwinSearch? _twin;
@@ -178,9 +184,9 @@ sealed partial class Editor
         s.SelMats = [.. s.Sel.Select(t => t.Sig.Mat)];
         s.Target = s.Sel.GroupBy(t => t.M.Name).MaxBy(g => g.Count())!.Key;
 
-        // The originals of the loaded area (the zone and its neighbours), sky excluded.
+        // The originals of the whole level (every zone, not only the loaded one), sky excluded.
         var bySig = new Dictionary<TexSig, List<int>>();
-        foreach (var m in _drawMeshes)
+        foreach (var m in L.Meshes)
         {
             if (m.Backdrop) continue;
             var cornerMap = new Dictionary<VKey, List<int>>();
@@ -210,11 +216,18 @@ sealed partial class Editor
                 s.Existing.Add(t.P);
             }
         }
-        foreach (var u in _doc.Tris)
+        for (int ui = 0; ui < _doc.Tris.Count; ui++)
         {
+            var u = _doc.Tris[ui];
             if (L.MeshByName.TryGetValue(u.Mesh, out var um) && um.Backdrop) continue;
             GridAdd(s.ExistingGrid, u.Center, s.Existing.Count);
             s.Existing.Add([.. u.V.Select(v => v.Pos)]);
+            // Own triangles of the selection are the piece itself, not work done at a twin.
+            if (s.SelKeys.Contains(Key(Kind.User, ui))) continue;
+            int i = s.User.Count;
+            s.User.Add(u);
+            GridAdd(s.UserGrid, u.Center, i);
+            foreach (var v in u.V) GridAdd(s.UserCorners, v.Pos, i);
         }
 
         // Ways to lay the piece on a copy: from the selected triangles with the rarest look,
@@ -228,7 +241,7 @@ sealed partial class Editor
         foreach (var seed in seeds)
         {
             if (!Frame(seed.P[0], seed.P[1], seed.P[2], out var ea1, out var ea2, out var na)) continue;
-            foreach (int ci in bySig[seed.Sig].OrderBy(ci => Vector3.DistanceSquared(s.Pool[ci].C, seed.C)).Take(600))
+            foreach (int ci in bySig[seed.Sig].OrderBy(ci => Vector3.DistanceSquared(s.Pool[ci].C, seed.C)).Take(1500))
             {
                 var c = s.Pool[ci];
                 foreach (var pi in perms)
@@ -275,10 +288,20 @@ sealed partial class Editor
             }
             return votes;
         }
+        // Own triangles around where the piece lands on a copy: a copy already fixed by hand
+        // comes first, so that work is reused instead of done again.
+        var selSize = s.SelMax - s.SelMin;
+        float nearR = 2 * Math.Max(Math.Max(selSize.X, selSize.Y), Math.Max(selSize.Z, 200));
+        var nearUser = new List<int>();
+        int UserNear(Xf xf)
+        {
+            GridNear(s.UserGrid, xf.Apply(selCentre), nearR, nearUser);
+            return nearUser.Count;
+        }
         List<TwinTri> sample = s.Sel.Count <= 24 ? s.Sel : [.. Enumerable.Range(0, 24).Select(i => s.Sel[i * s.Sel.Count / 24])];
         var shortlist = hyps.Values.Select(x => (Xf: x, Votes: Vote(x, sample, null)))
             .Where(h => h.Votes >= Math.Max(1, (int)MathF.Ceiling(sample.Count * 0.3f)))
-            .OrderByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(40).ToList();
+            .OrderByDescending(h => UserNear(h.Xf) > 0).ThenByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(60).ToList();
         int need = s.Sel.Count == 1 ? 1 : Math.Max(2, (int)MathF.Ceiling(s.Sel.Count * 0.35f));
         var seen = new HashSet<string>();
         foreach (var (xf, _) in shortlist)
@@ -292,11 +315,12 @@ sealed partial class Editor
             s.Hyps.Add(h);
         }
         foreach (var h in s.Hyps) TwinAdditions(s, h);
-        s.Hyps = [.. s.Hyps.Where(h => h.Add.Count > 0).OrderByDescending(h => h.Votes).ThenByDescending(h => h.Add.Count)];
+        s.Hyps = [.. s.Hyps.Where(h => h.Add.Count > 0)
+            .OrderByDescending(h => h.Mine.Count > 0).ThenByDescending(h => h.Votes).ThenByDescending(h => h.Mine.Count).ThenByDescending(h => h.Add.Count)];
         if (s.Hyps.Count == 0)
         {
             Say(hyps.Count == 0 || shortlist.Count == 0
-                ? "Nessun gemello nelle mesh caricate: nessun altro modello uguale qui intorno. Avvicina la camera a un'altra copia (o attiva \"tutte le mesh\")."
+                ? "Nessun gemello in tutto il livello: nessun altro modello uguale."
                 : "Ho trovato copie uguali, ma nessuna ha pezzi in più di questo. Prova ad aumentare \"quanto cercare attorno\".");
             return;
         }
@@ -312,6 +336,7 @@ sealed partial class Editor
         h.AddKey = (_twinReach, _twinTexOnly);
         h.Piece.Clear();
         h.Add.Clear();
+        h.Mine.Clear();
         h.OtherMesh = 0;
         var matched = h.Matched.ToHashSet();
         if (matched.Count == 0) return;
@@ -369,6 +394,48 @@ sealed partial class Editor
             }
         }
         h.Piece = piece;
+
+        // Work already done by hand at the twin: own triangles touching the twin's model or in
+        // its box, and those joined to them, within three times the reach. Copied back with
+        // their light, depth and rank as they are.
+        var umin = min - new Vector3(2 * reach);
+        var umax = max + new Vector3(2 * reach);
+        bool UInside(Vector3 p) => p.X >= umin.X && p.Y >= umin.Y && p.Z >= umin.Z && p.X <= umax.X && p.Y <= umax.Y && p.Z <= umax.Z;
+        var useen = new HashSet<int>();
+        var uqueue = new Queue<int>();
+        var unear = new List<int>();
+        void Touching(Vector3 c)
+        {
+            GridNear(s.UserCorners, c, TwinTol, unear);
+            foreach (int j in unear)
+                if (!useen.Contains(j) && UInside(s.User[j].Center) && s.User[j].V.Any(v => Vector3.DistanceSquared(v.Pos, c) < TwinTol * TwinTol))
+                { useen.Add(j); uqueue.Enqueue(j); }
+        }
+        foreach (int i in piece)
+            foreach (var c in s.Pool[i].P) Touching(c);
+        GridNear(s.UserGrid, (min + max) / 2, Vector3.Distance(min, max) / 2, unear);
+        foreach (int j in unear.ToList())
+            if (Inside(s.User[j].Center) && useen.Add(j)) uqueue.Enqueue(j);
+        while (uqueue.Count > 0)
+        {
+            var u = s.User[uqueue.Dequeue()];
+            foreach (var v in u.V) Touching(v.Pos);
+            var mat = TwinMat(u);
+            if (_twinTexOnly && !s.SelMats.Contains(mat)) continue;
+            var q = new Vector3[3];
+            for (int k = 0; k < 3; k++) q[k] = back.Apply(u.V[k].Pos);
+            GridNear(s.ExistingGrid, (q[0] + q[1] + q[2]) / 3, TwinTol, near);
+            if (near.Exists(e => SameCorners(q, s.Existing[e]))) continue;
+            var c = u.Clone();
+            c.Core = false;
+            c.Group = 0;
+            if (byMat.TryGetValue(mat, out int tp)) { c.Mesh = target.Name; c.Poly = tp; }
+            else h.OtherMesh++;
+            int[] order = h.ToTwin.Mirror ? [0, 2, 1] : [0, 1, 2];
+            c.V = [.. order.Select(k => u.V[k] with { Pos = q[k] })];
+            h.Add.Add(c);
+            h.Mine.Add(KeyOf(c.Center));
+        }
     }
 
     TwinHyp? CurrentTwin()
@@ -385,7 +452,8 @@ sealed partial class Editor
     {
         if (CurrentTwin() is not { } h) return;
         Say($"Gemello {_twin!.Index + 1} di {_twin.Hyps.Count}: {h.Votes} triangoli su {_twin.Sel.Count} uguali"
-            + $"{(h.ToTwin.Mirror ? " (specchiato)" : "")}, {h.Add.Count} pezzi possibili in verde. Clic sui pezzi verdi per sceglierli.");
+            + $"{(h.ToTwin.Mirror ? " (specchiato)" : "")}, {h.Add.Count} pezzi possibili"
+            + (h.Mine.Count > 0 ? $", {h.Mine.Count} già fatti da te là (gialli)" : "") + ". Clic sui pezzi verdi o gialli per sceglierli.");
     }
 
     void TwinStep(int d)
@@ -575,13 +643,16 @@ sealed partial class Editor
         if (ImGui.Button("Cerca il gemello (modello uguale)", new Vector2(-1, 0))) FindTwin();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Seleziona il modello tagliato (clic, poi L per i collegati) e premi qui.\n"
-                + "Cerca nelle mesh caricate un'altra copia dello stesso modello (stesse texture e forma,\n"
+                + "Cerca in tutto il livello un'altra copia dello stesso modello (stesse texture e forma,\n"
                 + "anche girata o specchiata) e mostra in verde i pezzi che a questo mancano.\n"
+                + "Se un gemello l'hai già sistemato a mano viene per primo: i tuoi triangoli di là\n"
+                + "sono in giallo, da scegliere col mouse come i verdi.\n"
                 + "Poi scegli col mouse quali pezzi verdi vuoi: si aggiungono solo quelli.");
         var h = CurrentTwin();
         if (h == null) return;
         ImGui.TextWrapped($"Gemello {_twin!.Index + 1} di {_twin.Hyps.Count}: {h.Votes}/{_twin.Sel.Count} uguali"
-            + $"{(h.ToTwin.Mirror ? ", specchiato" : "")}. Pezzi possibili: {h.Add.Count}.");
+            + $"{(h.ToTwin.Mirror ? ", specchiato" : "")}. Pezzi possibili: {h.Add.Count}"
+            + (h.Mine.Count > 0 ? $", di cui {h.Mine.Count} già fatti da te (gialli)." : "."));
         if (ImGui.Button("<##twin")) TwinStep(-1);
         ImGui.SameLine();
         if (ImGui.Button(">##twin")) TwinStep(1);
@@ -608,7 +679,8 @@ sealed partial class Editor
     }
 
     /// <summary>Preview: the twin outlined in light blue, the pieces it could add in pale
-    /// green, the chosen ones in full green, the piece under the mouse in white.</summary>
+    /// green (yellow: copied from own work at the twin), the chosen ones in full colour, the
+    /// piece under the mouse in white.</summary>
     void TwinOverlay(ImDrawListPtr dl)
     {
         if (CurrentTwin() is not { } h) return;
@@ -632,14 +704,16 @@ sealed partial class Editor
         {
             if (++drawn > 12000) break;
             if (_twin!.Chosen.ContainsKey(KeyOf(t.Center)) || !Proj(t)) continue;
-            dl.AddConvexPolyFilled(ref s[0], 3, Col(0.2f, 1, 0.3f, 0.10f));
-            dl.AddPolyline(ref s[0], 3, Col(0.2f, 1, 0.3f, 0.55f), ImDrawFlags.Closed, 1.2f * _ui);
+            bool mine = h.Mine.Contains(KeyOf(t.Center));
+            dl.AddConvexPolyFilled(ref s[0], 3, mine ? Col(1, 0.85f, 0.1f, 0.10f) : Col(0.2f, 1, 0.3f, 0.10f));
+            dl.AddPolyline(ref s[0], 3, mine ? Col(1, 0.85f, 0.1f, 0.55f) : Col(0.2f, 1, 0.3f, 0.55f), ImDrawFlags.Closed, 1.2f * _ui);
         }
         foreach (var t in _twin!.Chosen.Values)
         {
             if (!Proj(t)) continue;
-            dl.AddConvexPolyFilled(ref s[0], 3, Col(0.15f, 0.95f, 0.25f, 0.55f));
-            dl.AddPolyline(ref s[0], 3, Col(0.6f, 1, 0.6f, 1), ImDrawFlags.Closed, 2f * _ui);
+            bool mine = h.Mine.Contains(KeyOf(t.Center));
+            dl.AddConvexPolyFilled(ref s[0], 3, mine ? Col(1, 0.8f, 0.1f, 0.5f) : Col(0.15f, 0.95f, 0.25f, 0.55f));
+            dl.AddPolyline(ref s[0], 3, mine ? Col(1, 0.95f, 0.5f, 1) : Col(0.6f, 1, 0.6f, 1), ImDrawFlags.Closed, 2f * _ui);
         }
         if (_twinHoverList != null && _view.Contains(ImGui.GetIO().MousePos))
             foreach (int i in _twin.Hover)
