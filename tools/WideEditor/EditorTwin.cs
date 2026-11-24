@@ -54,10 +54,28 @@ sealed partial class Editor
         public HashSet<VKey> Mine = [];
     }
 
-    sealed class TwinSearch
+    /// <summary>Every original of the level (sky excluded), built once per level and shared
+    /// by all the searches: looking through the whole level then costs no rebuild.</summary>
+    sealed class TwinPool
     {
+        public required LevelData Level;
         public List<TwinTri> Pool = [];
         public Dictionary<(int, int, int), List<int>> Grid = [];
+        public Dictionary<TexSig, List<int>> BySig = [];
+        public Dictionary<Mesh, Dictionary<VKey, List<int>>> CornerMaps = [];
+        public Dictionary<(string, int), int> Index = [];
+    }
+
+    sealed class TwinSearch
+    {
+        public required LevelData Level;
+        public TwinPool P = null!;
+        public List<TwinTri> Pool => P.Pool;
+        public Dictionary<(int, int, int), List<int>> Grid => P.Grid;
+        public Dictionary<Mesh, Dictionary<VKey, List<int>>> CornerMaps => P.CornerMaps;
+        // Originals deleted by hand (by pool index): neither twins nor in place.
+        public bool[] Gone = [];
+        public HashSet<(string, int)> Removed = [];
         public List<TwinTri> Sel = [];
         public HashSet<long> SelKeys = [];
         public HashSet<Material> SelMats = [];
@@ -65,21 +83,36 @@ sealed partial class Editor
         public string Target = "";
         public List<TwinHyp> Hyps = [];
         public int Index;
-        public Dictionary<Mesh, Dictionary<VKey, List<int>>> CornerMaps = [];
-        // Triangles already in place: originals not deleted and own ones.
-        public List<Vector3[]> Existing = [];
-        public Dictionary<(int, int, int), List<int>> ExistingGrid = [];
+        // Own triangles already in place (any, the selection's too), by centre.
+        public List<Vector3[]> UserEx = [];
+        public Dictionary<(int, int, int), List<int>> UserExGrid = [];
         public int DocVersion;
+        public string Message = "";
         // Pieces the user picked, from any twin, by centre: kept when switching twin or reach.
         public Dictionary<VKey, UserTri> Chosen = [];
         public List<int> Hover = [];
-        // The user's own triangles (sky excluded): their centres and their corners.
+        // The user's own triangles (sky excluded, selection excluded): centres and corners.
         public List<UserTri> User = [];
         public Dictionary<(int, int, int), List<int>> UserGrid = [];
         public Dictionary<(int, int, int), List<int>> UserCorners = [];
+
+        /// <summary>Is a triangle with these corners already at the piece (original or own)?</summary>
+        public bool AtPiece(Vector3[] q, List<int> near)
+        {
+            var c = (q[0] + q[1] + q[2]) / 3;
+            GridNear(Grid, c, TwinTol, near);
+            foreach (int j in near)
+                if (!Gone[j] && SameCorners(q, Pool[j].P)) return true;
+            GridNear(UserExGrid, c, TwinTol, near);
+            foreach (int e in near)
+                if (SameCorners(q, UserEx[e])) return true;
+            return false;
+        }
     }
 
     TwinSearch? _twin;
+    TwinPool? _twinPool;
+    Task<TwinSearch>? _twinJob;
     float _twinReach = 1;
     bool _twinTexOnly;
 
@@ -112,6 +145,18 @@ sealed partial class Editor
         into.Clear();
         var lo = TwinCellOf(p - new Vector3(r));
         var hi = TwinCellOf(p + new Vector3(r));
+        for (int x = lo.Item1; x <= hi.Item1; x++)
+            for (int y = lo.Item2; y <= hi.Item2; y++)
+                for (int z = lo.Item3; z <= hi.Item3; z++)
+                    if (grid.TryGetValue((x, y, z), out var list)) into.AddRange(list);
+    }
+
+    /// <summary>Indices in the cells that touch a box.</summary>
+    static void GridBox(Dictionary<(int, int, int), List<int>> grid, Vector3 min, Vector3 max, List<int> into)
+    {
+        into.Clear();
+        var lo = TwinCellOf(min);
+        var hi = TwinCellOf(max);
         for (int x = lo.Item1; x <= hi.Item1; x++)
             for (int y = lo.Item2; y <= hi.Item2; y++)
                 for (int z = lo.Item3; z <= hi.Item3; z++)
@@ -170,12 +215,47 @@ sealed partial class Editor
         return t;
     }
 
-    /// <summary>Looks for copies of the selected piece among the originals of the loaded meshes.</summary>
+    static TwinPool BuildTwinPool(LevelData lv)
+    {
+        var tp = new TwinPool { Level = lv };
+        foreach (var m in lv.Meshes)
+        {
+            if (m.Backdrop) continue;
+            var cornerMap = new Dictionary<VKey, List<int>>();
+            tp.CornerMaps[m] = cornerMap;
+            for (int p = 0; p < m.PolyCount; p++)
+            {
+                var uv = lv.UvsOf(m, p);
+                var t = new TwinTri { M = m, Poly = p, UvF = uv, Uv = [.. uv.Select(UvInt)] };
+                for (int k = 0; k < 3; k++) t.P[k] = m.Corner(p, k);
+                if (Vector3.Cross(t.P[1] - t.P[0], t.P[2] - t.P[0]).LengthSquared() < 1) continue;
+                t.Sig = SigOf(lv.MaterialOf(m, p), t.Uv);
+                t.C = (t.P[0] + t.P[1] + t.P[2]) / 3;
+                int i = tp.Pool.Count;
+                tp.Pool.Add(t);
+                tp.Index[(m.Name, p)] = i;
+                GridAdd(tp.Grid, t.C, i);
+                if (!tp.BySig.TryGetValue(t.Sig, out var list)) tp.BySig[t.Sig] = list = [];
+                list.Add(i);
+                foreach (var c in t.P)
+                {
+                    var vk = KeyOf(c);
+                    if (!cornerMap.TryGetValue(vk, out var at)) cornerMap[vk] = at = [];
+                    at.Add(i);
+                }
+            }
+        }
+        return tp;
+    }
+
+    /// <summary>Looks for copies of the selected piece in the whole level. The search runs on
+    /// its own thread (the editor keeps answering); the result shows up when it is done.</summary>
     void FindTwin()
     {
+        if (_twinJob != null) { Say("Sto ancora cercando il gemello, un attimo..."); return; }
         _twin = null;
         if (L == null || _sel.Count == 0) { Say("Seleziona prima il pezzo tagliato (clic, poi L per i collegati)."); return; }
-        var s = new TwinSearch { SelKeys = [.. _sel], DocVersion = _docVersion };
+        var s = new TwinSearch { Level = L, SelKeys = [.. _sel], DocVersion = _docVersion, Removed = [.. _doc.Removed] };
         foreach (var key in _sel.OrderBy(k => k))
             if (SelTwinTri(key) is { } t) s.Sel.Add(t);
         if (s.Sel.Count == 0) { Say("Nella selezione non c'è niente con una texture del gioco da cercare."); return; }
@@ -186,52 +266,56 @@ sealed partial class Editor
             foreach (var p in t.P) { s.SelMin = Vector3.Min(s.SelMin, p); s.SelMax = Vector3.Max(s.SelMax, p); }
         s.SelMats = [.. s.Sel.Select(t => t.Sig.Mat)];
         s.Target = s.Sel.GroupBy(t => t.M.Name).MaxBy(g => g.Count())!.Key;
-
-        // The originals of the whole level (every zone, not only the loaded one), sky excluded.
-        var bySig = new Dictionary<TexSig, List<int>>();
-        foreach (var m in L.Meshes)
-        {
-            if (m.Backdrop) continue;
-            var cornerMap = new Dictionary<VKey, List<int>>();
-            s.CornerMaps[m] = cornerMap;
-            for (int p = 0; p < m.PolyCount; p++)
-            {
-                var uv = L.UvsOf(m, p);
-                // Originals deleted by hand are neither twins nor in place.
-                if (_doc.Removed.Contains((m.Name, p))) continue;
-                var t = new TwinTri { M = m, Poly = p, UvF = uv, Uv = [.. uv.Select(UvInt)] };
-                for (int k = 0; k < 3; k++) t.P[k] = m.Corner(p, k);
-                if (Vector3.Cross(t.P[1] - t.P[0], t.P[2] - t.P[0]).LengthSquared() < 1) continue;
-                t.Sig = SigOf(L.MaterialOf(m, p), t.Uv);
-                t.C = (t.P[0] + t.P[1] + t.P[2]) / 3;
-                int i = s.Pool.Count;
-                s.Pool.Add(t);
-                GridAdd(s.Grid, t.C, i);
-                if (!bySig.TryGetValue(t.Sig, out var list)) bySig[t.Sig] = list = [];
-                list.Add(i);
-                foreach (var c in t.P)
-                {
-                    var vk = KeyOf(c);
-                    if (!cornerMap.TryGetValue(vk, out var at)) cornerMap[vk] = at = [];
-                    at.Add(i);
-                }
-                GridAdd(s.ExistingGrid, t.C, s.Existing.Count);
-                s.Existing.Add(t.P);
-            }
-        }
+        // Own triangles copied now: the search thread never reads the document.
         for (int ui = 0; ui < _doc.Tris.Count; ui++)
         {
             var u = _doc.Tris[ui];
             if (L.MeshByName.TryGetValue(u.Mesh, out var um) && um.Backdrop) continue;
-            GridAdd(s.ExistingGrid, u.Center, s.Existing.Count);
-            s.Existing.Add([.. u.V.Select(v => v.Pos)]);
+            GridAdd(s.UserExGrid, u.Center, s.UserEx.Count);
+            s.UserEx.Add([.. u.V.Select(v => v.Pos)]);
             // Own triangles of the selection are the piece itself, not work done at a twin.
             if (s.SelKeys.Contains(Key(Kind.User, ui))) continue;
             int i = s.User.Count;
-            s.User.Add(u);
+            s.User.Add(u.Clone());
             GridAdd(s.UserGrid, u.Center, i);
             foreach (var v in u.V) GridAdd(s.UserCorners, v.Pos, i);
         }
+        var pool = _twinPool?.Level == L ? _twinPool : null;
+        float reach = _twinReach;
+        bool texOnly = _twinTexOnly, behind = _newBehind;
+        _twinJob = Task.Run(() => TwinCompute(s, pool, reach, texOnly, behind));
+        Say(pool == null ? "Cerco il gemello in tutto il livello (la prima volta ci mette di più)..." : "Cerco il gemello in tutto il livello...");
+    }
+
+    /// <summary>Called every frame: takes the finished search, if any.</summary>
+    void PollTwinJob()
+    {
+        if (_twinJob is not { IsCompleted: true } job) return;
+        _twinJob = null;
+        if (job.IsFaulted) { Say("Ricerca del gemello fallita: " + job.Exception?.InnerException?.Message); return; }
+        var s = job.Result;
+        if (s.Level != L) return;
+        _twinPool = s.P;
+        if (s.Hyps.Count == 0) { Say(s.Message); return; }
+        if (s.DocVersion != _docVersion || !_sel.SetEquals(s.SelKeys))
+        {
+            Say("La selezione è cambiata durante la ricerca: premi di nuovo \"Cerca il gemello\".");
+            return;
+        }
+        _twin = s;
+        TwinSay();
+    }
+
+    /// <summary>The search itself (own thread): reads only the level and the copies in
+    /// <paramref name="s"/>.</summary>
+    static TwinSearch TwinCompute(TwinSearch s, TwinPool? pool, float reachSetting, bool texOnly, bool behind)
+    {
+        s.P = pool ?? BuildTwinPool(s.Level);
+        s.Gone = new bool[s.Pool.Count];
+        foreach (var r in s.Removed)
+            if (s.P.Index.TryGetValue(r, out int gi)) s.Gone[gi] = true;
+        var bySig = s.P.BySig;
+        int threads = Math.Max(1, Environment.ProcessorCount / 2);
 
         // Ways to lay the piece on a copy: from the selected triangles with the rarest look,
         // each one laid on every original that looks the same (corners matched by texture).
@@ -244,7 +328,7 @@ sealed partial class Editor
         foreach (var seed in seeds)
         {
             if (!Frame(seed.P[0], seed.P[1], seed.P[2], out var ea1, out var ea2, out var na)) continue;
-            foreach (int ci in bySig[seed.Sig].OrderBy(ci => Vector3.DistanceSquared(s.Pool[ci].C, seed.C)).Take(1500))
+            foreach (int ci in bySig[seed.Sig].Where(ci => !s.Gone[ci]).OrderBy(ci => Vector3.DistanceSquared(s.Pool[ci].C, seed.C)).Take(1500))
             {
                 var c = s.Pool[ci];
                 foreach (var pi in perms)
@@ -271,10 +355,10 @@ sealed partial class Editor
         }
 
         // Vote: how many selected triangles each way lays on an original that looks the same.
-        var near = new List<int>();
-        var q = new Vector3[3];
         int Vote(Xf xf, IReadOnlyList<TwinTri> tris, List<int>? matched)
         {
+            var near = new List<int>();
+            var q = new Vector3[3];
             int votes = 0;
             foreach (var t in tris)
             {
@@ -283,7 +367,7 @@ sealed partial class Editor
                 foreach (int j in near)
                 {
                     var c = s.Pool[j];
-                    if (c.Sig != t.Sig || !SameCorners(q, c.P, t.Uv, c.Uv)) continue;
+                    if (s.Gone[j] || c.Sig != t.Sig || !SameCorners(q, c.P, t.Uv, c.Uv)) continue;
                     votes++;
                     matched?.Add(j);
                     break;
@@ -292,27 +376,32 @@ sealed partial class Editor
             return votes;
         }
         // Own triangles around where the piece lands on a copy: a copy already fixed by hand
-        // comes first, so that work is reused instead of done again.
+        // is looked at before the others.
         var selSize = s.SelMax - s.SelMin;
         float nearR = 2 * Math.Max(Math.Max(selSize.X, selSize.Y), Math.Max(selSize.Z, 200));
-        var nearUser = new List<int>();
         int UserNear(Xf xf)
         {
+            var nearUser = new List<int>();
             GridNear(s.UserGrid, xf.Apply(selCentre), nearR, nearUser);
             return nearUser.Count;
         }
         List<TwinTri> sample = s.Sel.Count <= 24 ? s.Sel : [.. Enumerable.Range(0, 24).Select(i => s.Sel[i * s.Sel.Count / 24])];
-        var shortlist = hyps.Values.Select(x => (Xf: x, Votes: Vote(x, sample, null)))
-            .Where(h => h.Votes >= Math.Max(1, (int)MathF.Ceiling(sample.Count * 0.3f)))
-            .OrderByDescending(h => UserNear(h.Xf) > 0).ThenByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(150).ToList();
+        int needSample = Math.Max(1, (int)MathF.Ceiling(sample.Count * 0.3f));
+        var shortlist = hyps.Values.AsParallel().WithDegreeOfParallelism(threads)
+            .Select(x => (Xf: x, Votes: Vote(x, sample, null)))
+            .Where(h => h.Votes >= needSample)
+            .Select(h => (h.Xf, h.Votes, Near: UserNear(h.Xf) > 0))
+            .ToList()
+            .OrderByDescending(h => h.Near).ThenByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(150).ToList();
         int need = s.Sel.Count == 1 ? 1 : Math.Max(2, (int)MathF.Ceiling(s.Sel.Count * 0.35f));
-        foreach (var (xf, _) in shortlist)
+        foreach (var (xf, _, _) in shortlist)
         {
             var h = new TwinHyp { ToTwin = xf };
             h.Votes = Vote(xf, s.Sel, h.Matched);
             if (h.Votes >= need) s.Hyps.Add(h);
         }
-        foreach (var h in s.Hyps) TwinAdditions(s, h);
+        Parallel.ForEach(s.Hyps, new ParallelOptions { MaxDegreeOfParallelism = threads },
+            h => TwinAdditions(s, h, reachSetting, texOnly, behind));
         // Best first: the copy whose surroundings agree most with the piece's (a small piece
         // fits many copies, turned any way, and only the right one has the same neighbours);
         // among the good ones, a copy already fixed by hand comes first.
@@ -324,54 +413,54 @@ sealed partial class Editor
         var seen = new HashSet<string>();
         s.Hyps = [.. ordered.Where(h => seen.Add(string.Join(",", h.Matched.Distinct().Order())))];
         if (s.Hyps.Count == 0)
-        {
-            Say(hyps.Count == 0 || shortlist.Count == 0
+            s.Message = hyps.Count == 0 || shortlist.Count == 0
                 ? "Nessun gemello in tutto il livello: nessun altro modello uguale."
-                : "Ho trovato copie uguali, ma nessuna ha pezzi in più di questo. Prova ad aumentare \"quanto cercare attorno\".");
-            return;
-        }
-        _twin = s;
-        TwinSay();
+                : "Ho trovato copie uguali, ma nessuna ha pezzi in più di questo. Prova ad aumentare \"quanto cercare attorno\".";
+        return s;
     }
 
+    static Material MatOf(LevelData lv, UserTri t) =>
+        lv.MeshByName.TryGetValue(t.Mesh, out var m) && t.Poly >= 0 && t.Poly < m.PolyCount ? lv.MaterialOf(m, t.Poly) : default;
+
     /// <summary>The twin's whole model (its originals joined to the matched ones, within the
-    /// reach) and the triangles of it that are not already at the selected piece.</summary>
-    void TwinAdditions(TwinSearch s, TwinHyp h)
+    /// reach) and the triangles of it that are not already at the selected piece. Reads only
+    /// the level and <paramref name="s"/>: safe on the search threads.</summary>
+    static void TwinAdditions(TwinSearch s, TwinHyp h, float reachSetting, bool texOnly, bool behind)
     {
-        if (h.AddKey is { } done && done.Reach == _twinReach && done.TexOnly == _twinTexOnly) return;
-        h.AddKey = (_twinReach, _twinTexOnly);
+        if (h.AddKey is { } done && done.Reach == reachSetting && done.TexOnly == texOnly) return;
+        h.AddKey = (reachSetting, texOnly);
         h.Piece.Clear();
         h.Add.Clear();
         h.Mine.Clear();
         h.OtherMesh = 0;
         var matched = h.Matched.ToHashSet();
         if (matched.Count == 0) return;
+        var lv = s.Level;
         Vector3 min = new(float.MaxValue), max = new(float.MinValue);
         foreach (int i in matched)
             foreach (var p in s.Pool[i].P) { min = Vector3.Min(min, p); max = Vector3.Max(max, p); }
         var size = s.SelMax - s.SelMin;
-        float reach = _twinReach * Math.Max(Math.Max(size.X, size.Y), Math.Max(size.Z, 200));
+        float reach = reachSetting * Math.Max(Math.Max(size.X, size.Y), Math.Max(size.Z, 200));
         min -= new Vector3(reach);
         max += new Vector3(reach);
         bool Inside(Vector3 p) => p.X >= min.X && p.Y >= min.Y && p.Z >= min.Z && p.X <= max.X && p.Y <= max.Y && p.Z <= max.Z;
         // Poly of the selected piece's mesh with the same material: the copy then belongs to
         // that mesh and is drawn wherever it is.
-        var target = L!.MeshByName[s.Target];
+        var target = lv.MeshByName[s.Target];
         var byMat = new Dictionary<Material, int>();
-        for (int p = target.PolyCount - 1; p >= 0; p--) byMat[L.MaterialOf(target, p)] = p;
+        for (int p = target.PolyCount - 1; p >= 0; p--) byMat[lv.MaterialOf(target, p)] = p;
         var back = h.ToTwin.Inverse;
         var near = new List<int>();
         h.Context = 0;
         var ctx = new List<int>();
-        GridNear(s.Grid, (min + max) / 2, Vector3.Distance(min, max) / 2, ctx);
+        GridBox(s.Grid, min, max, ctx);
         var cq = new Vector3[3];
         foreach (int j in ctx)
         {
             var u = s.Pool[j];
-            if (matched.Contains(j) || !Inside(u.C)) continue;
+            if (s.Gone[j] || matched.Contains(j) || !Inside(u.C)) continue;
             for (int k = 0; k < 3; k++) cq[k] = back.Apply(u.P[k]);
-            GridNear(s.ExistingGrid, (cq[0] + cq[1] + cq[2]) / 3, TwinTol, near);
-            if (near.Exists(e => SameCorners(cq, s.Existing[e]))) h.Context++;
+            if (s.AtPiece(cq, near)) h.Context++;
         }
         // The twin's model: from the matched triangles through shared corners. A triangle that
         // is already at the piece too (the same floor around both copies) is not taken and
@@ -388,13 +477,12 @@ sealed partial class Editor
                 if (!map.TryGetValue(KeyOf(c), out var list)) continue;
                 foreach (int j in list)
                 {
-                    if (!seen.Add(j)) continue;
+                    if (!seen.Add(j) || s.Gone[j]) continue;
                     var u = s.Pool[j];
-                    if (!Inside(u.C) || (_twinTexOnly && !s.SelMats.Contains(u.Sig.Mat))) continue;
+                    if (!Inside(u.C) || (texOnly && !s.SelMats.Contains(u.Sig.Mat))) continue;
                     var q = new Vector3[3];
                     for (int k = 0; k < 3; k++) q[k] = back.Apply(u.P[k]);
-                    GridNear(s.ExistingGrid, (q[0] + q[1] + q[2]) / 3, TwinTol, near);
-                    if (near.Exists(e => SameCorners(q, s.Existing[e]))) continue;
+                    if (s.AtPiece(q, near)) continue;
                     piece.Add(j);
                     queue.Enqueue(j);
                     string mesh = u.M.Name;
@@ -405,7 +493,7 @@ sealed partial class Editor
                     int[] order = h.ToTwin.Mirror ? [0, 2, 1] : [0, 1, 2];
                     h.Add.Add(new UserTri
                     {
-                        Mesh = mesh, Poly = poly, Behind = _newBehind,
+                        Mesh = mesh, Poly = poly, Behind = behind,
                         V = [.. order.Select(k => new EdVertex { Pos = q[k], Uv = u.UvF[k], Rgb = u.M.Rgb[u.M.Tri[u.Poly * 3 + k]] })],
                     });
                 }
@@ -431,19 +519,18 @@ sealed partial class Editor
         }
         foreach (int i in piece)
             foreach (var c in s.Pool[i].P) Touching(c);
-        GridNear(s.UserGrid, (min + max) / 2, Vector3.Distance(min, max) / 2, unear);
+        GridBox(s.UserGrid, min, max, unear);
         foreach (int j in unear.ToList())
             if (Inside(s.User[j].Center) && useen.Add(j)) uqueue.Enqueue(j);
         while (uqueue.Count > 0)
         {
             var u = s.User[uqueue.Dequeue()];
             foreach (var v in u.V) Touching(v.Pos);
-            var mat = TwinMat(u);
-            if (_twinTexOnly && !s.SelMats.Contains(mat)) continue;
+            var mat = MatOf(lv, u);
+            if (texOnly && !s.SelMats.Contains(mat)) continue;
             var q = new Vector3[3];
             for (int k = 0; k < 3; k++) q[k] = back.Apply(u.V[k].Pos);
-            GridNear(s.ExistingGrid, (q[0] + q[1] + q[2]) / 3, TwinTol, near);
-            if (near.Exists(e => SameCorners(q, s.Existing[e]))) continue;
+            if (s.AtPiece(q, near)) continue;
             var c = u.Clone();
             c.Core = false;
             c.Group = 0;
@@ -462,7 +549,7 @@ sealed partial class Editor
         // A new selection or another edit makes the preview stale.
         if (_twin.DocVersion != _docVersion || !_sel.SetEquals(_twin.SelKeys)) { _twin = null; return null; }
         var h = _twin.Hyps[_twin.Index];
-        TwinAdditions(_twin, h);
+        TwinAdditions(_twin, h, _twinReach, _twinTexOnly, _newBehind);
         return h;
     }
 
@@ -701,6 +788,7 @@ sealed partial class Editor
     /// piece under the mouse in white.</summary>
     void TwinOverlay(ImDrawListPtr dl)
     {
+        PollTwinJob();
         if (CurrentTwin() is not { } h) return;
         var s = new Vector2[3];
         int drawn = 0;
