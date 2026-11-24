@@ -47,6 +47,9 @@ sealed partial class Editor
         public List<UserTri> Add = [];
         public (float Reach, bool TexOnly)? AddKey;
         public int OtherMesh;
+        // Originals around the twin that are also around the piece (same place once laid back):
+        // the right copy, turned the right way, brings back the same pillar, wall and floor.
+        public int Context;
         // Additions copied from the user's own triangles at the twin (work already done there).
         public HashSet<VKey> Mine = [];
     }
@@ -301,22 +304,25 @@ sealed partial class Editor
         List<TwinTri> sample = s.Sel.Count <= 24 ? s.Sel : [.. Enumerable.Range(0, 24).Select(i => s.Sel[i * s.Sel.Count / 24])];
         var shortlist = hyps.Values.Select(x => (Xf: x, Votes: Vote(x, sample, null)))
             .Where(h => h.Votes >= Math.Max(1, (int)MathF.Ceiling(sample.Count * 0.3f)))
-            .OrderByDescending(h => UserNear(h.Xf) > 0).ThenByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(60).ToList();
+            .OrderByDescending(h => UserNear(h.Xf) > 0).ThenByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(150).ToList();
         int need = s.Sel.Count == 1 ? 1 : Math.Max(2, (int)MathF.Ceiling(s.Sel.Count * 0.35f));
-        var seen = new HashSet<string>();
         foreach (var (xf, _) in shortlist)
         {
             var h = new TwinHyp { ToTwin = xf };
             h.Votes = Vote(xf, s.Sel, h.Matched);
-            if (h.Votes < need) continue;
-            // The same twin found twice (a symmetric piece fits turned and mirrored): once.
-            string id = string.Join(",", h.Matched.Distinct().Order()) + (xf.Mirror ? "m" : "");
-            if (!seen.Add(id) || (xf.Mirror && seen.Contains(id[..^1]))) continue;
-            s.Hyps.Add(h);
+            if (h.Votes >= need) s.Hyps.Add(h);
         }
         foreach (var h in s.Hyps) TwinAdditions(s, h);
-        s.Hyps = [.. s.Hyps.Where(h => h.Add.Count > 0)
-            .OrderByDescending(h => h.Mine.Count > 0).ThenByDescending(h => h.Votes).ThenByDescending(h => h.Mine.Count).ThenByDescending(h => h.Add.Count)];
+        // Best first: the copy whose surroundings agree most with the piece's (a small piece
+        // fits many copies, turned any way, and only the right one has the same neighbours);
+        // among the good ones, a copy already fixed by hand comes first.
+        int best = s.Hyps.Count == 0 ? 0 : s.Hyps.Max(h => h.Votes + h.Context);
+        var ordered = s.Hyps.Where(h => h.Add.Count > 0)
+            .OrderByDescending(h => h.Mine.Count > 0 && h.Votes + h.Context >= best * 0.8f)
+            .ThenByDescending(h => h.Votes + h.Context).ThenByDescending(h => h.Mine.Count).ThenByDescending(h => h.Add.Count).ThenBy(h => h.ToTwin.Mirror);
+        // The same twin found twice (a symmetric piece fits turned and mirrored): the better one.
+        var seen = new HashSet<string>();
+        s.Hyps = [.. ordered.Where(h => seen.Add(string.Join(",", h.Matched.Distinct().Order())))];
         if (s.Hyps.Count == 0)
         {
             Say(hyps.Count == 0 || shortlist.Count == 0
@@ -355,6 +361,18 @@ sealed partial class Editor
         for (int p = target.PolyCount - 1; p >= 0; p--) byMat[L.MaterialOf(target, p)] = p;
         var back = h.ToTwin.Inverse;
         var near = new List<int>();
+        h.Context = 0;
+        var ctx = new List<int>();
+        GridNear(s.Grid, (min + max) / 2, Vector3.Distance(min, max) / 2, ctx);
+        var cq = new Vector3[3];
+        foreach (int j in ctx)
+        {
+            var u = s.Pool[j];
+            if (matched.Contains(j) || !Inside(u.C)) continue;
+            for (int k = 0; k < 3; k++) cq[k] = back.Apply(u.P[k]);
+            GridNear(s.ExistingGrid, (cq[0] + cq[1] + cq[2]) / 3, TwinTol, near);
+            if (near.Exists(e => SameCorners(cq, s.Existing[e]))) h.Context++;
+        }
         // The twin's model: from the matched triangles through shared corners. A triangle that
         // is already at the piece too (the same floor around both copies) is not taken and
         // the search does not go on through it, so it stays on the model.
