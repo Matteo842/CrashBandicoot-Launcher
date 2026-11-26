@@ -34,6 +34,9 @@ internal static class FrameTimer
     static double _lastJitMs = -1;
     static double _lastGcMs;
     static long _peakTs;
+    // This frame only, for AutoTune.
+    static double _frameGame;
+    static double _frameWait;
 
     public static double Average(Phase p) => _avg[(int)p];
     public static double AverageFrameMs { get; private set; }
@@ -51,7 +54,12 @@ internal static class FrameTimer
     {
         long now = Stopwatch.GetTimestamp();
         if (_mark != 0)
-            _acc[(int)p] += ToMs(now - _mark);
+        {
+            double ms = ToMs(now - _mark);
+            _acc[(int)p] += ms;
+            if (p == Phase.Game) _frameGame += ms;
+            else if (p == Phase.Wait) _frameWait += ms;
+        }
         _mark = now;
     }
 
@@ -67,6 +75,7 @@ internal static class FrameTimer
             double frame = ToMs(now - _frameStart);
             if (frame > _worst) _worst = frame;
             _frames++;
+            AutoTune.OnFrame(frame, _frameGame, _frameWait);
 
             if (frame > PeakFrameMs || ToMs(now - _peakTs) > PeakHoldMs)
             {
@@ -76,6 +85,8 @@ internal static class FrameTimer
                 _peakTs = now;
             }
         }
+        _frameGame = 0;
+        _frameWait = 0;
         _lastJitMs = jitMs;
         _lastGcMs = gcMs;
         _frameStart = now;

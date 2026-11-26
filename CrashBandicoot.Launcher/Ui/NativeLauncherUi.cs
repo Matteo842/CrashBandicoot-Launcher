@@ -112,6 +112,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _hiResDither;
     ThemeCheck? _dejitter;
     ThemeCheck? _crtFilter;
+    ThemeCheck? _autoTune;
     ThemeCheck? _saveLives;
     ThemeCheck? _analogMovement;
     ThemeCheck? _boxCounter;
@@ -326,6 +327,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             _hiResDither.Checked = sd.ValueKind == JsonValueKind.False;
         SetCheck(_dejitter, state, "dejitter");
         SetCheck(_crtFilter, state, "crtFilter");
+        SetCheck(_autoTune, state, "autoTune");
         SetCheck(_saveLives, state, "saveLives");
         SetCheck(_analogMovement, state, "analogMovement");
         SetCheck(_boxCounter, state, "boxCounter");
@@ -1660,6 +1662,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 52;
         AddHint("Curved CRT TV look by Mattias Gustavsson: scanlines, glow, and a shadow mask.");
 
+        _autoTune = MakeCheck("Automatic graphics setup");
+        _autoTune.Location = new Point(12, y);
+        page.Controls.Add(_autoTune);
+        y += 52;
+        AddHint("Measures the first minutes of play and picks widescreen, frame rate and resolution for this PC. Turns itself off when you change one of those.");
+
         AddLabel("Renderer");
         _renderer = MakeCombo(new Point(controlX, y), [
             (0, "Auto (recommended)"), (3, "Vulkan"), (4, "OpenGL"), (1, "OpenGL 3.3"), (2, "OpenGL ES 3"),
@@ -1768,6 +1776,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 scaledDither = !(_hiResDither?.Checked ?? false),
                 dejitter = _dejitter?.Checked ?? false,
                 crtFilter = _crtFilter?.Checked ?? false,
+                autoTune = _autoTune?.Checked ?? true,
                 graphicsApi = _renderer?.SelectedItem is Kv gaKv ? gaKv.Value : 0,
                 saveLives = _saveLives?.Checked ?? true,
                 analogMovement = _analogMovement?.Checked ?? false,

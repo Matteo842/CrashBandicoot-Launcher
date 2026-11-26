@@ -69,7 +69,7 @@ public class ViewConfig
                 return SnapInternalResolution(i);
 
             // Legacy bool: NativeResolution=true → 1x, else previous enhanced default (4x).
-            return GetBool("NativeResolution") ? 1 : 4;
+            return GetBool("NativeResolution") ? 1 : DefaultInternalResolution;
         }
         set
         {
@@ -91,6 +91,9 @@ public class ViewConfig
                 InternalResolution = 4;
         }
     }
+
+    /// <summary>First-run scale: 2x on phones, 4x on desktop. AutoTune raises or lowers it.</summary>
+    public static int DefaultInternalResolution => OperatingSystem.IsAndroid() ? 2 : 4;
 
     public static int SnapInternalResolution(int value)
     {
@@ -127,7 +130,9 @@ public class ViewConfig
                 return SnapTextureFilter(i);
 
             // Legacy bool from the first bilinear toggle.
-            return GetBool("BilinearFilter") ? TextureFilterBilinear : TextureFilterOff;
+            return Values.ContainsKey("BilinearFilter")
+                ? GetBool("BilinearFilter") ? TextureFilterBilinear : TextureFilterOff
+                : TextureFilterSharpBilinear;
         }
         set
         {
@@ -137,14 +142,14 @@ public class ViewConfig
         }
     }
 
-    /// <summary>0..1 blend of filtered vs nearest. Default 0.5 (full was too strong).</summary>
+    /// <summary>0..1 blend of filtered vs nearest. Default 0.15 (higher values wash the image out).</summary>
     public float TextureFilterStrength
     {
         get
         {
             if (!Values.ContainsKey("TextureFilterStrength"))
-                return 0.5f;
-            return Math.Clamp(GetFloat("TextureFilterStrength", 0.5f), 0f, 1f);
+                return 0.15f;
+            return Math.Clamp(GetFloat("TextureFilterStrength", 0.15f), 0f, 1f);
         }
         set => SetFloat("TextureFilterStrength", Math.Clamp(value, 0f, 1f));
     }
@@ -156,10 +161,10 @@ public class ViewConfig
         return value;
     }
 
-    /// <summary>Remove PS1 dither noise (true-color style). Off on menus &amp; cutscenes.</summary>
+    /// <summary>Remove PS1 dither noise (true-color style). Off on menus &amp; cutscenes. On by default.</summary>
     public bool Dedither
     {
-        get => GetBool("Dedither");
+        get => GetBool("Dedither", true);
         set => SetBool("Dedither", value);
     }
 
@@ -174,10 +179,10 @@ public class ViewConfig
         set => SetBool("ScaledDither", value);
     }
 
-    /// <summary>Keep GTE subpixel screen coords to reduce polygon wobble. Off on menus &amp; cutscenes.</summary>
+    /// <summary>Keep GTE subpixel screen coords to reduce polygon wobble. Off on menus &amp; cutscenes. On by default.</summary>
     public bool Dejitter
     {
-        get => GetBool("Dejitter");
+        get => GetBool("Dejitter", true);
         set => SetBool("Dejitter", value);
     }
 
@@ -187,21 +192,21 @@ public class ViewConfig
     /// </summary>
     public bool Widescreen
     {
-        get => GetBool("Widescreen");
+        get => GetBool("Widescreen", true);
         set => SetBool("Widescreen", value);
     }
 
-    /// <summary>Scale the framebuffer by whole pixels only (no blurry fractional upscale).</summary>
+    /// <summary>Scale the framebuffer by whole pixels only (no blurry fractional upscale). On by default.</summary>
     public bool IntegerScale
     {
-        get => GetBool("IntegerScale");
+        get => GetBool("IntegerScale", true);
         set => SetBool("IntegerScale", value);
     }
 
-    /// <summary>Nearest sampling on the presented frame (crisp pixels). Default on at 1x internal.</summary>
+    /// <summary>Nearest sampling on the presented frame (crisp pixels). On by default.</summary>
     public bool PresentNearest
     {
-        get => GetBool("PresentNearest");
+        get => GetBool("PresentNearest", true);
         set => SetBool("PresentNearest", value);
     }
 
@@ -223,9 +228,9 @@ public class ViewConfig
 
     /// <summary>
     /// Renderer for the desktop game window (#167, #80). Auto opens Vulkan on
-    /// Windows and OpenGL 4.3 elsewhere, then falls back to OpenGL 4.3, 3.3 and
-    /// ES 3 when the driver lacks one. The other values are tried first, then the
-    /// rest of that list (OpenGL = the OpenGL list without Vulkan). Applies on next start.
+    /// every OS, then falls back to OpenGL 4.3, 3.3 and ES 3 when the driver
+    /// lacks one. The other values are tried first, then the rest of that list
+    /// (OpenGL = the OpenGL list without Vulkan). Applies on next start.
     /// </summary>
     public int GraphicsApi
     {
@@ -233,19 +238,56 @@ public class ViewConfig
         set => SetInt("GraphicsApi", Math.Clamp(value, GraphicsApiAuto, GraphicsApiOpenGl));
     }
 
-    /// <summary>Whether the desktop window starts on Vulkan (Linux Auto stays on OpenGL until tested there).</summary>
+    /// <summary>Whether the desktop window starts on Vulkan (Auto = Vulkan on every OS).</summary>
     public bool DesktopWantsVulkan => GraphicsApi == GraphicsApiVulkan
-        || GraphicsApi == GraphicsApiAuto && OperatingSystem.IsWindows();
+        || GraphicsApi == GraphicsApiAuto;
 
     /// <summary>
     /// Vulkan game renderer on Android (the desktop uses <see cref="GraphicsApi"/>).
-    /// Off by default (no gain over OpenGL ES measured on phones); any Vulkan
-    /// failure falls back to OpenGL ES. Applies on next game start.
+    /// On by default; any Vulkan failure falls back to OpenGL ES. Applies on next
+    /// game start.
     /// </summary>
     public bool VulkanRenderer
     {
-        get => GetBool("VulkanRenderer");
+        get => GetBool("VulkanRenderer", true);
         set => SetBool("VulkanRenderer", value);
+    }
+
+    /// <summary>
+    /// Automatic graphics setup (<see cref="Host.AutoTune"/>): silently measures the
+    /// first gameplay and picks widescreen, frame rate and internal resolution. Stops
+    /// once done or when the player changes one of those settings. On by default.
+    /// </summary>
+    public bool AutoTune
+    {
+        get => GetBool("AutoTune", true);
+        set => SetBool("AutoTune", value);
+    }
+
+    /// <summary>AutoTune progress: 0 measure, 1 verify a new resolution, 2 done.</summary>
+    public int AutoTuneStage
+    {
+        get => Math.Clamp(GetInt("AutoTuneStage", 0), 0, 2);
+        set => SetInt("AutoTuneStage", Math.Clamp(value, 0, 2));
+    }
+
+    // Values AutoTune last set (first run: the defaults). Any difference = the player chose.
+    public bool AutoTuneWide
+    {
+        get => GetBool("AutoTuneWide", true);
+        set => SetBool("AutoTuneWide", value);
+    }
+
+    public int AutoTuneFps
+    {
+        get => SnapFrameRate(GetInt("AutoTuneFps", DefaultFrameRate));
+        set => SetInt("AutoTuneFps", SnapFrameRate(value));
+    }
+
+    public int AutoTuneRes
+    {
+        get => SnapInternalResolution(GetInt("AutoTuneRes", DefaultInternalResolution));
+        set => SetInt("AutoTuneRes", SnapInternalResolution(value));
     }
 
     /// <summary>Host swap-interval VSync (reduces tearing; may add input latency).</summary>
@@ -256,6 +298,8 @@ public class ViewConfig
     }
 
     public const int FrameRateOriginal = 0;
+    /// <summary>First-run frame rate. AutoTune raises it to 120 / 240 or drops it to 30.</summary>
+    public const int DefaultFrameRate = 60;
     public const int FrameRateUncapped = -1;
 
     /// <summary>
@@ -285,7 +329,7 @@ public class ViewConfig
     /// </summary>
     public int FrameRate
     {
-        get => SnapFrameRate(GetInt("FrameRate", FrameRateOriginal));
+        get => SnapFrameRate(GetInt("FrameRate", DefaultFrameRate));
         set => SetInt("FrameRate", SnapFrameRate(value));
     }
 
@@ -488,12 +532,12 @@ public class ViewConfig
 
     /// <summary>
     /// Story intro on New Game (#171): New Game plays the intro cutscene (retail:
-    /// attract demo only) before the map, like Crash 2 and 3. Start skips it. Off by
+    /// attract demo only) before the map, like Crash 2 and 3. Start skips it. On by
     /// default.
     /// </summary>
     public bool IntroOnNewGame
     {
-        get => GetBool("IntroOnNewGame");
+        get => GetBool("IntroOnNewGame", true);
         set => SetBool("IntroOnNewGame", value);
     }
 }

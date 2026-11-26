@@ -225,7 +225,17 @@ public sealed unsafe class VkSwapchain : IDisposable
         return formats.Length > 0 ? formats[0] : new SurfaceFormatKHR(Format.R8G8B8A8Unorm, ColorSpaceKHR.SpaceSrgbNonlinearKhr);
     }
 
+    /// <summary>Last swapchain presents in FIFO: present waits for vblank (AutoTune cannot see GPU time).</summary>
+    public static bool FifoActive { get; private set; }
+
     PresentModeKHR PickPresentMode()
+    {
+        var mode = PickPresentModeCore();
+        FifoActive = mode == PresentModeKHR.FifoKhr;
+        return mode;
+    }
+
+    PresentModeKHR PickPresentModeCore()
     {
         uint count = 0;
         _gpu.KhrSurface.GetPhysicalDeviceSurfacePresentModes(_gpu.Physical, _surface, &count, null);

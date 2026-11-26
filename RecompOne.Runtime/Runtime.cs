@@ -151,6 +151,8 @@ public static class Runtime
         if (_platformHost != null)
         {
             _platformHost.Present(Gpu);
+            // Android: present / swap time, so AutoTune can tell it from the throttle.
+            Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Swap);
             _platformHost.AttachAudio(Spu);
         }
         else

@@ -282,6 +282,7 @@ sealed partial class LauncherWindow
         var dejitter = Nav(new ThemeCheck("Dejitter") { Checked = view.Dejitter });
         var hiResDither = Nav(new ThemeCheck("High-res dither") { Checked = !view.ScaledDither });
         var crtFilter = Nav(new ThemeCheck("CRT filter (MattiasCRT)") { Checked = view.CrtFilter });
+        var autoTune = Nav(new ThemeCheck("Automatic graphics setup") { Checked = view.AutoTune });
         var renderer = Nav(MakeCombo([(0, "Auto (recommended)"), (3, "Vulkan"), (4, "OpenGL"), (1, "OpenGL 3.3"), (2, "OpenGL ES 3")],
             view.GraphicsApi));
 
@@ -338,8 +339,10 @@ sealed partial class LauncherWindow
                     Hint("Finer dither dots above 1x internal resolution. Off: dots keep the PS1 pixel size, like the original. No effect with Dedither."),
                     WithMargin(crtFilter, new Thickness(0, 0, 0, 14)),
                     Hint("Curved CRT TV look by Mattias Gustavsson: scanlines, glow, and a shadow mask."),
+                    WithMargin(autoTune, new Thickness(0, 0, 0, 14)),
+                    Hint("Measures the first minutes of play and picks widescreen, frame rate and resolution for this PC. Turns itself off when you change one of those."),
                     Row(Label("Renderer", 202), renderer, 14),
-                    Hint("Auto: OpenGL 4.3, or OpenGL 3.3 / ES 3 when the graphics driver lacks it. Change it only if the game does not start. Applies on next game start.", 8),
+                    Hint("Auto: Vulkan, or OpenGL 4.3 / 3.3 / ES 3 when the graphics driver cannot run it. Pick OpenGL if Vulkan misbehaves on your PC. Applies on next game start.", 8),
                 },
             },
             new()
@@ -405,6 +408,7 @@ sealed partial class LauncherWindow
             view.Dejitter = dejitter.Checked;
             view.ScaledDither = !hiResDither.Checked;
             view.CrtFilter = crtFilter.Checked;
+            view.AutoTune = autoTune.Checked;
             view.GraphicsApi = ComboValue(renderer, 0);
             view.SaveLives = saveLives.Checked;
             view.AnalogMovement = analogMovement.Checked;

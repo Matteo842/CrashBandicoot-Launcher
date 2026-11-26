@@ -224,6 +224,7 @@ public sealed class LauncherHost : Form
             scaledDither = ConfigManager.View.ScaledDither,
             dejitter = ConfigManager.View.Dejitter,
             crtFilter = ConfigManager.View.CrtFilter,
+            autoTune = ConfigManager.View.AutoTune,
             graphicsApi = ConfigManager.View.GraphicsApi,
             saveLives = ConfigManager.View.SaveLives,
             analogMovement = ConfigManager.View.AnalogMovement,
@@ -688,6 +689,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.Dejitter = dj.GetBoolean();
         if (root.TryGetProperty("crtFilter", out var crt))
             ConfigManager.View.CrtFilter = crt.GetBoolean();
+        if (root.TryGetProperty("autoTune", out var at))
+            ConfigManager.View.AutoTune = at.GetBoolean();
         if (root.TryGetProperty("graphicsApi", out var ga) && ga.TryGetInt32(out var api))
             ConfigManager.View.GraphicsApi = api;
         if (root.TryGetProperty("saveLives", out var sl))

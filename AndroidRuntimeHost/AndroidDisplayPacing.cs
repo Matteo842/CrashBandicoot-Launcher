@@ -36,6 +36,25 @@ static class AndroidDisplayPacing
         activity.Window.Attributes = lp;
     }
 
+    /// <summary>Highest refresh rate the display offers (0 when unknown).</summary>
+    public static double MaxHz(Activity activity)
+    {
+        try
+        {
+            var display = OperatingSystem.IsAndroidVersionAtLeast(30)
+                ? activity.Display
+                : activity.WindowManager?.DefaultDisplay;
+            double best = 0;
+            foreach (var mode in display?.GetSupportedModes() ?? Array.Empty<Display.Mode>())
+                best = Math.Max(best, mode.RefreshRate);
+            return best;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     public static void ApplySurface(Surface surface, double targetHz)
     {
         if (!OperatingSystem.IsAndroidVersionAtLeast(30)) return;

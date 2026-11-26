@@ -837,6 +837,11 @@ internal static partial class HostWindow
         Hle.GpuHle.CrtFilter = ConfigManager.View.CrtFilter;
         ApplyWidescreen(ConfigManager.View.Widescreen);
         ApplyVSync(ConfigManager.View.VSync);
+
+        AutoTune.MaxResolution = 8;
+        AutoTune.DisplayMaxHz = _window?.Monitor?.VideoMode.RefreshRate ?? 0;
+        AutoTune.ApplyLive = () => GraphicsPresets.ApplyLive(ConfigManager.View);
+        AutoTune.SaveConfig = () => ConfigManager.SaveView(PanelManager.Panels);
     }
 
     static void ConfigureImGui()

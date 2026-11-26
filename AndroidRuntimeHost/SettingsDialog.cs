@@ -68,6 +68,11 @@ static class SettingsDialog
         card.AddView(Hint(activity,
             "Applies on the next game start. Use 8x on 4K displays.", bodyFont));
 
+        var autoTune = AddSwitch(activity, card, "Automatic graphics setup", view.AutoTune, bodyBold);
+        card.AddView(Hint(activity,
+            "Measures the first minutes of play and picks widescreen, frame rate and resolution for this phone. Turns itself off when you change one of those.",
+            bodyFont));
+
         var vulkanRenderer = AddSwitch(activity, card, "Vulkan renderer", view.VulkanRenderer, bodyBold);
         card.AddView(Hint(activity,
             "Draws the game with Vulkan instead of OpenGL ES: less driver work per frame and no shader stutter after the first run. Helps most on phones with weak OpenGL ES drivers. Applies on the next game start. If the phone cannot run it, the game falls back to OpenGL ES.",
@@ -200,6 +205,7 @@ static class SettingsDialog
             view.Dejitter = dejitter.Checked;
             view.CrtFilter = crtFilter.Checked;
             view.VulkanRenderer = vulkanRenderer.Checked;
+            view.AutoTune = autoTune.Checked;
             view.SaveLives = saveLives.Checked;
             view.AnalogMovement = analogMovement.Checked;
             view.BoxCounter = boxCounter.Checked;

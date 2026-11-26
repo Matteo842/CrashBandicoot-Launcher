@@ -681,6 +681,16 @@ public sealed class MainActivity : Activity
             {
                 surface = WaitForGameSurface();
                 RecompOne.Runtime.Hle.GlVram.Scale = ConfigManager.View.InternalResolution;
+                // Phones: 8x VRAM targets do not fit; frame rate capped by the panel.
+                RecompOne.Runtime.Host.AutoTune.MaxResolution = 4;
+                RecompOne.Runtime.Host.AutoTune.DisplayMaxHz = AndroidDisplayPacing.MaxHz(this);
+                RecompOne.Runtime.Host.AutoTune.ApplyLive = () =>
+                {
+                    AndroidGraphics.ApplyLive();
+                    AndroidGraphics.ApplyFramePacing();
+                };
+                RecompOne.Runtime.Host.AutoTune.SaveConfig = () =>
+                    ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());
                 if (ConfigManager.View.VulkanRenderer)
                     vulkan = TryCreateVulkan(surface);
 
