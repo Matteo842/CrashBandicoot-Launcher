@@ -1238,9 +1238,13 @@ sealed partial class Editor
         TwinOverlay(dl);
         if (_tool == Tool.Vertex)
         {
+            // Only the vertices of the loaded area (as for picking): the rest of the level
+            // would float as dots in the sky.
+            var loaded = _drawMeshes.Select(m => m.Name).ToHashSet();
             foreach (var t in _doc.Tris)
-                foreach (var v in t.V)
-                    if (_cam.Project(Shown(t, v.Pos), _view, out var p)) dl.AddCircleFilled(p, 3.5f, Col(1, 0.85f, 0.1f, 0.9f));
+                if (loaded.Contains(t.Mesh))
+                    foreach (var v in t.V)
+                        if (_cam.Project(Shown(t, v.Pos), _view, out var p)) dl.AddCircleFilled(p, 3.5f, Col(1, 0.85f, 0.1f, 0.9f));
             if (_hoverVertex is { } hv && _cam.Project(Shown(_doc.Tris[hv.Tri], _doc.Tris[hv.Tri].V[hv.K].Pos), _view, out var hp))
                 dl.AddCircle(hp, 8, Col(1, 1, 1), 0, 2);
         }

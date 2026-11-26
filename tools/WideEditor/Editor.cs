@@ -311,6 +311,55 @@ sealed partial class Editor : IDisposable
 
     bool RuntimeHidden(Mesh m, int poly) => _auto != null && _auto.HiddenSides.TryGetValue(m, out var h) && h.Contains(poly);
 
+    // Own triangles with "Visibile solo dal davanti" (Culled) that face away from the
+    // camera: the game does not draw them (back-face cull in the bands).
+    HashSet<int> _backCulled = [];
+
+    /// <summary>Works out, for the current camera, which own one-sided triangles the game
+    /// would cull. The front winding is the one most originals on screen have, as the
+    /// game's renderer measures it (GpuHle.WideWorldFrontSign).</summary>
+    void UpdateBackCulled()
+    {
+        if (L == null) return;
+        Span<Vector2> s = stackalloc Vector2[3];
+        bool OnScreen(Vector3 a, Vector3 b, Vector3 c, Span<Vector2> o) =>
+            _cam.Depth(a) > 1 && _cam.Depth(b) > 1 && _cam.Depth(c) > 1
+            && _cam.Project(a, _view, out o[0]) && _cam.Project(b, _view, out o[1]) && _cam.Project(c, _view, out o[2]);
+        static float Area(ReadOnlySpan<Vector2> o) => (o[1].X - o[0].X) * (o[2].Y - o[0].Y) - (o[1].Y - o[0].Y) * (o[2].X - o[0].X);
+        bool any = false;
+        foreach (var t in _doc.Tris)
+            if (t.Culled) { any = true; break; }
+        if (!any)
+        {
+            if (_backCulled.Count > 0) { _backCulled = []; _userDirty = true; }
+            return;
+        }
+        int pos = 0, neg = 0;
+        foreach (var m in _drawMeshes)
+        {
+            if (m.Backdrop) continue;
+            int step = Math.Max(1, m.PolyCount / 400);
+            for (int p = 0; p < m.PolyCount; p += step)
+            {
+                if (!OnScreen(m.Corner(p, 0), m.Corner(p, 1), m.Corner(p, 2), s)) continue;
+                float a = Area(s);
+                if (a > 0.5f) pos++;
+                else if (a < -0.5f) neg++;
+            }
+        }
+        float front = pos >= neg ? 1 : -1;
+        var loaded = _drawMeshes.Select(m => m.Name).ToHashSet();
+        var now = new HashSet<int>();
+        for (int i = 0; i < _doc.Tris.Count; i++)
+        {
+            var t = _doc.Tris[i];
+            if (!t.Culled || !loaded.Contains(t.Mesh) || !L.MeshByName.TryGetValue(t.Mesh, out var m) || m.Backdrop) continue;
+            if (!OnScreen(t.V[0].Pos, t.V[1].Pos, t.V[2].Pos, s)) continue;
+            if (Area(s) * front < 0) now.Add(i);
+        }
+        if (!now.SetEquals(_backCulled)) { _backCulled = now; _userDirty = true; }
+    }
+
     void RebuildBuffers()
     {
         if (L == null || _auto == null) return;
@@ -411,7 +460,9 @@ sealed partial class Editor : IDisposable
                         int i = ordered[k];
                         var t = _doc.Tris[i];
                         var mat = t.Poly >= 0 && t.Poly < m.PolyCount ? L.MaterialOf(m, t.Poly) : default;
-                        var (info, clut) = Bits.Of(mat, (int)Kind.User, false, t.Behind, t.Rank, m.Backdrop, part > 0);
+                        // Seen from behind with "Visibile solo dal davanti": the game skips it, so
+                        // it is marked hidden (dropped in "Come nel gioco", like the game).
+                        var (info, clut) = Bits.Of(mat, (int)Kind.User, _backCulled.Contains(i), t.Behind, t.Rank, m.Backdrop, part > 0);
                         uint id = PickId(Kind.User, i);
                         foreach (var v in t.V)
                             list.Add(new GpuVertex
@@ -668,6 +719,7 @@ sealed partial class Editor : IDisposable
                     FollowGame();
                     UpdateDrawMeshes();
                     ViewInput((float)dt);
+                    UpdateBackCulled();
                     RebuildBuffers();
                     RenderScene();
                     Panels();
