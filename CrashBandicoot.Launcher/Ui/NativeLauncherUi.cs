@@ -84,9 +84,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     readonly LauncherGamepad _pad = new();
 
     // Sheets / overlays
-    Panel? _prepOverlay;
-    Label? _prepDetail;
-    Panel? _prepBarFill;
+    // Game prepare: drawn as a bar in the footer (replaces chip + path).
+    bool _preparing;
+    float _prepFraction;
+    string _prepDetail = "";
     Panel? _sheetHost;
     Panel? _activeSheet;
     bool _sheetFill;
@@ -433,6 +434,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void OnStageMouseMove(object? sender, MouseEventArgs e)
     {
+        // While preparing the menu is locked (it used to sit under a dim overlay).
+        if (_preparing)
+        {
+            _stage.Cursor = Cursors.WaitCursor;
+            return;
+        }
         var prevMenu = _hoverMenu;
         var prevInfo = _hoverInfo;
         var prevChip = _hoverChip;
@@ -461,7 +468,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     void OnStageMouseClick(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
-        if (_sheetHost is { Visible: true } || _prepOverlay is { Visible: true }) return;
+        if (_sheetHost is { Visible: true } || _preparing) return;
 
         if (_infoRect.Contains(e.Location))
         {
@@ -484,7 +491,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void PollController()
     {
-        if (_disposed || !Visible || _prepOverlay is { Visible: true }) return;
+        if (_disposed || !Visible || _preparing) return;
         if (!_pad.TryEnsureInit()) return;
 
         var action = _pad.Poll();
@@ -729,7 +736,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (_disposed || !Visible || _prepOverlay is { Visible: true })
+        if (_disposed || !Visible || _preparing)
             return base.ProcessCmdKey(ref msg, keyData);
 
         if (_sheetHost is { Visible: true } && KeyCaptureBox.Active is { } listening)
@@ -1139,6 +1146,19 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             g.FillPath(fill, infoPath);
         }
 
+        if (_preparing) DrawPrepBar(g, bounds);
+        else DrawDiscRow(g, bounds, footTop);
+
+        TextRenderer.DrawText(g, _version, _fontVer,
+            new Rectangle(bounds.Width - 110, bounds.Height - 44, 96, 32),
+            Color.FromArgb(115, NativeTheme.Sand),
+            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
+
+    /// <summary>Select disc chip, status line and disc path.</summary>
+    void DrawDiscRow(Graphics g, Rectangle bounds, int footTop)
+    {
+        if (_fontChip == null || _fontFooter == null) return;
         // Chip
         var chipHot = _hoverChip || _focusIndex == FocusChip;
         var chipFill = chipHot
@@ -1172,11 +1192,47 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             new Rectangle(textX, _chipRect.Y + 5, textW, 24),
             Color.FromArgb(160, NativeTheme.Sand),
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+    }
 
-        TextRenderer.DrawText(g, _version, _fontVer,
-            new Rectangle(bounds.Width - 110, bounds.Height - 44, 96, 32),
-            Color.FromArgb(115, NativeTheme.Sand),
-            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    /// <summary>
+    /// Prepare progress in the footer, where Select disc + path normally sit:
+    /// detail text and percent on top, rounded wumpa bar below.
+    /// </summary>
+    void DrawPrepBar(Graphics g, Rectangle bounds)
+    {
+        if (_fontFooter == null) return;
+        var x = _chipRect.X;
+        var right = bounds.Width - 130;          // keep clear of the version label
+        var w = Math.Max(60, right - x);
+        var textTop = _chipRect.Y - 4;
+        var barTop = _chipRect.Y + 22;
+        const int barH = 10;
+
+        var pct = $"{(int)MathF.Round(_prepFraction * 100f)}%";
+        TextRenderer.DrawText(g, pct, _fontFooter,
+            new Rectangle(right - 70, textTop, 70, 22), NativeTheme.WumpaHot,
+            TextFormatFlags.Right | TextFormatFlags.NoPadding);
+        var detail = string.IsNullOrEmpty(_prepDetail) ? "Preparing game…" : "Preparing game · " + _prepDetail;
+        TextRenderer.DrawText(g, detail, _fontFooter,
+            new Rectangle(x, textTop, w - 80, 22), Color.FromArgb(210, NativeTheme.Sand),
+            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+
+        var track = new Rectangle(x, barTop, w, barH);
+        using (var path = RoundRect(track, barH / 2))
+        using (var br = new SolidBrush(Color.FromArgb(28, 255, 255, 255)))
+        using (var pen = new Pen(Color.FromArgb(70, 255, 180, 60)))
+        {
+            g.FillPath(br, path);
+            g.DrawPath(pen, path);
+        }
+        var fillW = (int)(Math.Clamp(_prepFraction, 0f, 1f) * w);
+        if (fillW >= barH)
+        {
+            var fill = new Rectangle(x, barTop, fillW, barH);
+            using var path = RoundRect(fill, barH / 2);
+            using var br = new LinearGradientBrush(fill, NativeTheme.WumpaHot, NativeTheme.Wumpa, 90f);
+            g.FillPath(br, path);
+        }
     }
 
     static GraphicsPath RoundRect(Rectangle r, int radius)
@@ -1195,48 +1251,6 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void BuildOverlays()
     {
-        _prepOverlay = MakeDimHost();
-        var prepCard = MakeCard(480, 180);
-        prepCard.Controls.Add(MakeTitle("Preparing game", new Point(36, 12)));
-        _prepDetail = new Label
-        {
-            Text = "Working from your disc…",
-            ForeColor = Color.FromArgb(210, NativeTheme.Sand),
-            Font = NativeTheme.MakeNunito(15),
-            Location = new Point(36, 92),
-            Size = new Size(480, 24),
-            BackColor = Color.Transparent,
-        };
-        prepCard.Controls.Add(_prepDetail);
-        var barBg = new Panel
-        {
-            Location = new Point(36, 130),
-            Size = new Size(480, 12),
-            BackColor = Color.FromArgb(20, 255, 255, 255),
-        };
-        _prepBarFill = new Panel
-        {
-            Location = new Point(0, 0),
-            Size = new Size(0, 12),
-            BackColor = NativeTheme.Wumpa,
-        };
-        barBg.Controls.Add(_prepBarFill);
-        prepCard.Controls.Add(barBg);
-        prepCard.Controls.Add(new Label
-        {
-            Text = "First prepare writes into the game folder next to the exe. Your .chd or .cue + .bin must still be present to play.",
-            ForeColor = Color.FromArgb(140, NativeTheme.Sand),
-            Font = NativeTheme.MakeNunito(13),
-            Location = new Point(36, 156),
-            Size = new Size(480, 40),
-            BackColor = Color.Transparent,
-        });
-        _prepOverlay.Controls.Add(prepCard);
-        CenterChild(_prepOverlay, prepCard);
-        _prepOverlay.Resize += (_, _) => CenterChild(_prepOverlay, prepCard);
-        Controls.Add(_prepOverlay);
-        _prepOverlay.BringToFront();
-
         _sheetHost = MakeDimHost();
         Controls.Add(_sheetHost);
         _sheetHost.BringToFront();
@@ -1331,17 +1345,36 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
 
     void ShowPrep(bool show)
     {
-        if (_prepOverlay == null) return;
-        _prepOverlay.Visible = show;
-        if (show) _prepOverlay.BringToFront();
+        if (_preparing == show) return;
+        _preparing = show;
+        if (show)
+        {
+            _prepFraction = 0f;
+            _prepDetail = "";
+            _hoverChip = false;
+            _hoverMenu = -1;
+            _hoverInfo = false;
+            _stage.Cursor = Cursors.WaitCursor;
+            _stage.Invalidate();
+        }
+        else
+        {
+            _stage.Cursor = Cursors.Default;
+        }
+        InvalidateFooter();
     }
 
     void SetPrepProgress(float fraction, string? detail)
     {
-        if (_prepBarFill != null)
-            _prepBarFill.Width = (int)(Math.Clamp(fraction, 0f, 1f) * 480);
-        if (detail != null && _prepDetail != null)
-            _prepDetail.Text = detail;
+        _prepFraction = Math.Clamp(fraction, 0f, 1f);
+        if (detail != null) _prepDetail = detail;
+        InvalidateFooter();
+    }
+
+    void InvalidateFooter()
+    {
+        var size = _stage.ClientSize;
+        _stage.Invalidate(new Rectangle(0, size.Height - 80, size.Width, 80));
     }
 
     void CloseSheet()
