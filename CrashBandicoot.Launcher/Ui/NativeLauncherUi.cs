@@ -127,6 +127,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _analogMovement;
     ThemeCheck? _boxCounter;
     ThemeCheck? _classicBoxCounter;
+    ThemeCheck? _classicBoxCounterOnBreak;
     ThemeCheck? _gemHints;
     ThemeCheck? _singleBoxDrop;
     ThemeCheck? _pityMask;
@@ -356,6 +357,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_analogMovement, state, "analogMovement");
         SetCheck(_boxCounter, state, "boxCounter");
         SetCheck(_classicBoxCounter, state, "classicBoxCounter");
+        SetCheck(_classicBoxCounterOnBreak, state, "classicBoxCounterOnBreak");
         SetCheck(_gemHints, state, "gemHints");
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
         SetCheck(_pityMask, state, "pityMask");
@@ -1894,7 +1896,13 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _classicBoxCounter.Location = new Point(12, y);
         page.Controls.Add(_classicBoxCounter);
         y += 52;
-        AddHint("Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters (hold Triangle) and when a box breaks.");
+        AddHint("Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters (hold Triangle).");
+
+        _classicBoxCounterOnBreak = MakeCheck("Show box counter when a box breaks");
+        _classicBoxCounterOnBreak.Location = new Point(12, y);
+        page.Controls.Add(_classicBoxCounterOnBreak);
+        y += 52;
+        AddHint("Also shows the classic box counter for a moment every time a box breaks. Off: only with the fruit and lives counters (Triangle), like Crash 2 and 3.");
 
         _boxCounter = MakeCheck("Corner box counter");
         _boxCounter.Location = new Point(12, y);
@@ -1955,6 +1963,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 analogMovement = _analogMovement?.Checked ?? false,
                 boxCounter = _boxCounter?.Checked ?? false,
                 classicBoxCounter = _classicBoxCounter?.Checked ?? true,
+                classicBoxCounterOnBreak = _classicBoxCounterOnBreak?.Checked ?? false,
                 gemHints = _gemHints?.Checked ?? false,
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
                 pityMask = _pityMask?.Checked ?? false,

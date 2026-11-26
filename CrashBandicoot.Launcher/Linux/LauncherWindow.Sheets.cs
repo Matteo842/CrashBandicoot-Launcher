@@ -293,6 +293,7 @@ sealed partial class LauncherWindow
         var saveLives = Nav(new ThemeCheck("Save lives to memory card") { Checked = view.SaveLives });
         var analogMovement = Nav(new ThemeCheck("Analog movement (left stick)") { Checked = view.AnalogMovement });
         var classicBoxCounter = Nav(new ThemeCheck("Classic box counter") { Checked = view.ClassicBoxCounter });
+        var classicBoxCounterOnBreak = Nav(new ThemeCheck("Show box counter when a box breaks") { Checked = view.ClassicBoxCounterOnBreak });
         var boxCounter = Nav(new ThemeCheck("Corner box counter") { Checked = view.BoxCounter });
         var gemHints = Nav(new ThemeCheck("Gem hints") { Checked = view.GemHints });
         var singleBoxDrop = Nav(new ThemeCheck("Japanese box drop (one box)") { Checked = view.SingleBoxDrop });
@@ -364,7 +365,9 @@ sealed partial class LauncherWindow
                     WithMargin(analogMovement, new Thickness(0, 0, 0, 14)),
                     Hint("The gamepad left stick steers Crash in any direction, not only the 8 of the D-pad. D-pad and keyboard are unchanged."),
                     WithMargin(classicBoxCounter, new Thickness(0, 0, 0, 14)),
-                    Hint("Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters (hold Triangle) and when a box breaks."),
+                    Hint("Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters (hold Triangle)."),
+                    WithMargin(classicBoxCounterOnBreak, new Thickness(0, 0, 0, 14)),
+                    Hint("Also shows the classic box counter for a moment every time a box breaks. Off: only with the fruit and lives counters (Triangle), like Crash 2 and 3."),
                     WithMargin(boxCounter, new Thickness(0, 0, 0, 14)),
                     Hint("Always shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint."),
                     WithMargin(gemHints, new Thickness(0, 0, 0, 14)),
@@ -414,6 +417,7 @@ sealed partial class LauncherWindow
             view.AnalogMovement = analogMovement.Checked;
             view.BoxCounter = boxCounter.Checked;
             view.ClassicBoxCounter = classicBoxCounter.Checked;
+            view.ClassicBoxCounterOnBreak = classicBoxCounterOnBreak.Checked;
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;

@@ -84,6 +84,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Crash 2 style: crate + boxes broken / needed, with the HUD (Triangle)");
 
+        bool classicOnBreak = ConfigManager.View.ClassicBoxCounterOnBreak;
+        if (ImGui.Checkbox("Show box counter when a box breaks", ref classicOnBreak))
+        {
+            ConfigManager.View.ClassicBoxCounterOnBreak = classicOnBreak;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Classic counter pops up on every box. Off: Triangle only, like Crash 2");
+
         bool boxes = ConfigManager.View.BoxCounter;
         if (ImGui.Checkbox("Corner box counter", ref boxes))
         {

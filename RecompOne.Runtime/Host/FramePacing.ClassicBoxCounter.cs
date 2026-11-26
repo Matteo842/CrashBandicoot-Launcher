@@ -16,8 +16,9 @@ public static partial class FramePacing
     /// DispC <c>Variable_Display</c> object is borrowed for a few extra
     /// GoolObjectTransform calls (its own FONT_NUMBERS digits, then the BoxsC crate
     /// model placed in front of the camera) and put back exactly as it was.
-    /// It slides in and out with the fruit/lives HUD (Triangle, pickups) and also
-    /// shows for 1.5 s whenever a box breaks, like DispC <c>Display_Show</c>.
+    /// It slides in and out with the fruit/lives HUD (Triangle, pickups) and, with
+    /// ClassicBoxCounterOnBreak (#246), also shows for 1.5 s whenever a box breaks,
+    /// like DispC <c>Display_Show</c>.
     /// </summary>
     const uint ClassicGhostBytes = 0x160u;
     const byte AnimTypeText = 4;
@@ -120,7 +121,7 @@ public static partial class FramePacing
             }
             else if (run.Broken != _classicBroken)
             {
-                if (run.Broken > _classicBroken) _classicHoldUntil = now + ClassicHoldSeconds;
+                if (run.Broken > _classicBroken && ConfigManager.View.ClassicBoxCounterOnBreak) _classicHoldUntil = now + ClassicHoldSeconds;
                 _classicBroken = run.Broken;
             }
             bool paused = GamePaused(m);

@@ -230,6 +230,7 @@ public sealed class LauncherHost : Form
             analogMovement = ConfigManager.View.AnalogMovement,
             boxCounter = ConfigManager.View.BoxCounter,
             classicBoxCounter = ConfigManager.View.ClassicBoxCounter,
+            classicBoxCounterOnBreak = ConfigManager.View.ClassicBoxCounterOnBreak,
             gemHints = ConfigManager.View.GemHints,
             singleBoxDrop = ConfigManager.View.SingleBoxDrop,
             pityMask = ConfigManager.View.PityMask,
@@ -701,6 +702,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.BoxCounter = bc.GetBoolean();
         if (root.TryGetProperty("classicBoxCounter", out var cbc))
             ConfigManager.View.ClassicBoxCounter = cbc.GetBoolean();
+        if (root.TryGetProperty("classicBoxCounterOnBreak", out var cbob))
+            ConfigManager.View.ClassicBoxCounterOnBreak = cbob.GetBoolean();
         if (root.TryGetProperty("gemHints", out var gh))
             ConfigManager.View.GemHints = gh.GetBoolean();
         if (root.TryGetProperty("singleBoxDrop", out var sbd))

@@ -120,7 +120,12 @@ static class SettingsDialog
 
         var classicBoxCounter = AddSwitch(activity, card, "Classic box counter", view.ClassicBoxCounter, bodyBold);
         card.AddView(Hint(activity,
-            "Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters and when a box breaks.",
+            "Crash 2 style: a spinning crate and boxes broken / boxes needed at the top of the screen, in the game's own digits. It shows with the fruit and lives counters.",
+            bodyFont));
+
+        var classicBoxCounterOnBreak = AddSwitch(activity, card, "Show box counter when a box breaks", view.ClassicBoxCounterOnBreak, bodyBold);
+        card.AddView(Hint(activity,
+            "Also shows the classic box counter for a moment every time a box breaks. Off: only with the fruit and lives counters (Triangle), like Crash 2 and 3.",
             bodyFont));
 
         var boxCounter = AddSwitch(activity, card, "Corner box counter", view.BoxCounter, bodyBold);
@@ -210,6 +215,7 @@ static class SettingsDialog
             view.AnalogMovement = analogMovement.Checked;
             view.BoxCounter = boxCounter.Checked;
             view.ClassicBoxCounter = classicBoxCounter.Checked;
+            view.ClassicBoxCounterOnBreak = classicBoxCounterOnBreak.Checked;
             view.GemHints = gemHints.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;

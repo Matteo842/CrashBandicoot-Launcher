@@ -490,12 +490,23 @@ public class ViewConfig
     /// <summary>
     /// Classic box counter (#243), Crash 2/3 style: a spinning crate and broken/total
     /// in the game's own HUD digits at the top centre. It shows with the fruit/lives HUD
-    /// (Triangle) and when a box breaks. On by default.
+    /// (Triangle) and, with <see cref="ClassicBoxCounterOnBreak"/>, when a box breaks.
+    /// On by default.
     /// </summary>
     public bool ClassicBoxCounter
     {
         get => GetBool("ClassicBoxCounter", true);
         set => SetBool("ClassicBoxCounter", value);
+    }
+
+    /// <summary>
+    /// #246: the classic box counter also pops up for 1.5 s whenever a box breaks.
+    /// Off by default: like Crash 2/3 it only shows with the HUD (Triangle, pickups).
+    /// </summary>
+    public bool ClassicBoxCounterOnBreak
+    {
+        get => GetBool("ClassicBoxCounterOnBreak");
+        set => SetBool("ClassicBoxCounterOnBreak", value);
     }
 
     /// <summary>
