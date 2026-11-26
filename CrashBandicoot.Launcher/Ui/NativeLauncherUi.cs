@@ -62,6 +62,10 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     int _hoverMenu = -1;
     bool _hoverInfo;
     bool _hoverChip;
+    // Select disc breathes green while there is nothing playable yet.
+    float _chipPulseTime;
+    const float ChipPulsePeriod = 1.8f;
+    bool ChipNeedsAttention => !_canStart && !_preparing;
     /// <summary>Controller/keyboard focus: 0–5 menu, 6 info, 7 disc chip.</summary>
     const int MenuCount = 6;
     const int FocusInfo = 6;
@@ -181,6 +185,15 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             _cratePhase += 0.065f * dt / 0.033f;
             if (_cratePhase > MathF.PI * 2) _cratePhase -= MathF.PI * 2;
             _stage.Invalidate(_crateRect.InflateCopy(12, 16));
+            if (ChipNeedsAttention)
+            {
+                _chipPulseTime += dt;
+                _stage.Invalidate(_chipRect.InflateCopy(10, 10));
+            }
+            else
+            {
+                _chipPulseTime = 0f;
+            }
             AnimateMenu(dt);
             PollController();
         };
@@ -1164,14 +1177,35 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         var chipFill = chipHot
             ? Color.FromArgb(70, 255, 138, 0)
             : Color.FromArgb(30, 255, 138, 0);
+        var chipLine = Color.FromArgb(90, 255, 180, 60);
+        var chipText = NativeTheme.Sand;
+
+        // No playable disc yet: soft green breathing (0 → 1 → 0 every
+        // ChipPulsePeriod s) so the first-time user sees where to click.
+        if (ChipNeedsAttention)
+        {
+            var pulse = 0.5f - 0.5f * MathF.Cos(_chipPulseTime / ChipPulsePeriod * MathF.PI * 2f);
+            var green = NativeTheme.Ok;
+            chipFill = LerpColor(chipFill, Color.FromArgb(chipHot ? 90 : 55, green), pulse);
+            chipLine = LerpColor(chipLine, Color.FromArgb(210, green), pulse);
+            chipText = LerpColor(chipText, Color.FromArgb(205, 255, 215), pulse * 0.7f);
+            if (pulse > 0.02f)
+            {
+                var glowRect = _chipRect.InflateCopy(2 + (int)(3 * pulse), 2 + (int)(3 * pulse));
+                using var glowPath = RoundRect(glowRect, glowRect.Height / 2);
+                using var glowPen = new Pen(Color.FromArgb((int)(70 * pulse), green), 2f);
+                g.DrawPath(glowPen, glowPath);
+            }
+        }
+
         using (var path = RoundRect(_chipRect, 17))
         using (var br = new SolidBrush(chipFill))
-        using (var pen = new Pen(Color.FromArgb(90, 255, 180, 60)))
+        using (var pen = new Pen(chipLine))
         {
             g.FillPath(br, path);
             g.DrawPath(pen, path);
         }
-        TextRenderer.DrawText(g, "Select disc", _fontChip, _chipRect, NativeTheme.Sand,
+        TextRenderer.DrawText(g, "Select disc", _fontChip, _chipRect, chipText,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
         // Status + path
@@ -1233,6 +1267,14 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             using var br = new LinearGradientBrush(fill, NativeTheme.WumpaHot, NativeTheme.Wumpa, 90f);
             g.FillPath(br, path);
         }
+    }
+
+    static Color LerpColor(Color a, Color b, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return Color.FromArgb(
+            (int)(a.A + (b.A - a.A) * t), (int)(a.R + (b.R - a.R) * t),
+            (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
     }
 
     static GraphicsPath RoundRect(Rectangle r, int radius)
