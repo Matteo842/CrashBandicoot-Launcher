@@ -34,8 +34,23 @@ PACKS = {
 PROGRAMS = {name for _, name, _ in PACKS.values()}
 
 
+def check_ready_marker(manifest: pathlib.Path) -> None:
+    """prepare.done must name the marker GameStore writes for the current PipelineVersion."""
+    import json, re
+
+    src = (ROOT / "CrashBandicoot.Launcher" / "Recomp" / "GameLoader.cs").read_text(encoding="utf-8")
+    m = re.search(r'PipelineVersion\s*=\s*"([^"]+)"', src)
+    if not m:
+        sys.exit("PipelineVersion not found in GameLoader.cs")
+    want = f"{{install}}/game/ready-p{m.group(1)}"
+    done = json.loads(manifest.read_text(encoding="utf-8")).get("prepare", {}).get("done", [])
+    if done != [want]:
+        sys.exit(f"recomplauncher.json prepare.done is {done}, expected [{want!r}] (PipelineVersion changed?)")
+
+
 def pack(platform: str, version: str, program: str, out_dir: str) -> None:
     suffix, inner, _ = PACKS[platform]
+    check_ready_marker(ROOT / "recomplauncher.json")
     out = pathlib.Path(out_dir) / f"CrashBandicoot-{version}-{suffix}"
     out.parent.mkdir(parents=True, exist_ok=True)
     manifest = ROOT / "recomplauncher.json"

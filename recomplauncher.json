@@ -17,7 +17,8 @@
   "prepare": {
     "program": ["CrashBandicoot.exe", "CrashBandicoot-arm64.exe", "CrashBandicoot-Linux", "CrashBandicoot-Linux-arm64"],
     "args": ["--prepare", "{input:game}"],
-    "label": "Building the game from your disc"
+    "label": "Building the game from your disc",
+    "done": ["{install}/game/ready-p10"]
   },
   "start": {
     "program": ["CrashBandicoot.exe", "CrashBandicoot-arm64.exe", "CrashBandicoot-Linux", "CrashBandicoot-Linux-arm64"],

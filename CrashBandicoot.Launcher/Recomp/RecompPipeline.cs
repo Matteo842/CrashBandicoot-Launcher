@@ -39,6 +39,8 @@ public static class RecompPipeline
 
         if (GameStore.TryGetValid(v.Fingerprint, v.CuePath, out var dll) && File.Exists(dll))
         {
+            // Builds made before the marker existed get it too, or RecompLauncher re-asks setup.
+            GameStore.MarkReady(v.Fingerprint);
             Report("Game", "Using prepared game (disc dump still required).", 1f);
             return dll;
         }

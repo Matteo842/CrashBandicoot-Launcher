@@ -24,9 +24,14 @@ public sealed class GameManifest
 /// </summary>
 public static class GameStore
 {
+    // recomplauncher.json prepare.done names ReadyMarkerPath ("game/ready-p<this>"):
+    // tools/release_hashes.py pack refuses a release where the two disagree.
     public const string PipelineVersion = "10";
 
     public static string RootDir => AppPaths.GameDir;
+
+    /// <summary>Fixed-name file left by every finished build (RecompLauncher prepare.done, #245).</summary>
+    public static string ReadyMarkerPath => Path.Combine(RootDir, "ready-p" + PipelineVersion);
 
     public static string SlotDir(string fingerprint) => Path.Combine(RootDir, fingerprint);
 
@@ -77,6 +82,20 @@ public static class GameStore
             PipelineVersion = PipelineVersion,
         };
         File.WriteAllText(ManifestPath(fingerprint), JsonSerializer.Serialize(m, new JsonSerializerOptions { WriteIndented = true }));
+        MarkReady(fingerprint);
+    }
+
+    public static void MarkReady(string fingerprint)
+    {
+        try
+        {
+            Directory.CreateDirectory(RootDir);
+            File.WriteAllText(ReadyMarkerPath, fingerprint);
+        }
+        catch
+        {
+            // marker is only a hint for RecompLauncher; the game runs without it
+        }
     }
 }
 
