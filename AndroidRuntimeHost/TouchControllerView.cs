@@ -12,6 +12,10 @@ namespace CrashBandicoot.AndroidRuntime;
 sealed class TouchControllerView : View
 {
     readonly Paint _paint = new(PaintFlags.AntiAlias | PaintFlags.SubpixelText);
+    readonly Android.Graphics.Path _path = new();
+    CornerPathEffect? _dpadCorners;
+
+    enum FaceSymbol { Triangle, Circle, Cross, Square }
     readonly Dictionary<int, ushort> _pointerButtons = [];
     readonly TouchControlSettings _settings;
     readonly bool _editing;
@@ -46,9 +50,10 @@ sealed class TouchControllerView : View
     float _joystickKnobX;
     float _joystickKnobY;
 
-    static readonly Color Sand = Color.Rgb(255, 239, 194);
+    // "Glass" style, picked from offline previews (artifacts/touch-buttons).
+    static readonly Color Glass = Color.Rgb(226, 230, 236);
     static readonly Color Neutral = Color.Rgb(174, 184, 186);
-    static readonly Color Gold = Color.Rgb(255, 153, 20);
+    static readonly Color PressedInk = Color.Rgb(20, 24, 30);
     static readonly Color CrossBlue = Color.Rgb(80, 155, 255);
     static readonly Color CircleRed = Color.Rgb(255, 90, 90);
     static readonly Color SquarePink = Color.Rgb(255, 120, 205);
@@ -111,6 +116,8 @@ sealed class TouchControllerView : View
 
         _joystickTravelRadius = Math.Min(_radius * 2.0f, height * 0.32f);
         var joystickReach = _joystickTravelRadius + _radius * 0.58f;
+        _dpadCorners?.Dispose();
+        _dpadCorners = new CornerPathEffect(_joystickTravelRadius * 0.21f * 0.35f);
         _dpadX = Fit(width * _settings.DpadX,
             margin + joystickReach, width * 0.48f - joystickReach);
         _dpadY = Fit(height * _settings.DpadY,
@@ -166,10 +173,10 @@ sealed class TouchControllerView : View
         if (_radius <= 0) LayoutControls(Width, Height);
 
         DrawJoystick(canvas);
-        DrawCircleButton(canvas, _triangle, "△", TriangleGreen, Controller.Triangle);
-        DrawCircleButton(canvas, _circle, "○", CircleRed, Controller.Circle);
-        DrawCircleButton(canvas, _cross, "×", CrossBlue, Controller.Cross);
-        DrawCircleButton(canvas, _square, "□", SquarePink, Controller.Square);
+        DrawCircleButton(canvas, _triangle, FaceSymbol.Triangle, TriangleGreen, Controller.Triangle);
+        DrawCircleButton(canvas, _circle, FaceSymbol.Circle, CircleRed, Controller.Circle);
+        DrawCircleButton(canvas, _cross, FaceSymbol.Cross, CrossBlue, Controller.Cross);
+        DrawCircleButton(canvas, _square, FaceSymbol.Square, SquarePink, Controller.Square);
 
         if (_settings.ShowShoulders)
         {
@@ -188,7 +195,7 @@ sealed class TouchControllerView : View
         var originY = _joystickActive ? _joystickOriginY : _dpadY;
         var knobX = _joystickActive ? _joystickKnobX : originX;
         var knobY = _joystickActive ? _joystickKnobY : originY;
-        var accent = _settings.UseColors ? Sand : Neutral;
+        var accent = _settings.UseColors ? Glass : Neutral;
         var moving = (_pressedButtons &
             (Controller.Up | Controller.Right | Controller.Down | Controller.Left)) != 0;
 
@@ -201,6 +208,8 @@ sealed class TouchControllerView : View
         var baseAlpha = _settings.UseColors ? (_joystickActive ? 195 : 120) : (_joystickActive ? 145 : 90);
         _paint.Color = Color.Argb(baseAlpha, accent.R, accent.G, accent.B);
         canvas.DrawCircle(originX, originY, _joystickTravelRadius, _paint);
+
+        DrawDpadEmblem(canvas, originX, originY, accent);
 
         _paint.SetStyle(Paint.Style.Fill);
         _paint.Color = moving
@@ -215,44 +224,137 @@ sealed class TouchControllerView : View
         _paint.SetStyle(Paint.Style.Fill);
     }
 
-    void DrawCircleButton(Canvas canvas, RectF bounds, string label, Color accent, ushort bit)
+    // Plus-shaped cross pad drawn inside the stick base (look only: the
+    // stick still reads any direction). Follows the floating origin.
+    void DrawDpadEmblem(Canvas canvas, float x, float y, Color accent)
+    {
+        var arm = _joystickTravelRadius * 0.70f;
+        var h = _joystickTravelRadius * 0.21f;
+        _path.Reset();
+        _path.MoveTo(x - h, y - arm);
+        _path.LineTo(x + h, y - arm);
+        _path.LineTo(x + h, y - h);
+        _path.LineTo(x + arm, y - h);
+        _path.LineTo(x + arm, y + h);
+        _path.LineTo(x + h, y + h);
+        _path.LineTo(x + h, y + arm);
+        _path.LineTo(x - h, y + arm);
+        _path.LineTo(x - h, y + h);
+        _path.LineTo(x - arm, y + h);
+        _path.LineTo(x - arm, y - h);
+        _path.LineTo(x - h, y - h);
+        _path.Close();
+
+        _paint.SetPathEffect(_dpadCorners);
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Argb(_joystickActive ? 70 : 50, 8, 14, 20);
+        canvas.DrawPath(_path, _paint);
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(2f, _radius * 0.04f);
+        _paint.Color = Color.Argb(_joystickActive ? 170 : 110, accent.R, accent.G, accent.B);
+        canvas.DrawPath(_path, _paint);
+        _paint.SetPathEffect(null);
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = Color.Argb(_joystickActive ? 200 : 140, accent.R, accent.G, accent.B);
+        var tip = arm * 0.86f;
+        var baseDistance = arm * 0.62f;
+        var halfWidth = h * 0.55f;
+        for (var i = 0; i < 4; i++)
+        {
+            var angle = i * MathF.PI / 2f;
+            var dx = MathF.Cos(angle);
+            var dy = MathF.Sin(angle);
+            _path.Reset();
+            _path.MoveTo(x + dx * tip, y + dy * tip);
+            _path.LineTo(x + dx * baseDistance - dy * halfWidth, y + dy * baseDistance + dx * halfWidth);
+            _path.LineTo(x + dx * baseDistance + dy * halfWidth, y + dy * baseDistance - dx * halfWidth);
+            _path.Close();
+            canvas.DrawPath(_path, _paint);
+        }
+    }
+
+    void DrawCircleButton(Canvas canvas, RectF bounds, FaceSymbol symbol, Color accent, ushort bit)
     {
         var pressed = (_pressedButtons & bit) != 0;
         if (!_settings.UseColors) accent = Neutral;
-        DrawControlCircle(canvas, bounds.CenterX(), bounds.CenterY(), _radius, pressed, accent);
-        DrawCenteredLabel(canvas, label, bounds.CenterX(), bounds.CenterY(), _radius * 0.86f,
-            pressed ? Color.White : accent);
+        var x = bounds.CenterX();
+        var y = bounds.CenterY();
+
+        _paint.SetStyle(Paint.Style.Fill);
+        _paint.Color = pressed ? Color.Argb(178, accent.R, accent.G, accent.B) : Color.Argb(90, 8, 14, 20);
+        canvas.DrawCircle(x, y, _radius, _paint);
+        _paint.SetStyle(Paint.Style.Stroke);
+        _paint.StrokeWidth = Math.Max(2f, _radius * 0.05f);
+        var outlineAlpha = _settings.UseColors ? 190 : 145;
+        _paint.Color = pressed ? Color.White : Color.Argb(outlineAlpha, accent.R, accent.G, accent.B);
+        canvas.DrawCircle(x, y, _radius * 0.97f, _paint);
+
+        _paint.Color = pressed ? Color.White : accent;
+        DrawFaceSymbol(canvas, symbol, x, y, _radius);
+        _paint.SetStyle(Paint.Style.Fill);
     }
 
-    void DrawControlCircle(Canvas canvas, float x, float y, float radius, bool pressed, Color accent)
+    // Symbols are geometry, not font glyphs: the font's ○ and × came out
+    // smaller than △ and □. Sizes are tuned so all four look the same size.
+    void DrawFaceSymbol(Canvas canvas, FaceSymbol symbol, float x, float y, float unit)
     {
-        _paint.SetStyle(Paint.Style.Fill);
-        _paint.Color = pressed ? Color.Argb(178, accent.R, accent.G, accent.B) : Color.Argb(76, 8, 14, 20);
-        canvas.DrawCircle(x, y, radius, _paint);
         _paint.SetStyle(Paint.Style.Stroke);
-        _paint.StrokeWidth = Math.Max(2f, radius * 0.065f);
-        var outlineAlpha = _settings.UseColors ? 205 : 145;
-        _paint.Color = pressed ? Color.White : Color.Argb(outlineAlpha, accent.R, accent.G, accent.B);
-        canvas.DrawCircle(x, y, radius, _paint);
-        _paint.SetStyle(Paint.Style.Fill);
+        _paint.StrokeWidth = unit * 0.13f;
+        _paint.StrokeJoin = Paint.Join.Miter;
+        _paint.StrokeCap = Paint.Cap.Round;
+        switch (symbol)
+        {
+            case FaceSymbol.Triangle:
+            {
+                var r = unit * 0.46f;
+                var cy = y + unit * 0.05f;   // centroid sits a little low, like the pad print
+                var sin60 = r * 0.8660254f;
+                _path.Reset();
+                _path.MoveTo(x, cy - r);
+                _path.LineTo(x + sin60, cy + r * 0.5f);
+                _path.LineTo(x - sin60, cy + r * 0.5f);
+                _path.Close();
+                canvas.DrawPath(_path, _paint);
+                break;
+            }
+            case FaceSymbol.Circle:
+                canvas.DrawCircle(x, y, unit * 0.36f, _paint);
+                break;
+            case FaceSymbol.Cross:
+            {
+                var e = unit * 0.32f;
+                canvas.DrawLine(x - e, y - e, x + e, y + e, _paint);
+                canvas.DrawLine(x - e, y + e, x + e, y - e, _paint);
+                break;
+            }
+            default:
+            {
+                var e = unit * 0.30f;
+                canvas.DrawRect(x - e, y - e, x + e, y + e, _paint);
+                break;
+            }
+        }
+        _paint.StrokeCap = Paint.Cap.Butt;
     }
 
     void DrawPill(Canvas canvas, RectF bounds, string label, ushort bit)
     {
         var pressed = (_pressedButtons & bit) != 0;
-        var accent = _settings.UseColors ? Gold : Neutral;
+        var accent = _settings.UseColors ? Glass : Neutral;
         _paint.SetStyle(Paint.Style.Fill);
         _paint.Color = pressed ? Color.Argb(190, accent.R, accent.G, accent.B) : Color.Argb(92, 8, 14, 20);
         canvas.DrawRoundRect(bounds, bounds.Height() * 0.42f, bounds.Height() * 0.42f, _paint);
         _paint.SetStyle(Paint.Style.Stroke);
         _paint.StrokeWidth = Math.Max(2f, _radius * 0.045f);
-        var outlineAlpha = _settings.UseColors ? 205 : 145;
+        var outlineAlpha = _settings.UseColors ? 150 : 145;
         _paint.Color = pressed ? Color.White : Color.Argb(outlineAlpha, accent.R, accent.G, accent.B);
         canvas.DrawRoundRect(bounds, bounds.Height() * 0.42f, bounds.Height() * 0.42f, _paint);
         _paint.SetStyle(Paint.Style.Fill);
+        // Pressed fill is light grey: dark text stays readable on it.
         DrawCenteredLabel(canvas, label, bounds.CenterX(), bounds.CenterY(),
             Math.Max(_radius * 0.34f, bounds.Height() * 0.45f),
-            pressed ? Color.White : (_settings.UseColors ? Sand : Neutral));
+            pressed ? PressedInk : (_settings.UseColors ? Color.White : Neutral));
     }
 
     void DrawCenteredLabel(Canvas canvas, string label, float x, float y, float size, Color color)
