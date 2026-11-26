@@ -157,6 +157,7 @@ internal static unsafe class InputManager
         PollSaveStateHotkeys();
         PollEditorHotkey();
         PollGamepadEvents();
+        _padActive = ConfigManager.View.BackgroundPadInput || HostWindow.HasFocus;
         PollKeyboard();
         PollGamepads();
         ApplyVirtualPad();
@@ -343,7 +344,7 @@ internal static unsafe class InputManager
     public static int? GetFirstPressedPadButton(int pad = 0)
     {
         var ctrl = pad == 0 ? _pad0 : _pad1;
-        if (_sdl == null || ctrl == null) return null;
+        if (_sdl == null || ctrl == null || !_padActive) return null;
         for (int b = 0; b < (int)GameControllerButton.Max; b++)
             if (_sdl.GameControllerGetButton(ctrl, (GameControllerButton)b) != 0)
                 return b;
@@ -562,9 +563,12 @@ internal static unsafe class InputManager
         return false;
     }
 
+    /// <summary>False while another window is in front (see <see cref="HostWindow.HasFocus"/>).</summary>
+    static bool _padActive = true;
+
     static bool Pressed(GameController* ctrl, int binding)
     {
-        if (_sdl == null) return false;
+        if (_sdl == null || !_padActive) return false;
         if (binding == LeftTrigger)
             return _sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Triggerleft) > AxisThreshold;
         if (binding == RightTrigger)
@@ -580,12 +584,14 @@ internal static unsafe class InputManager
 
     static byte AxisToByte(short axis)
     {
+        if (!_padActive) return 0x80;
         float f = Math.Clamp(axis * 1.3f / 32768.0f, -1.0f, 1.0f);
         return (byte)Math.Clamp((int)MathF.Round((f + 1.0f) * 127.5f), 0, 255);
     }
 
     public static void SetRumble(byte large, byte small)
     {
+        if (!_padActive) large = small = 0;
         if (_sdl != null && _pad0 != null)
         {
             ushort lo = (ushort)(large * 257);

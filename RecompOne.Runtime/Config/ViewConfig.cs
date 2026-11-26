@@ -433,6 +433,16 @@ public class ViewConfig
         set => SetBool("InterpolatedFps", value);
     }
 
+    /// <summary>
+    /// Read the controller while another window is in front. Off by default: the pad is ignored
+    /// (released) until the game window is focused again.
+    /// </summary>
+    public bool BackgroundPadInput
+    {
+        get => GetBool("BackgroundPadInput");
+        set => SetBool("BackgroundPadInput", value);
+    }
+
     /// <summary>Keys 1–5 switch frame-rate presets during gameplay. On by default.</summary>
     public bool FrameRateHotkeys
     {

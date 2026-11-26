@@ -78,6 +78,16 @@ internal static partial class HostWindow
     public static bool IsEmbedded => _embedded;
 
     /// <summary>Whether the embedded game belongs to the current foreground window.</summary>
+    static volatile bool _windowFocused = true;
+
+    /// <summary>
+    /// The game window (or the launcher hosting it) is the foreground window. Gamepads are read
+    /// through SDL with no window of its own, so SDL keeps reporting them while another game is in
+    /// front; input code checks this instead.
+    /// </summary>
+    public static bool HasFocus =>
+        OperatingSystem.IsWindows() && _embedded ? IsInputActive : _windowFocused;
+
     public static bool IsInputActive
     {
         get
@@ -116,6 +126,8 @@ internal static partial class HostWindow
                 || !TryCreateVulkanWindow(options) || !TryLoadVulkanUi())
                 CreateGlWindow(options);
             LogWindowEvents(_window!);
+            _windowFocused = true;
+            _window!.FocusChanged += focused => _windowFocused = focused;
             _window!.Render += OnRender;
             _window.Closing += OnClosing;
             // Silk raises Load inside Initialize; OnLoad runs here instead so a context

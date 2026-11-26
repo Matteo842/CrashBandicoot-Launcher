@@ -268,6 +268,19 @@ internal sealed class InputSettingsSection : ISettingsSection
 
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
+        ImGui.TextUnformatted("Controller in background");
+        ImGui.TableSetColumnIndex(1);
+        bool bgPad = ConfigManager.View.BackgroundPadInput;
+        if (ImGui.Checkbox("Enabled##bgPad", ref bgPad))
+        {
+            ConfigManager.View.BackgroundPadInput = bgPad;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Read the controller while another window is in front.\nOff: the game ignores the pad until its window is focused.");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
         ImGui.TextUnformatted("FPS keys 1-5");
         ImGui.TableSetColumnIndex(1);
         bool fpsKeys = ConfigManager.View.FrameRateHotkeys;
