@@ -19,8 +19,9 @@
 #      the notes: GitHub's asset digests are the archives', and the check reads
 #      every "sha256:" in the release. Write the notes, then press Publish.
 #   5. On Publish, writes the program hashes into the notes again (in case they
-#      were edited away), sends CrashBandicoot.exe to VirusTotal and adds its
-#      badge under the title of the release notes. To redo only this step, run
+#      were edited away), sends every asset (archives, APK) and
+#      CrashBandicoot.exe to VirusTotal and adds the exe's badge under the
+#      title of the release notes. To redo only this step, run
 #      the workflow with the version and "Only VirusTotal" ticked.
 #
 # Running it again for a version that is still a draft rebuilds the files and
@@ -656,20 +657,41 @@ jobs:
           else
             gh release download "$TAG" -p CrashBandicoot.exe -D /tmp/vt --clobber
           fi
+          # Sends a file VirusTotal does not know yet. Prints the analysis id
+          # (empty if the file was already known); returns 1 on failure.
+          # Files over 32 MB (ours are ~65 MB) need a one-time upload URL.
+          vt_upload() {
+            local file="$1" sha code
+            sha=$(sha256sum "$file" | awk '{print $1}')
+            code=$(vt_request GET "$VT_API/files/$sha")
+            [ "$code" = "200" ] && { echo "$(basename "$file"): already on VirusTotal" >&2; return 0; }
+            [ "$code" = "404" ] || { echo "$(basename "$file"): lookup failed (HTTP $code)" >&2; return 1; }
+            code=$(vt_request GET "$VT_API/files/upload_url")
+            [ "$code" = "200" ] || { echo "upload_url failed (HTTP $code)" >&2; cat /tmp/vt_response.json >&2; return 1; }
+            local upload_url
+            upload_url=$(jq -r '.data' /tmp/vt_response.json)
+            echo "Uploading $(basename "$file") ($(stat -c%s "$file") bytes) to VirusTotal..." >&2
+            code=$(vt_request POST "$upload_url" --form "file=@$file")
+            [ "$code" = "200" ] || { echo "Upload failed (HTTP $code)" >&2; cat /tmp/vt_response.json >&2; return 1; }
+            jq -r '.data.id' /tmp/vt_response.json
+          }
+
+          # Every release asset too (archives, APK), so RecompLauncher and
+          # anyone checking a download find a finished report instead of
+          # queueing a new scan. Not waited for, and a failure only warns.
+          gh release download "$TAG" -p '*.apk' -D /tmp/rel --clobber || true
+          for asset in /tmp/rel/*.zip /tmp/rel/*.tar.gz /tmp/rel/*.apk; do
+            [ -f "$asset" ] || continue
+            vt_upload "$asset" >/dev/null || echo "::warning::VirusTotal upload of $(basename "$asset") failed"
+          done
+
+          # VirusTotal lists the exe as CrashBandicoot.dll: that is the
+          # OriginalFilename in the .NET apphost's version info, not another file.
           SHA256=$(sha256sum "$EXE" | awk '{print $1}')
           echo "CrashBandicoot.exe $TAG: sha256 $SHA256, $(stat -c%s "$EXE") bytes"
 
-          HTTP_CODE=$(vt_request GET "$VT_API/files/$SHA256")
-          if [ "$HTTP_CODE" = "404" ]; then
-            # Files over 32 MB (ours are ~65 MB) need a one-time upload URL.
-            HTTP_CODE=$(vt_request GET "$VT_API/files/upload_url")
-            [ "$HTTP_CODE" = "200" ] || { echo "upload_url failed (HTTP $HTTP_CODE)"; cat /tmp/vt_response.json; exit 1; }
-            UPLOAD_URL=$(jq -r '.data' /tmp/vt_response.json)
-            echo "Uploading to VirusTotal..."
-            HTTP_CODE=$(vt_request POST "$UPLOAD_URL" --form "file=@$EXE")
-            [ "$HTTP_CODE" = "200" ] || { echo "Upload failed (HTTP $HTTP_CODE)"; cat /tmp/vt_response.json; exit 1; }
-            ANALYSIS_ID=$(jq -r '.data.id' /tmp/vt_response.json)
-
+          ANALYSIS_ID=$(vt_upload "$EXE") || exit 1
+          if [ -n "$ANALYSIS_ID" ]; then
             for attempt in $(seq 1 60); do
               sleep 15
               vt_request GET "$VT_API/analyses/$ANALYSIS_ID" >/dev/null
@@ -677,10 +699,9 @@ jobs:
               echo "Analysis $attempt/60: $STATUS"
               [ "$STATUS" = "completed" ] && break
             done
-
             sleep 15
-            HTTP_CODE=$(vt_request GET "$VT_API/files/$SHA256")
           fi
+          HTTP_CODE=$(vt_request GET "$VT_API/files/$SHA256")
           [ "$HTTP_CODE" = "200" ] || { echo "File report failed (HTTP $HTTP_CODE)"; cat /tmp/vt_response.json; exit 1; }
 
           # Same count as the VirusTotal page: engines that gave a verdict.
