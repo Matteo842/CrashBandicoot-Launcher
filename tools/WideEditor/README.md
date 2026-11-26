@@ -69,6 +69,9 @@ senza quel font i pulsanti mostrano il testo.
   < > passa agli altri gemelli (i pezzi scelti restano: puoi prenderli da più gemelli),
   "Vai al gemello" / "Torna al pezzo" spostano la camera, "quanto cercare attorno" limita il
   verde. Invio o "Aggiungi i N scelti" li crea come tuoi (un gruppo, selezionati); Esc chiude.
+  "Solo dove manca, attorno alla selezione" (acceso di base): trova i bordi aperti (arancio)
+  attorno ai vertici selezionati e propone solo i pezzi attaccati a quei bordi (e quelli
+  attaccati a loro); i gemelli che lì non aggiungono niente spariscono dalla lista.
 - **Seleziona collegati (L)**: aggiunge tutto ciò che è attaccato (tuoi con tuoi, automatici
   della stessa mesh, originali nella loro mesh). **Automatici della mesh**: tutti in blocco.
 - **Rettangolo attraverso** (Selezionabili): il rettangolo prende anche quello che sta dietro.

@@ -45,7 +45,7 @@ sealed partial class Editor
         public int Votes;
         public List<int> Piece = [];
         public List<UserTri> Add = [];
-        public (float Reach, bool TexOnly)? AddKey;
+        public (float Reach, bool TexOnly, bool Holes)? AddKey;
         public int OtherMesh;
         // Originals around the twin that are also around the piece (same place once laid back):
         // the right copy, turned the right way, brings back the same pillar, wall and floor.
@@ -95,6 +95,14 @@ sealed partial class Editor
         public List<UserTri> User = [];
         public Dictionary<(int, int, int), List<int>> UserGrid = [];
         public Dictionary<(int, int, int), List<int>> UserCorners = [];
+        // Open sides around the selected corners (nothing on the other side): where the model
+        // is missing. Only twin pieces attached to them are offered.
+        public List<(Vector3 A, Vector3 B)> Holes = [];
+        // No twin had pieces attached to the open sides: everything is offered.
+        public bool HolesOff;
+        // Faces around the piece (originals and own), in the coarse cells they touch.
+        public List<Vector3[]> Surf = [];
+        public Dictionary<(int, int, int), List<int>> SurfGrid = [];
 
         /// <summary>Is a triangle with these corners already at the piece (original or own)?</summary>
         public bool AtPiece(Vector3[] q, List<int> near)
@@ -115,8 +123,179 @@ sealed partial class Editor
     Task<TwinSearch>? _twinJob;
     float _twinReach = 1;
     bool _twinTexOnly;
+    bool _twinHoles = true;
 
     const float TwinCell = 64, TwinTol = 12;
+
+    static float SegDist2(Vector3 p, Vector3 a, Vector3 b)
+    {
+        var ab = b - a;
+        float l2 = ab.LengthSquared();
+        float t = l2 < 1e-6f ? 0 : Math.Clamp(Vector3.Dot(p - a, ab) / l2, 0, 1);
+        return Vector3.DistanceSquared(p, a + ab * t);
+    }
+
+    /// <summary>The stretch of side a-b (distance from a) that side c-d lies on, or null.</summary>
+    static (float Lo, float Hi)? Covered(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+    {
+        var ab = b - a;
+        float len = ab.Length();
+        if (len < 1) return null;
+        var u = ab / len;
+        float tc = Vector3.Dot(c - a, u), td = Vector3.Dot(d - a, u);
+        if ((c - a - u * tc).LengthSquared() > TwinTol * TwinTol || (d - a - u * td).LengthSquared() > TwinTol * TwinTol) return null;
+        float lo = Math.Max(0, Math.Min(tc, td)), hi = Math.Min(len, Math.Max(tc, td));
+        return hi - lo > TwinTol ? (lo, hi) : null;
+    }
+
+    const float SurfCell = 256;
+
+    static (int, int, int) SurfCellOf(Vector3 p) =>
+        ((int)MathF.Floor(p.X / SurfCell), (int)MathF.Floor(p.Y / SurfCell), (int)MathF.Floor(p.Z / SurfCell));
+
+    /// <summary>The coarse cells a box (plus the tolerance) touches.</summary>
+    static IEnumerable<(int, int, int)> SurfCells(Vector3 min, Vector3 max)
+    {
+        var lo = SurfCellOf(min - new Vector3(TwinTol));
+        var hi = SurfCellOf(max + new Vector3(TwinTol));
+        for (int x = lo.Item1; x <= hi.Item1; x++)
+            for (int y = lo.Item2; y <= hi.Item2; y++)
+                for (int z = lo.Item3; z <= hi.Item3; z++)
+                    yield return (x, y, z);
+    }
+
+    /// <summary>Puts triangle <paramref name="i"/> in every coarse cell its box touches.</summary>
+    static void SurfAdd(Dictionary<(int, int, int), List<int>> grid, Vector3[] q, int i)
+    {
+        foreach (var cell in SurfCells(Vector3.Min(q[0], Vector3.Min(q[1], q[2])), Vector3.Max(q[0], Vector3.Max(q[1], q[2]))))
+        {
+            if (!grid.TryGetValue(cell, out var list)) grid[cell] = list = [];
+            list.Add(i);
+        }
+    }
+
+    /// <summary>Does point <paramref name="c"/> lie on triangle <paramref name="t"/> (on its plane, inside it)?</summary>
+    static bool PointOnTri(Vector3[] t, Vector3 c)
+    {
+        var v0 = t[1] - t[0];
+        var v1 = t[2] - t[0];
+        var n = Vector3.Cross(v0, v1);
+        float nl = n.Length();
+        if (nl < 1) return false;
+        var v2 = c - t[0];
+        if (MathF.Abs(Vector3.Dot(v2, n / nl)) > TwinTol) return false;
+        float d00 = Vector3.Dot(v0, v0), d01 = Vector3.Dot(v0, v1), d11 = Vector3.Dot(v1, v1);
+        float d20 = Vector3.Dot(v2, v0), d21 = Vector3.Dot(v2, v1);
+        float den = d00 * d11 - d01 * d01;
+        if (MathF.Abs(den) < 1e-6f) return false;
+        float v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den;
+        return v >= -0.01f && w >= -0.01f && v + w <= 1.01f;
+    }
+
+    /// <summary>Do two triangles share (part of) a side?</summary>
+    static bool ShareSide(Vector3[] p, Vector3[] q)
+    {
+        for (int e = 0; e < 3; e++)
+            for (int f = 0; f < 3; f++)
+                if (Covered(p[e], p[(e + 1) % 3], q[f], q[(f + 1) % 3]) != null
+                    || Covered(q[f], q[(f + 1) % 3], p[e], p[(e + 1) % 3]) != null) return true;
+        return false;
+    }
+
+    /// <summary>Open sides near the selected corners: stretches of triangle sides (originals
+    /// and own, any mesh) that no other triangle's side lies on. Sides split differently on the
+    /// two faces (T joints) count as closed where they overlap. Also keeps the faces around the
+    /// piece (<c>Surf</c>), to leave out copies that would lie on them.</summary>
+    static void FindHoles(TwinSearch s)
+    {
+        var size = s.SelMax - s.SelMin;
+        float maxSize = Math.Max(size.X, Math.Max(size.Y, size.Z));
+        float r = Math.Max(250, 0.5f * maxSize);
+        var corners = s.Sel.SelectMany(t => t.P).ToList();
+        // As far as a twin piece can land (the reach slider goes up to 3x).
+        var pad = new Vector3(Math.Max(3 * Math.Max(maxSize, 200), 1000) + 768);
+        var idx = new List<int>();
+        GridBox(s.Grid, s.SelMin - pad, s.SelMax + pad, idx);
+        foreach (int j in idx)
+            if (!s.Gone[j]) { SurfAdd(s.SurfGrid, s.Pool[j].P, s.Surf.Count); s.Surf.Add(s.Pool[j].P); }
+        GridBox(s.UserExGrid, s.SelMin - pad, s.SelMax + pad, idx);
+        foreach (int e in idx) { SurfAdd(s.SurfGrid, s.UserEx[e], s.Surf.Count); s.Surf.Add(s.UserEx[e]); }
+        var loc = s.Surf;
+        float r2 = r * r;
+        var spans = new List<(float Lo, float Hi)>();
+        var others = new HashSet<int>();
+        for (int i = 0; i < loc.Count; i++)
+            for (int k = 0; k < 3; k++)
+            {
+                Vector3 a = loc[i][k], b = loc[i][(k + 1) % 3];
+                float len = Vector3.Distance(a, b);
+                if (len < 2 * TwinTol || !corners.Any(c => SegDist2(c, a, b) < r2)) continue;
+                others.Clear();
+                foreach (var cell in SurfCells(Vector3.Min(a, b), Vector3.Max(a, b)))
+                    if (s.SurfGrid.TryGetValue(cell, out var list)) others.UnionWith(list);
+                spans.Clear();
+                foreach (int j in others)
+                {
+                    // The same triangle twice (an own copy over an original) closes nothing.
+                    if (j == i || SameCorners(loc[i], loc[j])) continue;
+                    for (int m = 0; m < 3; m++)
+                        if (Covered(a, b, loc[j][m], loc[j][(m + 1) % 3]) is { } cv) spans.Add(cv);
+                }
+                spans.Sort();
+                var u = (b - a) / len;
+                float at = 0;
+                foreach (var (lo, hi) in spans)
+                {
+                    if (lo - at > 2 * TwinTol) s.Holes.Add((a + u * at, a + u * lo));
+                    at = Math.Max(at, hi);
+                }
+                if (len - at > 2 * TwinTol) s.Holes.Add((a + u * at, b));
+            }
+    }
+
+    /// <summary>Keeps only the additions attached to an open side near the selection, and
+    /// those joined to them side by side (also across T joints): the hole is filled from its
+    /// edge outwards. Copies that would lie on a face already there are left out.</summary>
+    static void KeepAtHoles(TwinSearch s, TwinHyp h)
+    {
+        bool OnFace(Vector3 c)
+        {
+            if (!s.SurfGrid.TryGetValue(SurfCellOf(c), out var list)) return false;
+            foreach (int i in list)
+                if (PointOnTri(s.Surf[i], c)) return true;
+            return false;
+        }
+        var add = h.Add.Where(t => !OnFace(t.Center)).ToList();
+        var pos = add.Select(t => t.V.Select(v => v.Pos).ToArray()).ToList();
+        var grid = new Dictionary<(int, int, int), List<int>>();
+        for (int i = 0; i < add.Count; i++) SurfAdd(grid, pos[i], i);
+        var keep = new bool[add.Count];
+        var queue = new Queue<int>();
+        for (int i = 0; i < add.Count; i++)
+        {
+            bool touches = false;
+            for (int e = 0; e < 3 && !touches; e++)
+            {
+                Vector3 a = pos[i][e], b = pos[i][(e + 1) % 3];
+                foreach (var (ha, hb) in s.Holes)
+                    if (Covered(ha, hb, a, b) != null || Covered(a, b, ha, hb) != null) { touches = true; break; }
+            }
+            if (touches) { keep[i] = true; queue.Enqueue(i); }
+        }
+        var near = new HashSet<int>();
+        while (queue.Count > 0)
+        {
+            int a = queue.Dequeue();
+            near.Clear();
+            var pa = pos[a];
+            foreach (var cell in SurfCells(Vector3.Min(pa[0], Vector3.Min(pa[1], pa[2])), Vector3.Max(pa[0], Vector3.Max(pa[1], pa[2]))))
+                if (grid.TryGetValue(cell, out var list)) near.UnionWith(list);
+            foreach (int j in near)
+                if (!keep[j] && ShareSide(pa, pos[j])) { keep[j] = true; queue.Enqueue(j); }
+        }
+        h.Add = [.. add.Where((_, i) => keep[i])];
+        h.Mine.IntersectWith(h.Add.Select(t => KeyOf(t.Center)));
+    }
 
     static int UvInt(Vector2 uv) => ((int)MathF.Round(uv.X) & 255) << 8 | ((int)MathF.Round(uv.Y) & 255);
 
@@ -282,8 +461,8 @@ sealed partial class Editor
         }
         var pool = _twinPool?.Level == L ? _twinPool : null;
         float reach = _twinReach;
-        bool texOnly = _twinTexOnly, behind = _newBehind;
-        _twinJob = Task.Run(() => TwinCompute(s, pool, reach, texOnly, behind));
+        bool texOnly = _twinTexOnly, behind = _newBehind, holes = _twinHoles;
+        _twinJob = Task.Run(() => TwinCompute(s, pool, reach, texOnly, behind, holes));
         Say(pool == null ? "Cerco il gemello in tutto il livello (la prima volta ci mette di più)..." : "Cerco il gemello in tutto il livello...");
     }
 
@@ -308,12 +487,13 @@ sealed partial class Editor
 
     /// <summary>The search itself (own thread): reads only the level and the copies in
     /// <paramref name="s"/>.</summary>
-    static TwinSearch TwinCompute(TwinSearch s, TwinPool? pool, float reachSetting, bool texOnly, bool behind)
+    static TwinSearch TwinCompute(TwinSearch s, TwinPool? pool, float reachSetting, bool texOnly, bool behind, bool holes)
     {
         s.P = pool ?? BuildTwinPool(s.Level);
         s.Gone = new bool[s.Pool.Count];
         foreach (var r in s.Removed)
             if (s.P.Index.TryGetValue(r, out int gi)) s.Gone[gi] = true;
+        if (holes) FindHoles(s);
         var bySig = s.P.BySig;
         int threads = Math.Max(1, Environment.ProcessorCount / 2);
 
@@ -401,7 +581,15 @@ sealed partial class Editor
             if (h.Votes >= need) s.Hyps.Add(h);
         }
         Parallel.ForEach(s.Hyps, new ParallelOptions { MaxDegreeOfParallelism = threads },
-            h => TwinAdditions(s, h, reachSetting, texOnly, behind));
+            h => TwinAdditions(s, h, reachSetting, texOnly, behind, holes));
+        // Nothing attached to the open sides anywhere: offer the twins' whole models instead.
+        if (holes && s.Hyps.Count > 0 && s.Hyps.All(h => h.Add.Count == 0))
+        {
+            s.HolesOff = true;
+            foreach (var h in s.Hyps) h.AddKey = null;
+            Parallel.ForEach(s.Hyps, new ParallelOptions { MaxDegreeOfParallelism = threads },
+                h => TwinAdditions(s, h, reachSetting, texOnly, behind, holes));
+        }
         // Best first: the copy whose surroundings agree most with the piece's (a small piece
         // fits many copies, turned any way, and only the right one has the same neighbours);
         // among the good ones, a copy already fixed by hand comes first.
@@ -425,10 +613,11 @@ sealed partial class Editor
     /// <summary>The twin's whole model (its originals joined to the matched ones, within the
     /// reach) and the triangles of it that are not already at the selected piece. Reads only
     /// the level and <paramref name="s"/>: safe on the search threads.</summary>
-    static void TwinAdditions(TwinSearch s, TwinHyp h, float reachSetting, bool texOnly, bool behind)
+    static void TwinAdditions(TwinSearch s, TwinHyp h, float reachSetting, bool texOnly, bool behind, bool holes)
     {
-        if (h.AddKey is { } done && done.Reach == reachSetting && done.TexOnly == texOnly) return;
-        h.AddKey = (reachSetting, texOnly);
+        holes = holes && !s.HolesOff && s.Holes.Count > 0;
+        if (h.AddKey is { } done && done.Reach == reachSetting && done.TexOnly == texOnly && done.Holes == holes) return;
+        h.AddKey = (reachSetting, texOnly, holes);
         h.Piece.Clear();
         h.Add.Clear();
         h.Mine.Clear();
@@ -468,37 +657,60 @@ sealed partial class Editor
         var seen = new HashSet<int>(matched);
         var queue = new Queue<int>(matched);
         var piece = new List<int>(matched);
-        while (queue.Count > 0)
+        // Takes original j of the twin if it is not already at the piece.
+        bool Take(int j)
         {
-            var t = s.Pool[queue.Dequeue()];
-            var map = s.CornerMaps[t.M];
-            foreach (var c in t.P)
+            var u = s.Pool[j];
+            if (texOnly && !s.SelMats.Contains(u.Sig.Mat)) return false;
+            var q = new Vector3[3];
+            for (int k = 0; k < 3; k++) q[k] = back.Apply(u.P[k]);
+            if (s.AtPiece(q, near)) return false;
+            piece.Add(j);
+            string mesh = u.M.Name;
+            int poly = u.Poly;
+            if (byMat.TryGetValue(u.Sig.Mat, out int tp)) { mesh = target.Name; poly = tp; }
+            else h.OtherMesh++;
+            // A mirrored copy keeps facing the same way as its neighbours.
+            int[] order = h.ToTwin.Mirror ? [0, 2, 1] : [0, 1, 2];
+            h.Add.Add(new UserTri
             {
-                if (!map.TryGetValue(KeyOf(c), out var list)) continue;
-                foreach (int j in list)
-                {
-                    if (!seen.Add(j) || s.Gone[j]) continue;
-                    var u = s.Pool[j];
-                    if (!Inside(u.C) || (texOnly && !s.SelMats.Contains(u.Sig.Mat))) continue;
-                    var q = new Vector3[3];
-                    for (int k = 0; k < 3; k++) q[k] = back.Apply(u.P[k]);
-                    if (s.AtPiece(q, near)) continue;
-                    piece.Add(j);
-                    queue.Enqueue(j);
-                    string mesh = u.M.Name;
-                    int poly = u.Poly;
-                    if (byMat.TryGetValue(u.Sig.Mat, out int tp)) { mesh = target.Name; poly = tp; }
-                    else h.OtherMesh++;
-                    // A mirrored copy keeps facing the same way as its neighbours.
-                    int[] order = h.ToTwin.Mirror ? [0, 2, 1] : [0, 1, 2];
-                    h.Add.Add(new UserTri
-                    {
-                        Mesh = mesh, Poly = poly, Behind = behind,
-                        V = [.. order.Select(k => new EdVertex { Pos = q[k], Uv = u.UvF[k], Rgb = u.M.Rgb[u.M.Tri[u.Poly * 3 + k]] })],
-                    });
-                }
+                Mesh = mesh, Poly = poly, Behind = behind,
+                V = [.. order.Select(k => new EdVertex { Pos = q[k], Uv = u.UvF[k], Rgb = u.M.Rgb[u.M.Tri[u.Poly * 3 + k]] })],
+            });
+            return true;
+        }
+        if (holes)
+        {
+            // Filling the holes around the selection: every original around the twin, of any
+            // mesh and joined or not (the missing wall may be another piece); KeepAtHoles then
+            // keeps only what grows from the open sides.
+            float far = Math.Max(reach, 1000);
+            Vector3 bmin = min + new Vector3(reach - far), bmax = max - new Vector3(reach - far);
+            var box = new List<int>();
+            GridBox(s.Grid, bmin, bmax, box);
+            foreach (int j in box)
+            {
+                var c = s.Pool[j].C;
+                if (s.Gone[j] || matched.Contains(j) || !seen.Add(j)) continue;
+                if (c.X < bmin.X || c.Y < bmin.Y || c.Z < bmin.Z || c.X > bmax.X || c.Y > bmax.Y || c.Z > bmax.Z) continue;
+                Take(j);
             }
         }
+        else
+            while (queue.Count > 0)
+            {
+                var t = s.Pool[queue.Dequeue()];
+                var map = s.CornerMaps[t.M];
+                foreach (var c in t.P)
+                {
+                    if (!map.TryGetValue(KeyOf(c), out var list)) continue;
+                    foreach (int j in list)
+                    {
+                        if (!seen.Add(j) || s.Gone[j] || !Inside(s.Pool[j].C)) continue;
+                        if (Take(j)) queue.Enqueue(j);
+                    }
+                }
+            }
         h.Piece = piece;
 
         // Work already done by hand at the twin: own triangles touching the twin's model or in
@@ -541,6 +753,12 @@ sealed partial class Editor
             h.Add.Add(c);
             h.Mine.Add(KeyOf(c.Center));
         }
+        if (holes)
+        {
+            KeepAtHoles(s, h);
+            // The blue outline: the matched part only (the box holds far more than the model).
+            h.Piece = [.. matched];
+        }
     }
 
     TwinHyp? CurrentTwin()
@@ -549,7 +767,7 @@ sealed partial class Editor
         // A new selection or another edit makes the preview stale.
         if (_twin.DocVersion != _docVersion || !_sel.SetEquals(_twin.SelKeys)) { _twin = null; return null; }
         var h = _twin.Hyps[_twin.Index];
-        TwinAdditions(_twin, h, _twinReach, _twinTexOnly, _newBehind);
+        TwinAdditions(_twin, h, _twinReach, _twinTexOnly, _newBehind, _twinHoles);
         return h;
     }
 
@@ -558,7 +776,15 @@ sealed partial class Editor
         if (CurrentTwin() is not { } h) return;
         Say($"Gemello {_twin!.Index + 1} di {_twin.Hyps.Count}: {h.Votes} triangoli su {_twin.Sel.Count} uguali"
             + $"{(h.ToTwin.Mirror ? " (specchiato)" : "")}, {h.Add.Count} pezzi possibili"
-            + (h.Mine.Count > 0 ? $", {h.Mine.Count} già fatti da te là (gialli)" : "") + ". Clic sui pezzi verdi o gialli per sceglierli.");
+            + (h.Mine.Count > 0 ? $", {h.Mine.Count} già fatti da te là (gialli)" : "") + HolesNote() + ". Clic sui pezzi verdi o gialli per sceglierli.");
+    }
+
+    string HolesNote()
+    {
+        if (!_twinHoles || _twin == null) return "";
+        if (_twin.Holes.Count == 0) return " (nessun bordo aperto attorno alla selezione: mostro tutto)";
+        if (_twin.HolesOff) return $" (niente attaccato ai {_twin.Holes.Count} bordi aperti: mostro tutto)";
+        return $", solo quelli attaccati ai {_twin.Holes.Count} bordi aperti (arancio)";
     }
 
     void TwinStep(int d)
@@ -769,6 +995,11 @@ sealed partial class Editor
         ImGui.SliderFloat("quanto cercare attorno##twin", ref _twinReach, 0.1f, 3, "%.1f x");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Fin dove prendere i pezzi del gemello, rispetto alla grandezza del pezzo selezionato.");
+        ImGui.Checkbox("Solo dove manca, attorno alla selezione##twin", ref _twinHoles);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Cerca i bordi aperti (in arancio) attorno ai vertici selezionati e propone solo i pezzi\n"
+                + "del gemello attaccati a quei bordi, e quelli attaccati a loro: riempie il buco dal bordo.\n"
+                + "Cambiandolo vale per la prossima ricerca anche per l'ordine dei gemelli.");
         ImGui.Checkbox("Solo le texture del pezzo##twin", ref _twinTexOnly);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Prende dal gemello solo triangoli con texture che il pezzo selezionato già usa.");
@@ -792,6 +1023,10 @@ sealed partial class Editor
         if (CurrentTwin() is not { } h) return;
         var s = new Vector2[3];
         int drawn = 0;
+        if (_twinHoles && !_twin!.HolesOff)
+            foreach (var (a, b) in _twin.Holes)
+                if (_cam.Depth(a) > 1 && _cam.Depth(b) > 1 && _cam.Project(a, _view, out var sa) && _cam.Project(b, _view, out var sb))
+                    dl.AddLine(sa, sb, Col(1, 0.45f, 0.05f, 0.95f), 3f * _ui);
         bool Proj(UserTri t)
         {
             for (int k = 0; k < 3; k++)
