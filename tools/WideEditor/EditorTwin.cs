@@ -43,6 +43,8 @@ sealed partial class Editor
         public Xf ToTwin;
         public List<int> Matched = [];
         public int Votes;
+        // How far the copy is from the piece.
+        public float Dist;
         public List<int> Piece = [];
         public List<UserTri> Add = [];
         public (float Reach, bool TexOnly, bool Holes)? AddKey;
@@ -555,28 +557,21 @@ sealed partial class Editor
             }
             return votes;
         }
-        // Own triangles around where the piece lands on a copy: a copy already fixed by hand
-        // is looked at before the others.
-        var selSize = s.SelMax - s.SelMin;
-        float nearR = 2 * Math.Max(Math.Max(selSize.X, selSize.Y), Math.Max(selSize.Z, 200));
-        int UserNear(Xf xf)
-        {
-            var nearUser = new List<int>();
-            GridNear(s.UserGrid, xf.Apply(selCentre), nearR, nearUser);
-            return nearUser.Count;
-        }
+        // How far the copy is from the piece: on a wall that repeats, the copy right next to
+        // it (above, below, beside) is the one to copy from.
+        float DistOf(Xf xf) => Vector3.Distance(xf.Apply(selCentre), selCentre);
         List<TwinTri> sample = s.Sel.Count <= 24 ? s.Sel : [.. Enumerable.Range(0, 24).Select(i => s.Sel[i * s.Sel.Count / 24])];
         int needSample = Math.Max(1, (int)MathF.Ceiling(sample.Count * 0.3f));
         var shortlist = hyps.Values.AsParallel().WithDegreeOfParallelism(threads)
             .Select(x => (Xf: x, Votes: Vote(x, sample, null)))
             .Where(h => h.Votes >= needSample)
-            .Select(h => (h.Xf, h.Votes, Near: UserNear(h.Xf) > 0))
+            .Select(h => (h.Xf, h.Votes, Dist: DistOf(h.Xf)))
             .ToList()
-            .OrderByDescending(h => h.Near).ThenByDescending(h => h.Votes).ThenBy(h => h.Xf.Mirror).Take(150).ToList();
+            .OrderByDescending(h => h.Votes).ThenBy(h => h.Dist).ThenBy(h => h.Xf.Mirror).Take(200).ToList();
         int need = s.Sel.Count == 1 ? 1 : Math.Max(2, (int)MathF.Ceiling(s.Sel.Count * 0.35f));
-        foreach (var (xf, _, _) in shortlist)
+        foreach (var (xf, _, dist) in shortlist)
         {
-            var h = new TwinHyp { ToTwin = xf };
+            var h = new TwinHyp { ToTwin = xf, Dist = dist };
             h.Votes = Vote(xf, s.Sel, h.Matched);
             if (h.Votes >= need) s.Hyps.Add(h);
         }
@@ -592,11 +587,12 @@ sealed partial class Editor
         }
         // Best first: the copy whose surroundings agree most with the piece's (a small piece
         // fits many copies, turned any way, and only the right one has the same neighbours);
-        // among the good ones, a copy already fixed by hand comes first.
-        int best = s.Hyps.Count == 0 ? 0 : s.Hyps.Max(h => h.Votes + h.Context);
+        // copies that give original pieces come before those that give only own work (yellow),
+        // and among equals the nearest copy first.
         var ordered = s.Hyps.Where(h => h.Add.Count > 0)
-            .OrderByDescending(h => h.Mine.Count > 0 && h.Votes + h.Context >= best * 0.8f)
-            .ThenByDescending(h => h.Votes + h.Context).ThenByDescending(h => h.Mine.Count).ThenByDescending(h => h.Add.Count).ThenBy(h => h.ToTwin.Mirror);
+            .OrderByDescending(h => h.Add.Count > h.Mine.Count)
+            .ThenByDescending(h => h.Votes + h.Context).ThenBy(h => h.Dist)
+            .ThenByDescending(h => h.Add.Count - h.Mine.Count).ThenBy(h => h.ToTwin.Mirror);
         // The same twin found twice (a symmetric piece fits turned and mirrored): the better one.
         var seen = new HashSet<string>();
         s.Hyps = [.. ordered.Where(h => seen.Add(string.Join(",", h.Matched.Distinct().Order())))];
@@ -976,9 +972,23 @@ sealed partial class Editor
             ImGui.SetTooltip("Seleziona il modello tagliato (clic, poi L per i collegati) e premi qui.\n"
                 + "Cerca in tutto il livello un'altra copia dello stesso modello (stesse texture e forma,\n"
                 + "anche girata o specchiata) e mostra in verde i pezzi che a questo mancano.\n"
-                + "Se un gemello l'hai già sistemato a mano viene per primo: i tuoi triangoli di là\n"
-                + "sono in giallo, da scegliere col mouse come i verdi.\n"
+                + "Vengono prima i gemelli con pezzi originali, e tra quelli il più vicino al pezzo.\n"
+                + "I tuoi triangoli fatti a mano là sono in giallo, da scegliere col mouse come i verdi.\n"
                 + "Poi scegli col mouse quali pezzi verdi vuoi: si aggiungono solo quelli.");
+        // Options always visible: also usable before a search, or after one that found nothing.
+        ImGui.SetNextItemWidth(120 * S);
+        ImGui.SliderFloat("quanto cercare attorno##twin", ref _twinReach, 0.1f, 3, "%.1f x");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Fin dove prendere i pezzi del gemello, rispetto alla grandezza del pezzo selezionato.\n"
+                + "Se la ricerca non ha trovato niente, alzalo e premi di nuovo \"Cerca il gemello\".");
+        ImGui.Checkbox("Solo dove manca, attorno alla selezione##twin", ref _twinHoles);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Cerca i bordi aperti (in arancio) attorno ai vertici selezionati e propone solo i pezzi\n"
+                + "del gemello attaccati a quei bordi, e quelli attaccati a loro: riempie il buco dal bordo.\n"
+                + "Cambiandolo vale per la prossima ricerca anche per l'ordine dei gemelli.");
+        ImGui.Checkbox("Solo le texture del pezzo##twin", ref _twinTexOnly);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Prende dal gemello solo triangoli con texture che il pezzo selezionato già usa.");
         var h = CurrentTwin();
         if (h == null) return;
         ImGui.TextWrapped($"Gemello {_twin!.Index + 1} di {_twin.Hyps.Count}: {h.Votes}/{_twin.Sel.Count} uguali"
@@ -991,18 +1001,6 @@ sealed partial class Editor
         if (ImGui.Button("Vai al gemello")) FrameTwin();
         ImGui.SameLine();
         if (ImGui.Button("Torna al pezzo")) FrameSelection();
-        ImGui.SetNextItemWidth(120 * S);
-        ImGui.SliderFloat("quanto cercare attorno##twin", ref _twinReach, 0.1f, 3, "%.1f x");
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Fin dove prendere i pezzi del gemello, rispetto alla grandezza del pezzo selezionato.");
-        ImGui.Checkbox("Solo dove manca, attorno alla selezione##twin", ref _twinHoles);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Cerca i bordi aperti (in arancio) attorno ai vertici selezionati e propone solo i pezzi\n"
-                + "del gemello attaccati a quei bordi, e quelli attaccati a loro: riempie il buco dal bordo.\n"
-                + "Cambiandolo vale per la prossima ricerca anche per l'ordine dei gemelli.");
-        ImGui.Checkbox("Solo le texture del pezzo##twin", ref _twinTexOnly);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Prende dal gemello solo triangoli con texture che il pezzo selezionato già usa.");
         ImGui.TextWrapped("Clic su un pezzo verde = sceglilo / toglilo (il quadrato intero). Doppio clic o Alt = tutto il pezzo "
             + "con quella texture. Rettangolo = scegli quelli dentro, Alt+rettangolo = togli. Si possono cliccare solo i pezzi verdi.");
         if (ImGui.SmallButton("scegli tutti##twin")) TwinChooseAll(true);
