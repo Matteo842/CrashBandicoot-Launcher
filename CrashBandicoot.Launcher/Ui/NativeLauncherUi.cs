@@ -66,6 +66,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     float _chipPulseTime;
     const float ChipPulsePeriod = 1.8f;
     bool ChipNeedsAttention => !_canStart && !_preparing;
+    // "Start game" letters pop in one by one when the game becomes ready.
+    // About 1 s total and the row is clickable from the first frame.
+    float _startRevealTime = -1f;
+    const float RevealLetterTime = 0.40f;
+    const float RevealStagger = 0.0667f;
     /// <summary>Controller/keyboard focus: 0–5 menu, 6 info, 7 disc chip.</summary>
     const int MenuCount = 6;
     const int FocusInfo = 6;
@@ -195,6 +200,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 _chipPulseTime = 0f;
             }
             AnimateMenu(dt);
+            AnimateStartReveal(dt);
             PollController();
         };
     }
@@ -299,7 +305,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         if (state.TryGetProperty("statusKind", out var sk))
             _statusKind = sk.GetString() ?? "";
         if (state.TryGetProperty("canStart", out var cs))
+        {
+            var couldStart = _canStart;
             _canStart = cs.ValueKind == JsonValueKind.True;
+            if (_canStart && !couldStart) _startRevealTime = 0f;   // game just became ready
+        }
         if (state.TryGetProperty("discPath", out var dp))
             _discPath = (dp.GetString() ?? "").Trim();
         else if (state.TryGetProperty("discName", out var dn))
@@ -1040,6 +1050,83 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         _stage.Invalidate(area);
     }
 
+    float StartRevealDuration =>
+        _menuHits.Count == 0 ? 0f
+            : RevealLetterTime + Math.Max(0, _menuHits[0].Label.Length - 1) * RevealStagger;
+
+    void AnimateStartReveal(float dt)
+    {
+        if (_startRevealTime < 0f || _menuHits.Count == 0) return;
+        _startRevealTime += dt;
+        if (_startRevealTime >= StartRevealDuration || !_canStart) _startRevealTime = -1f;
+        var area = _menuHits[0].Bounds;
+        area.Inflate(24, 24);                    // room for the letters' overshoot
+        area.Width += MenuIconSlide;
+        _stage.Invalidate(area);
+    }
+
+    /// <summary>
+    /// Draws the Start label letter by letter: each glyph drops in from a
+    /// little above and pops past full size before settling (ease-out-back).
+    /// Glyph i = the points the prefix [0..i] adds over the prefix [0..i-1].
+    /// </summary>
+    void DrawRevealLabel(Graphics g, GraphicsPath full, string label, Point origin, Color color, float slideX)
+    {
+        if (_fontMenu == null) return;
+        var pts = full.PathPoints;
+        var types = full.PathTypes;
+        var start = 0;
+        for (var i = 0; i < label.Length; i++)
+        {
+            int end;
+            if (i == label.Length - 1)
+            {
+                end = pts.Length;
+            }
+            else
+            {
+                using var prefix = new GraphicsPath();
+                prefix.AddString(label[..(i + 1)], _fontMenu.FontFamily, (int)_fontMenu.Style, _fontMenu.Size,
+                    origin, StringFormat.GenericTypographic);
+                end = Math.Min(prefix.PointCount, pts.Length);
+            }
+            if (end <= start) continue;             // space: no outline points
+
+            var local = Math.Clamp((_startRevealTime - i * RevealStagger) / RevealLetterTime, 0f, 1f);
+            var segPts = pts[start..end];
+            var segTypes = types[start..end];
+            start = end;
+            if (local <= 0f) continue;
+
+            // ease-out-back: 0 → ~1.1 → 1
+            const float back = 1.9f;
+            var u = local - 1f;
+            var scale = 1f + (back + 1f) * u * u * u + back * u * u;
+            var drop = (1f - local) * (1f - local) * -14f;
+            var alpha = (int)(255 * Math.Min(1f, local * 2.2f));
+
+            using var letter = new GraphicsPath(segPts, segTypes);
+            var b = letter.GetBounds();
+            using (var m = new Matrix())
+            {
+                m.Translate(slideX + b.X + b.Width / 2f, b.Y + b.Height / 2f + drop);
+                m.Scale(Math.Max(0.01f, scale), Math.Max(0.01f, scale));
+                m.Translate(-(b.X + b.Width / 2f), -(b.Y + b.Height / 2f));
+                letter.Transform(m);
+            }
+            using (var shadow = new SolidBrush(Color.FromArgb(alpha * 180 / 255, 0, 0, 0)))
+            using (var sp = (GraphicsPath)letter.Clone())
+            using (var sm = new Matrix())
+            {
+                sm.Translate(0, 2);
+                sp.Transform(sm);
+                g.FillPath(shadow, sp);
+            }
+            using var brush = new SolidBrush(Color.FromArgb(alpha, color));
+            g.FillPath(brush, letter);
+        }
+    }
+
     /// <summary>How far the hot label slides right to make room for its icon.</summary>
     const int MenuIconSlide = 46;
 
@@ -1100,6 +1187,17 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
             path.AddString(hit.Label, _fontMenu.FontFamily, (int)_fontMenu.Style, _fontMenu.Size,
                 hit.Bounds.Location, StringFormat.GenericTypographic);
             var textBox = path.GetBounds();
+            if (i == 0 && !disabled && _startRevealTime >= 0f)
+            {
+                if (t > 0f)
+                {
+                    var revealIcon = MenuIcons.Build(MenuIcons.MainMenu[i],
+                        new System.Numerics.Vector2(hit.Bounds.X + 18, textBox.Y + textBox.Height / 2f), 16f, t, _menuPhase[i]);
+                    PaintIcon(g, revealIcon);
+                }
+                DrawRevealLabel(g, path, hit.Label, hit.Bounds.Location, color, MenuIconSlide * t);
+                continue;
+            }
             if (t > 0f)
             {
                 using var slide = new Matrix();
