@@ -166,12 +166,18 @@ static class SettingsDialog
         var doubleWumpaCrate = AddSwitch(activity, card, "Double wumpa crate", view.DoubleWumpaCrate, bodyBold);
         card.AddView(Hint(activity,
             "A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.",
+            bodyFont));
+
         var mapWrapAround = AddSwitch(activity, card, "Island map wrap-around", view.MapWrapAround, bodyBold);
         card.AddView(Hint(activity,
             "On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original.",
+            bodyFont));
+
         var cortexPowerFirst = AddSwitch(activity, card, "Cortex Power before Heavy Machinery", view.CortexPowerFirst, bodyBold);
         card.AddView(Hint(activity,
             "On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished.",
+            bodyFont));
+
         var fixOversights = AddSwitch(activity, card, "Fix original oversights", view.FixOriginalOversights, bodyBold);
         card.AddView(Hint(activity,
             "Fixes small mistakes left in the original game: the river fish in Upstream and Up the Creek and Ripper Roo now show their shadow, and the night sky at the top of the Lights Out tower is no longer hidden by the level's darkness. Off: as in the original.",
