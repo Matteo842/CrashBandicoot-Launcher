@@ -304,6 +304,7 @@ sealed partial class LauncherWindow
         var doubleWumpaCrate = Nav(new ThemeCheck("Double wumpa crate") { Checked = view.DoubleWumpaCrate });
         var mapWrapAround = Nav(new ThemeCheck("Island map wrap-around") { Checked = view.MapWrapAround });
         var cortexPowerFirst = Nav(new ThemeCheck("Cortex Power before Heavy Machinery") { Checked = view.CortexPowerFirst });
+        var fixOversights = Nav(new ThemeCheck("Fix original oversights") { Checked = view.FixOriginalOversights });
 
         var strengthRow = Row(Label("Filter strength", 202), strength, 30);
         void SyncStrength() => strengthRow.IsVisible = ComboValue(texFilter, 0) != 0;
@@ -392,7 +393,9 @@ sealed partial class LauncherWindow
                     WithMargin(mapWrapAround, new Thickness(0, 0, 0, 14)),
                     Hint("On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original."),
                     WithMargin(cortexPowerFirst, new Thickness(0, 0, 0, 14)),
-                    Hint("On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished.", 8),
+                    Hint("On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished."),
+                    WithMargin(fixOversights, new Thickness(0, 0, 0, 14)),
+                    Hint("Fixes small mistakes left in the original game: the river fish in Upstream and Up the Creek and Ripper Roo now show their shadow, and the night sky at the top of the Lights Out tower is no longer hidden by the level's darkness. Off: as in the original.", 8),
                 },
             },
         ];
@@ -442,6 +445,7 @@ sealed partial class LauncherWindow
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
             view.MapWrapAround = mapWrapAround.Checked;
             view.CortexPowerFirst = cortexPowerFirst.Checked;
+            view.FixOriginalOversights = fixOversights.Checked;
             view.StartPauseMenu = startPauseMenu.Checked;
             ConfigManager.SaveGame();
             SaveView();

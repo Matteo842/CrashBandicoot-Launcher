@@ -1272,7 +1272,7 @@ public static partial class FramePacing
             g = NativeWideDepthCue(g, _nativeWideLighting[bank + 1], amount);
             b = NativeWideDepthCue(b, _nativeWideLighting[bank + 2], amount);
         }
-        if (_nativeWideShader == NativeWideShader.Lamp)
+        if (_nativeWideShader == NativeWideShader.Lamp && !OversightSkyUnlit(m, world.Header))
         {
             int distance = Math.Abs((int)FastU32(m, world.Header) + x - _nativeWideLighting[0])
                 + Math.Abs((int)FastU32(m, world.Header + 4) + y - _nativeWideLighting[1])

@@ -137,6 +137,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _doubleWumpaCrate;
     ThemeCheck? _mapWrapAround;
     ThemeCheck? _cortexPowerFirst;
+    ThemeCheck? _fixOversights;
     ThemeCheck? _startPauseMenu;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
@@ -372,6 +373,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_doubleWumpaCrate, state, "doubleWumpaCrate");
         SetCheck(_mapWrapAround, state, "mapWrapAround");
         SetCheck(_cortexPowerFirst, state, "cortexPowerFirst");
+        SetCheck(_fixOversights, state, "fixOriginalOversights");
         SetCheck(_startPauseMenu, state, "startPauseMenu");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
@@ -1971,6 +1973,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         page.Controls.Add(_cortexPowerFirst);
         y += 52;
         AddHint("On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished.");
+        _fixOversights = MakeCheck("Fix original oversights");
+        _fixOversights.Location = new Point(12, y);
+        page.Controls.Add(_fixOversights);
+        y += 52;
+        AddHint("Fixes small mistakes left in the original game: the river fish in Upstream and Up the Creek and Ripper Roo now show their shadow, and the night sky at the top of the Lights Out tower is no longer hidden by the level's darkness. Off: as in the original.");
 
         // Scroll extent = last control + a small margin (no empty hint gap at the end).
         foreach (var p in pages)
@@ -2011,6 +2018,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 doubleWumpaCrate = _doubleWumpaCrate?.Checked ?? false,
                 mapWrapAround = _mapWrapAround?.Checked ?? false,
                 cortexPowerFirst = _cortexPowerFirst?.Checked ?? false,
+                fixOriginalOversights = _fixOversights?.Checked ?? false,
                 startPauseMenu = _startPauseMenu?.Checked ?? true,
             });
             CloseSheet();

@@ -617,4 +617,15 @@ public class ViewConfig
         get => GetBool("CortexPowerFirst");
         set => SetBool("CortexPowerFirst", value);
     }
+
+    /// <summary>
+    /// Fix original oversights (#125, from The Cutting Room Floor): river fish and
+    /// Ripper Roo get the shadow their spawn code forgot to enable, and the Lights Out
+    /// tower top sky is drawn without the level's darkness. Off by default.
+    /// </summary>
+    public bool FixOriginalOversights
+    {
+        get => GetBool("FixOriginalOversights");
+        set => SetBool("FixOriginalOversights", value);
+    }
 }

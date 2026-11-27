@@ -248,15 +248,20 @@ public static partial class FramePacing
 
     public static bool PreWorlds(CpuContext c, IMemory m)
     {
+        // #125 Lights Out sky: our own plain pass inside the dark one's capture.
+        if (_oversightSkyPass) return true;
         PatchMapSkyList(c, m);
         PatchLagSlst(c, m);
         CommitWaterDrawCount(m);
         BeginNativeWideWorldPass(m);
+        SplitOversightSky(c, m);
         return true;
     }
 
     public static void PostWorlds(CpuContext c, IMemory m)
     {
+        if (_oversightSkyPass) return;
+        DrawOversightSky(c, m);
         RestoreMapSkyList(m);
         RestoreLagSlst(m);
         EndNativeWideWorldPass(m);

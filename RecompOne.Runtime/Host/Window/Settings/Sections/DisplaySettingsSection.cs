@@ -169,6 +169,13 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGui.TextDisabled("Island 3: the power plant spot loads Cortex Power; progress stays per map spot");
+        bool oversights = ConfigManager.View.FixOriginalOversights;
+        if (ImGui.Checkbox("Fix original oversights", ref oversights))
+        {
+            ConfigManager.View.FixOriginalOversights = oversights;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Fish and Ripper Roo shadows, Lights Out tower sky");
 
         bool vsync = ConfigManager.View.VSync;
         if (ImGui.Checkbox("VSync", ref vsync))

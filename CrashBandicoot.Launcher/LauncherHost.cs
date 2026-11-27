@@ -240,6 +240,7 @@ public sealed class LauncherHost : Form
             doubleWumpaCrate = ConfigManager.View.DoubleWumpaCrate,
             mapWrapAround = ConfigManager.View.MapWrapAround,
             cortexPowerFirst = ConfigManager.View.CortexPowerFirst,
+            fixOriginalOversights = ConfigManager.View.FixOriginalOversights,
             startPauseMenu = ConfigManager.View.StartPauseMenu,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
@@ -727,6 +728,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.MapWrapAround = mwa.GetBoolean();
         if (root.TryGetProperty("cortexPowerFirst", out var cpf))
             ConfigManager.View.CortexPowerFirst = cpf.GetBoolean();
+        if (root.TryGetProperty("fixOriginalOversights", out var foo))
+            ConfigManager.View.FixOriginalOversights = foo.GetBoolean();
         if (root.TryGetProperty("startPauseMenu", out var spm))
             ConfigManager.View.StartPauseMenu = spm.GetBoolean();
 

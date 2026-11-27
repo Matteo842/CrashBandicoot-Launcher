@@ -172,6 +172,9 @@ static class SettingsDialog
         var cortexPowerFirst = AddSwitch(activity, card, "Cortex Power before Heavy Machinery", view.CortexPowerFirst, bodyBold);
         card.AddView(Hint(activity,
             "On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished.",
+        var fixOversights = AddSwitch(activity, card, "Fix original oversights", view.FixOriginalOversights, bodyBold);
+        card.AddView(Hint(activity,
+            "Fixes small mistakes left in the original game: the river fish in Upstream and Up the Creek and Ripper Roo now show their shadow, and the night sky at the top of the Lights Out tower is no longer hidden by the level's darkness. Off: as in the original.",
             bodyFont));
 
         if (gpuLabRequested != null)
@@ -246,6 +249,7 @@ static class SettingsDialog
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
             view.MapWrapAround = mapWrapAround.Checked;
             view.CortexPowerFirst = cortexPowerFirst.Checked;
+            view.FixOriginalOversights = fixOversights.Checked;
 
             ConfigManager.SaveGame();
             ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());

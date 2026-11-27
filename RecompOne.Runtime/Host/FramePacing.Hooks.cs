@@ -125,6 +125,7 @@ public static partial class FramePacing
         NoteBoxDropUpdate(c.A0);
         NoteMapSwapUpdate(c.A0);
         HideGemParade(m, c.A0);
+        ApplyOversightShadow(m, c.A0);
         // Hold / NSInit run GOOL with pacing off. Hoppers Wait then Jump
         // (may OR SOLID_TOP). If we do not record them here, unlock treats
         // them as pillars and i+=1 runs every present until Crash dies and
