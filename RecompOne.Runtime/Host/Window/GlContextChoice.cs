@@ -12,7 +12,14 @@ namespace RecompOne.Runtime.Host;
 readonly record struct GlContextChoice(bool Es, int Major, int Minor, bool Egl = false)
 {
     public GraphicsAPI Api => new(Es ? ContextAPI.OpenGLES : ContextAPI.OpenGL,
-        ContextProfile.Core, ContextFlags.Default, new APIVersion(Major, Minor));
+        ContextProfile.Core, ForwardCompatible ? ContextFlags.ForwardCompatible : ContextFlags.Default,
+        new APIVersion(Major, Minor));
+
+    /// <summary>
+    /// macOS gives a 3.2+ Core context only when it is asked forward-compatible,
+    /// and then returns its newest one (4.1) for any version up to 4.1 (#14).
+    /// </summary>
+    public bool ForwardCompatible => !Es && OperatingSystem.IsMacOS();
 
     public string Name => Es
         ? $"OpenGL ES {Major}.{Minor}{(Egl ? " (EGL)" : "")}"
@@ -21,6 +28,11 @@ readonly record struct GlContextChoice(bool Es, int Major, int Minor, bool Egl =
     /// <summary>Contexts to try, in order, for the Renderer setting.</summary>
     public static List<GlContextChoice> Chain(int graphicsApi)
     {
+        // macOS stops at OpenGL 4.1 and has no OpenGL ES or EGL (#14): 4.1 Core runs
+        // the 3.3 path (blit copies), whatever the Renderer setting says.
+        if (OperatingSystem.IsMacOS())
+            return [new(false, 4, 1), new(false, 3, 3)];
+
         GlContextChoice[] gl43 = [new(false, 4, 3)];
         GlContextChoice[] gl33 = [new(false, 3, 3)];
         // Mesa returns its newest ES version for any request, other drivers need

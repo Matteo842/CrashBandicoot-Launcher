@@ -32,11 +32,28 @@ public static class AppPaths
             {
                 var dir = Path.GetDirectoryName(exe);
                 if (!string.IsNullOrWhiteSpace(dir))
-                    return Path.GetFullPath(dir);
+                    return MacAppBundleRoot(dir) ?? Path.GetFullPath(dir);
             }
 
             return Path.GetFullPath(AppContext.BaseDirectory);
         }
+    }
+
+    /// <summary>
+    /// macOS (#14): inside "Crash Bandicoot Recompiled.app/Contents/MacOS" the exe folder
+    /// is read-only once the app is in /Applications (or translocated by Gatekeeper),
+    /// and writing there breaks the app's signature. User data then lives in
+    /// ~/Library/Application Support/CrashBandicoot-Recompiled. A bare binary outside
+    /// an .app keeps the portable exe-folder layout, as on Linux.
+    /// </summary>
+    static string? MacAppBundleRoot(string exeDir)
+    {
+        if (!OperatingSystem.IsMacOS()) return null;
+        var full = Path.GetFullPath(exeDir).TrimEnd('/');
+        if (!full.EndsWith(".app/Contents/MacOS", StringComparison.OrdinalIgnoreCase)) return null;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(home)) return null;
+        return Path.Combine(home, "Library", "Application Support", "CrashBandicoot-Recompiled");
     }
 
     public static string SaveDir => Path.Combine(Root, "save");

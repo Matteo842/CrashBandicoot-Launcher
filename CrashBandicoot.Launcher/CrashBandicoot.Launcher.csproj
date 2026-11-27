@@ -97,7 +97,25 @@
           Visible="false" />
   </ItemGroup>
 
-  <!-- Avalonia launcher UI is Linux-only. -->
+  <!-- macOS (issue #14): NativeFileDialogSharp ships osx-x64 only and RabbitizerSharp
+       osx-arm64 only. .github/workflows/release.yml builds the missing one of each
+       on a Mac runner into native/osx-arm64/ and native/osx-x64/. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">
+    <None Include="..\native\osx-arm64\libnfd.dylib"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+    <None Include="..\native\osx-x64\librabbitizer.dylib"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+
+  <!-- Avalonia launcher UI is Linux and macOS only. -->
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
     <Compile Remove="Linux\**" />
   </ItemGroup>

@@ -406,7 +406,8 @@ sealed partial class LauncherWindow
         Directory.CreateDirectory(dir);
         try
         {
-            var psi = new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+            // macOS (#14): "open" is the Finder counterpart of xdg-open.
+            var psi = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open") { UseShellExecute = false };
             psi.ArgumentList.Add(dir);
             using var _ = Process.Start(psi);
             return;

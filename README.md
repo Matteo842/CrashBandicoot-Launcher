@@ -98,6 +98,14 @@ LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot-Linux --run /path/to/game.cue
 
 </details>
 
+### macOS (experimental)
+
+1. Download `CrashBandicoot-<version>-macOS-arm64.zip` (Apple Silicon: M1 or newer) or `CrashBandicoot-<version>-macOS-x64.zip` (Intel Macs) from [**Releases**](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest) and unzip it.
+2. Move `Crash Bandicoot Recompiled.app` to **Applications**.
+3. The first time, **right-click it → Open → Open**: the app is not notarized by Apple, so a double-click only shows a warning. On macOS 15 Sequoia, open it once, then **System Settings → Privacy & Security → Open Anyway**.
+
+Settings, saves and the built game live in `~/Library/Application Support/CrashBandicoot-Recompiled` (Finder: **Go → Go to Folder…**). Logs for a bug report are in its `logs` folder. The macOS build is new and gets the least testing of all.
+
 <details>
 <summary><b>More about disc images (CHD, CLI options)</b></summary>
 
@@ -132,6 +140,7 @@ LIBGL_ALWAYS_SOFTWARE=1 ./CrashBandicoot-Linux --run /path/to/game.cue
 - **Windows on ARM (Snapdragon X):** use `CrashBandicoot-arm64.exe`, which runs natively; `CrashBandicoot.exe` also starts there, but only through Windows' x64 emulation. OpenGL on these PCs comes from Microsoft's *OpenCL, OpenGL, and Vulkan Compatibility Pack* (Microsoft Store): install or update it if the game window doesn't open or draws wrongly. This build gets less testing than the x64 one.
 - **Linux:** the launcher also needs fontconfig and ICU (`libicu`), which every desktop distribution includes. Older releases, such as Ubuntu 20.04 or Debian 11, have an older glibc and can't run the game.
 - **Linux on ARM (Raspberry Pi 4/5):** the `arm64` build needs a 64-bit system, such as Raspberry Pi OS 64-bit (Bookworm or newer); the 32-bit Raspberry Pi OS can't run it. The Pi 4 and 5 GPU offers OpenGL ES 3.1, which the game uses through the fallback above. A Pi 3 or older has no OpenGL ES 3 and can't run the game. The first launch builds the game on the Pi itself, which takes much longer than on a PC. This build gets less testing than the x86-64 one.
+- **macOS (experimental):** macOS 14 Sonoma or newer, on Apple Silicon or Intel. The program itself starts from macOS 12 Monterey, but its window (GLFW) and audio (OpenAL Soft) libraries are built for macOS 14, so 12 and 13 may not work. The game uses Apple's OpenGL 4.1 (every Mac since 2012) through the OpenGL 3.3 path; Vulkan and OpenGL ES are not used there. Big Sur (11) and older are not supported by .NET 10, which the game is built on.
 - **Android GPU:** besides OpenGL ES 3.2, the driver must support framebuffer fetch or `GL_EXT_blend_func_extended`. Adreno (Snapdragon) and Mali drivers do. The APK also contains `x86_64` libraries (emulators, some Chromebooks), but that gets less testing.
 
 ---

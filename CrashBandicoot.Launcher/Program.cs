@@ -13,6 +13,8 @@ internal static class Program
     {
         try
         {
+            // macOS .app: Root is in ~/Library/Application Support and may not exist yet (#14).
+            Directory.CreateDirectory(RecompOne.Runtime.AppPaths.Root);
             Directory.SetCurrentDirectory(RecompOne.Runtime.AppPaths.Root);
         }
         catch

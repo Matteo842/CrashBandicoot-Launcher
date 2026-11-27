@@ -687,7 +687,8 @@ sealed class GlyphToast : Window
     {
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("xdg-open") { UseShellExecute = false };
+            var psi = new System.Diagnostics.ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "xdg-open")
+                { UseShellExecute = false };
             psi.ArgumentList.Add(url);
             using var _ = System.Diagnostics.Process.Start(psi);
         }

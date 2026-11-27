@@ -17,7 +17,7 @@ namespace CrashBandicoot.Launcher;
 /// </summary>
 internal static class LinuxLaunch
 {
-    const string AppName = "Crash Bandicoot: Recompiled";
+    internal const string AppName = "Crash Bandicoot: Recompiled";
     const string LogFileName = "last-run.txt";
 
     /// <summary>Startup and crash output is what matters; stop before a long session grows the file.</summary>
@@ -139,6 +139,20 @@ internal static class LinuxLaunch
     {
         try
         {
+            if (OperatingSystem.IsMacOS())
+            {
+                // macOS (#14): Notification Center through AppleScript; text passed as argv, no quoting.
+                var mac = new ProcessStartInfo("osascript") { UseShellExecute = false };
+                foreach (var line in new[] { "on run argv", "display notification (item 1 of argv) with title (item 2 of argv)", "end run" })
+                {
+                    mac.ArgumentList.Add("-e");
+                    mac.ArgumentList.Add(line);
+                }
+                mac.ArgumentList.Add(message);
+                mac.ArgumentList.Add(AppName);
+                using var _m = Process.Start(mac);
+                return;
+            }
             var psi = new ProcessStartInfo("notify-send") { UseShellExecute = false };
             psi.ArgumentList.Add("--app-name=" + AppName);
             if (error)

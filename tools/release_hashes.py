@@ -30,8 +30,33 @@ PACKS = {
     "windows-arm64": ("Windows-arm64.zip", "CrashBandicoot-arm64.exe", "Windows arm64"),
     "linux": ("Linux-x64.tar.gz", "CrashBandicoot-Linux", "Linux x64"),
     "linux-arm64": ("Linux-arm64.tar.gz", "CrashBandicoot-Linux-arm64", "Linux arm64"),
+    # macOS (#14): the program is a whole .app folder, signed ad hoc on the Mac runner.
+    "macos": ("macOS-arm64.zip", "Crash Bandicoot Recompiled.app", "macOS Apple Silicon"),
+    "macos-x64": ("macOS-x64.zip", "Crash Bandicoot Recompiled.app", "macOS Intel"),
 }
-PROGRAMS = {name for _, name, _ in PACKS.values()}
+PROGRAMS = {name for _, name, _ in PACKS.values() if not name.endswith(".app")}
+# The file the official-build check hashes inside a .app.
+MAC_PROGRAM = ".app/Contents/MacOS/CrashBandicoot"
+
+
+def _is_program(name: str) -> bool:
+    return name.rsplit("/", 1)[-1] in PROGRAMS or name.endswith(MAC_PROGRAM)
+
+
+def _zip_tree(z: zipfile.ZipFile, folder: pathlib.Path, inner: str) -> None:
+    """Zip a folder with its Unix modes, so the .app keeps its executable bit."""
+    for path in sorted(folder.rglob("*")):
+        if path.is_dir():
+            continue
+        name = f"{inner}/{path.relative_to(folder).as_posix()}"
+        info = zipfile.ZipInfo.from_file(str(path), name)
+        info.create_system = 3  # Unix: Archive Utility reads the mode from external_attr
+        # Contents/MacOS holds the program: always executable, even when packed on Windows.
+        executable = path.stat().st_mode & 0o111 or "/Contents/MacOS/" in f"/{name}"
+        info.external_attr = (0o100755 if executable else 0o100644) << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        with open(path, "rb") as fh:
+            z.writestr(info, fh.read())
 
 
 def check_ready_marker(manifest: pathlib.Path) -> None:
@@ -56,7 +81,10 @@ def pack(platform: str, version: str, program: str, out_dir: str) -> None:
     manifest = ROOT / "recomplauncher.json"
     if out.suffix == ".zip":
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-            z.write(program, inner)
+            if pathlib.Path(program).is_dir():
+                _zip_tree(z, pathlib.Path(program), inner)
+            else:
+                z.write(program, inner)
             z.write(manifest, manifest.name)
     else:
         # tar keeps the executable bit, which browsers and zips drop on Linux.
@@ -82,13 +110,13 @@ def program_hashes(dist: pathlib.Path) -> list[tuple[str, str, str]]:
         if archive.name.endswith(".zip"):
             with zipfile.ZipFile(archive) as z:
                 for name in z.namelist():
-                    if name.rsplit("/", 1)[-1] in PROGRAMS:
+                    if _is_program(name):
                         with z.open(name) as fh:
                             found.append((archive.name, name, _sha256(fh)))
         elif archive.name.endswith(".tar.gz"):
             with tarfile.open(archive, "r:gz") as t:
                 for m in t.getmembers():
-                    if m.isfile() and m.name.rsplit("/", 1)[-1] in PROGRAMS:
+                    if m.isfile() and _is_program(m.name):
                         found.append((archive.name, m.name, _sha256(t.extractfile(m))))
     return found
 

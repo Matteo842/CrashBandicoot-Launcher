@@ -8,15 +8,19 @@ Usage (from repo root):
     python publish_release.py --platform linux
     python publish_release.py --platform linux-arm64
     python publish_release.py --platform android
-    python publish_release.py --platform all
+    python publish_release.py --platform macos      # osx-arm64 .app (run on a Mac)
+    python publish_release.py --platform macos-x64  # osx-x64 .app (run on a Mac)
+    python publish_release.py --platform all        # everything but macOS
     python publish_release.py --rid linux-x64  # legacy RID flag (Windows/Linux only)
     python publish_release.py --set-version 2.3  # write 2.3 into every version field
 
 Requires: .NET 10 SDK. Android also needs the Android SDK + a release keystore
 (created automatically on first Android publish into signing/, gitignored).
 linux-arm64 also needs native/linux-arm64/libcimgui.so and libnfd.so, and
-windows-arm64 needs native/win-arm64/nfd.dll and rabbitizer.dll, all built by
-the "Release" GitHub workflow (see the README.md in each folder).
+windows-arm64 needs native/win-arm64/nfd.dll and rabbitizer.dll, macos needs
+native/osx-arm64/libnfd.dylib and macos-x64 needs native/osx-x64/librabbitizer.dylib,
+all built by the "Release" GitHub workflow (see the README.md in each folder).
+macOS builds must run on a Mac: the .app is signed (ad hoc) with codesign (#14).
 
 Normal releases are built on GitHub: Actions > Release > Run workflow
 (.github/workflows/release.yml), which uses --set-version and --platform.
@@ -51,6 +55,8 @@ DEFAULT_OUT = {
     "windows-arm64": ROOT / "publish-win-arm64",
     "linux": ROOT / "publish-linux",
     "linux-arm64": ROOT / "publish-linux-arm64",
+    "macos": ROOT / "publish-macos",
+    "macos-x64": ROOT / "publish-macos-x64",
     "android": ROOT / "publish-android",
 }
 
@@ -59,6 +65,8 @@ RID_FRAMEWORK = {
     "win-arm64": "net10.0-windows",
     "linux-x64": "net10.0",
     "linux-arm64": "net10.0",
+    "osx-arm64": "net10.0",
+    "osx-x64": "net10.0",
 }
 
 PLATFORM_RID = {
@@ -66,9 +74,16 @@ PLATFORM_RID = {
     "windows-arm64": "win-arm64",
     "linux": "linux-x64",
     "linux-arm64": "linux-arm64",
+    "macos": "osx-arm64",
+    "macos-x64": "osx-x64",
 }
 
+# macOS is not in "all": it builds on a Mac only (codesign), see the Release workflow.
 ALL_PLATFORMS = ["windows", "windows-arm64", "linux", "linux-arm64", "android"]
+MAC_APP_NAME = "Crash Bandicoot Recompiled.app"
+MAC_BUNDLE_ID = "io.github.matteo842.crashbandicoot-recompiled"
+# .NET 10 does not support Big Sur (11) or older (#14); the build log prints the real floor (minos).
+MAC_MIN_VERSION = "12.0"
 
 # Every place that holds the app version (the "2.2" commit touched exactly
 # these). Each pattern must match once: a moved or renamed field stops the
@@ -86,17 +101,22 @@ VERSION_FIELDS = (
 )
 ANDROID_VERSION_CODE = r"(<ApplicationVersion>)(\d+)(</ApplicationVersion>)"
 
-# Natives that a package ships for x64 but not for arm64. The "Release"
-# workflow (.github/workflows/release.yml) builds them into native/<rid>/;
-# the launcher csproj packs them into that RID's single-file.
+# Natives that a package ships for x64 but not for arm64 (or, on macOS, for one
+# of the two). The "Release" workflow (.github/workflows/release.yml) builds them
+# into native/<rid>/; the launcher csproj packs them into that RID's single-file.
 #   linux-arm64: ImGui.NET and NativeFileDialogSharp
 #   win-arm64:   NativeFileDialogSharp and RabbitizerSharp
+#   osx-arm64:   NativeFileDialogSharp (it ships osx-x64 only)
+#   osx-x64:     RabbitizerSharp (it ships osx-arm64 only)
 ARM64_NATIVES = {
     "linux-arm64": ("libcimgui.so", "libnfd.so"),
     "win-arm64": ("nfd.dll", "rabbitizer.dll"),
+    "osx-arm64": ("libnfd.dylib",),
+    "osx-x64": ("librabbitizer.dylib",),
 }
 EM_AARCH64 = 183
 IMAGE_FILE_MACHINE_ARM64 = 0xAA64
+MACHO_CPU = {"osx-arm64": 0x0100000C, "osx-x64": 0x01000007}
 
 FORBIDDEN_GLOBS = (
     "*.bin",
@@ -309,6 +329,12 @@ def warn_forbidden(out_dir: Path) -> None:
 def arm64_native_problem(path: Path, rid: str) -> str | None:
     """Why path is not an arm64 library for rid, or None when it is."""
     data = path.read_bytes()
+    if rid.startswith("osx-"):
+        if len(data) < 8 or data[:4] != b"\xcf\xfa\xed\xfe":
+            return f"{path.name} is not a 64-bit macOS library"
+        if struct.unpack_from("<I", data, 4)[0] != MACHO_CPU[rid]:
+            return f"{path.name} is not built for {rid.split('-')[1]}"
+        return None
     if rid.startswith("win-"):
         pe = struct.unpack_from("<I", data, 0x3C)[0] if len(data) >= 0x40 and data[:2] == b"MZ" else 0
         if not pe or data[pe:pe + 4] != b"PE\0\0" or len(data) < pe + 6:
@@ -343,7 +369,8 @@ def check_arm64_natives(rid: str) -> None:
     die(
         f"{native_dir.relative_to(ROOT)}: " + "; ".join(problems) + ".\n"
         "  The GitHub 'Release' workflow builds them on its own. For a local build,\n"
-        f"  copy {' and '.join(names)} from the '{rid}-natives' artifact\n"
+        f"  copy {' and '.join(names)} from the "
+        f"'{'macos' if rid.startswith('osx-') else rid}-natives' artifact\n"
         f"  of a Release run into {native_dir}\n"
         "  (or publish the other platforms one at a time)."
     )
@@ -423,6 +450,9 @@ def publish_desktop(out_dir: Path, rid: str) -> Path:
     for junk in out_dir.glob("*.xml"):
         junk.unlink(missing_ok=True)
 
+    if rid.startswith("osx-"):
+        return make_mac_app(out_dir, binary, rid)
+
     copy_example_mods(out_dir)
     warn_forbidden(out_dir)
 
@@ -453,6 +483,97 @@ def publish_desktop(out_dir: Path, rid: str) -> Path:
         if rid == "linux-arm64":
             print("  4. arm64: needs a 64-bit OS, e.g. Raspberry Pi OS 64-bit Bookworm or newer")
     return binary
+
+
+def mac_icon(resources: Path) -> bool:
+    """AppIcon.icns from icon.png with sips + iconutil (macOS tools)."""
+    if not ICON_PNG.is_file() or not shutil.which("sips") or not shutil.which("iconutil"):
+        print("[publish] WARNING: no sips/iconutil, the .app has no icon")
+        return False
+    iconset = resources.parent / "AppIcon.iconset"
+    iconset.mkdir(exist_ok=True)
+    for size in (16, 32, 128, 256):
+        for scale in (1, 2):
+            px = size * scale
+            if px > 256:  # icon.png is 256x256: do not upscale
+                continue
+            name = f"icon_{size}x{size}{'@2x' if scale == 2 else ''}.png"
+            subprocess.run(["sips", "-z", str(px), str(px), str(ICON_PNG), "--out", str(iconset / name)],
+                           check=True, capture_output=True)
+    r = subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "AppIcon.icns")])
+    shutil.rmtree(iconset, ignore_errors=True)
+    return r.returncode == 0
+
+
+def make_mac_app(out_dir: Path, binary: Path, rid: str) -> Path:
+    """Wrap the single-file binary in a .app and sign it ad hoc (#14).
+
+    Apple Silicon refuses to run unsigned code, and an ad hoc signature
+    (codesign -s -) needs no Apple account. Users still see the Gatekeeper
+    "unidentified developer" prompt the first time (right-click > Open).
+    """
+    version = app_version()
+    app = out_dir / MAC_APP_NAME
+    macos_dir = app / "Contents" / "MacOS"
+    resources = app / "Contents" / "Resources"
+    macos_dir.mkdir(parents=True, exist_ok=True)
+    resources.mkdir(parents=True, exist_ok=True)
+    exe = macos_dir / "CrashBandicoot"
+    shutil.move(str(binary), str(exe))
+    exe.chmod(0o755)
+    has_icon = mac_icon(resources)
+    icon_key = "    <key>CFBundleIconFile</key><string>AppIcon</string>\n" if has_icon else ""
+    (app / "Contents" / "Info.plist").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n<dict>\n'
+        "    <key>CFBundleName</key><string>Crash Bandicoot Recompiled</string>\n"
+        "    <key>CFBundleDisplayName</key><string>Crash Bandicoot: Recompiled</string>\n"
+        f"    <key>CFBundleIdentifier</key><string>{MAC_BUNDLE_ID}</string>\n"
+        "    <key>CFBundleExecutable</key><string>CrashBandicoot</string>\n"
+        "    <key>CFBundlePackageType</key><string>APPL</string>\n"
+        f"    <key>CFBundleShortVersionString</key><string>{version}</string>\n"
+        f"    <key>CFBundleVersion</key><string>{version}</string>\n"
+        f"    <key>LSMinimumSystemVersion</key><string>{MAC_MIN_VERSION}</string>\n"
+        "    <key>LSApplicationCategoryType</key><string>public.app-category.games</string>\n"
+        "    <key>NSHighResolutionCapable</key><true/>\n"
+        f"{icon_key}"
+        "</dict>\n</plist>\n",
+        encoding="utf-8",
+    )
+    # Leftovers of the plain publish (nothing else should be there).
+    for extra in out_dir.iterdir():
+        if extra != app:
+            if extra.is_dir():
+                shutil.rmtree(extra)
+            else:
+                extra.unlink()
+
+    if shutil.which("codesign"):
+        if subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)]).returncode != 0:
+            die("codesign failed")
+        subprocess.run(["codesign", "--verify", "--verbose=2", str(app)], check=True)
+    elif rid == "osx-arm64":
+        die("codesign not found: build macOS releases on a Mac (Apple Silicon runs signed code only)")
+    else:
+        print("[publish] WARNING: codesign not found, the .app is unsigned")
+    if shutil.which("otool"):
+        load = subprocess.run(["otool", "-l", str(exe)], capture_output=True, text=True).stdout
+        m = re.search(r"minos (\S+)", load)
+        print(f"[publish] needs macOS {m.group(1) if m else '?'} or newer (binary minos)")
+
+    size_mb = exe.stat().st_size / (1024 * 1024)
+    print()
+    print("[publish] OK")
+    print(f"  rid : {rid}")
+    print(f"  app : {app}")
+    print(f"  size: {size_mb:.1f} MB")
+    print()
+    print("Test:")
+    print(f'  1. open "{app}"   (first time from a download: right-click > Open)')
+    print("  2. Needs OpenGL 4.1 (every Mac since 2012); the launcher opens first")
+    print("  3. User data: ~/Library/Application Support/CrashBandicoot-Recompiled")
+    return app
 
 
 def find_java_home() -> Path:
@@ -722,9 +843,11 @@ def pick_platforms(args: argparse.Namespace) -> list[str]:
             return ["windows"]
         if args.rid == "linux-arm64":
             return ["linux-arm64"]
+        if args.rid.startswith("osx-"):
+            return ["macos" if args.rid == "osx-arm64" else "macos-x64"]
         return ["linux"]
     if not sys.stdin.isatty():
-        die("pass --platform windows|windows-arm64|linux|linux-arm64|android|all")
+        die("pass --platform windows|windows-arm64|linux|linux-arm64|macos|macos-x64|android|all")
 
     print()
     print("Crash Bandicoot — publish release")
@@ -735,8 +858,10 @@ def pick_platforms(args: argparse.Namespace) -> list[str]:
     print("  4) All five     (Windows, Windows arm64, Linux, Linux arm64, Android)")
     print("  5) Linux arm64  (linux-arm64, Raspberry Pi 4/5; needs native/linux-arm64)")
     print("  6) Windows arm64 (win-arm64, Snapdragon X; needs native/win-arm64)")
+    print("  7) macOS        (osx-arm64 .app, Apple Silicon; on a Mac, needs native/osx-arm64)")
+    print("  8) macOS x64    (osx-x64 .app, Intel Macs; on a Mac, needs native/osx-x64)")
     print()
-    choice = input("Choice [1-6]: ").strip()
+    choice = input("Choice [1-8]: ").strip()
     mapping = {
         "1": ["windows"],
         "2": ["linux"],
@@ -744,6 +869,10 @@ def pick_platforms(args: argparse.Namespace) -> list[str]:
         "4": list(ALL_PLATFORMS),
         "5": ["linux-arm64"],
         "6": ["windows-arm64"],
+        "7": ["macos"],
+        "8": ["macos-x64"],
+        "macos": ["macos"],
+        "macos-x64": ["macos-x64"],
         "windows": ["windows"],
         "windows-arm64": ["windows-arm64"],
         "linux": ["linux"],
@@ -769,7 +898,7 @@ def main() -> None:
     )
     ap.add_argument(
         "--platform",
-        choices=("windows", "windows-arm64", "linux", "linux-arm64", "android", "all"),
+        choices=("windows", "windows-arm64", "linux", "linux-arm64", "macos", "macos-x64", "android", "all"),
         help="target platform (default: interactive menu)",
     )
     ap.add_argument(

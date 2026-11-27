@@ -265,6 +265,8 @@ internal static partial class HostWindow
         glfw.WindowHint(SilkGlfw.WindowHintInt.ContextVersionMinor, choice.Minor);
         if (!choice.Es)
             glfw.WindowHint(SilkGlfw.WindowHintOpenGlProfile.OpenGlProfile, SilkGlfw.OpenGlProfile.Core);
+        if (choice.ForwardCompatible)
+            glfw.WindowHint(SilkGlfw.WindowHintBool.OpenGLForwardCompat, true);
         glfw.WindowHint(SilkGlfw.WindowHintInt.DepthBits, 24);
         glfw.WindowHint(SilkGlfw.WindowHintInt.StencilBits, 8);
         var probe = glfw.CreateWindow(1, 1, "GL probe", null, null);

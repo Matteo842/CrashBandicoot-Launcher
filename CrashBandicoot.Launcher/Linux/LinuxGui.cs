@@ -8,7 +8,7 @@ using Avalonia.Themes.Fluent;
 
 namespace CrashBandicoot.Launcher.Linux;
 
-/// <summary>Entry point of the graphical Linux launcher (Avalonia on X11 / XWayland).</summary>
+/// <summary>Entry point of the graphical Linux launcher (Avalonia on X11 / XWayland, Cocoa on macOS).</summary>
 static class LinuxGui
 {
     const string IconResource = "CrashBandicoot.icon.png";
@@ -26,7 +26,8 @@ static class LinuxGui
     public static bool TryRun(string[] args, out int exitCode)
     {
         exitCode = 0;
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
+        // macOS (#14) draws through Avalonia.Native (Cocoa), no X11 display involved.
+        if (!OperatingSystem.IsMacOS() && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
         {
             Console.WriteLine("[Launcher] no X11 display (DISPLAY is not set), starting without the launcher window");
             return false;
@@ -91,6 +92,7 @@ static class LinuxGui
     {
         public override void Initialize()
         {
+            Name = LinuxLaunch.AppName; // macOS menu bar and Dock title (#14)
             RequestedThemeVariant = ThemeVariant.Dark;
             Styles.Add(new FluentTheme());
             LinuxTheme.AddResources(Resources);

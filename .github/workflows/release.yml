@@ -5,14 +5,18 @@
 #      and pushes it to main as a commit named after the version, like the old
 #      manual "2.2" commit. Nothing is committed if the sources already say it.
 #   2. Builds the arm64 native libraries that some packages lack: linux-arm64
-#      (libcimgui.so, libnfd.so) and win-arm64 (nfd.dll, rabbitizer.dll).
-#   3. Builds the five release files with publish_release.py, in parallel.
+#      (libcimgui.so, libnfd.so) and win-arm64 (nfd.dll, rabbitizer.dll),
+#      plus the two macOS ones (libnfd.dylib arm64, librabbitizer.dylib x64).
+#   3. Builds the seven release files with publish_release.py, in parallel
+#      (the two macOS ones on a Mac runner, which signs the .app ad hoc, #14).
 #      The desktop programs go in archives with recomplauncher.json beside
 #      them (RecompLauncher, issue #245), packed by tools/release_hashes.py:
 #        CrashBandicoot-<version>-Windows-x64.zip    (CrashBandicoot.exe)
 #        CrashBandicoot-<version>-Windows-arm64.zip  (CrashBandicoot-arm64.exe)
 #        CrashBandicoot-<version>-Linux-x64.tar.gz   (CrashBandicoot-Linux)
 #        CrashBandicoot-<version>-Linux-arm64.tar.gz (CrashBandicoot-Linux-arm64)
+#        CrashBandicoot-<version>-macOS-arm64.zip    (Crash Bandicoot Recompiled.app)
+#        CrashBandicoot-<version>-macOS-x64.zip      (Crash Bandicoot Recompiled.app)
 #        CrashBandicoot-<version>.apk
 #   4. Puts them in a DRAFT release, tag <version> (no "v", the official-build
 #      check looks the tag up by version), with the SHA-256 of each program in
@@ -552,9 +556,165 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  mac-natives:
+    # macOS (issue #14): NativeFileDialogSharp 0.5.0 ships libnfd.dylib for
+    # osx-x64 only and RabbitizerSharp 0.1.0 librabbitizer.dylib for osx-arm64
+    # only, so each missing one is built here from the same upstream commits.
+    # GLFW, SDL, OpenAL Soft, cimgui, Skia, HarfBuzz and Avalonia.Native ship both.
+    name: Build macOS natives
+    if: github.event_name == 'workflow_dispatch' && !inputs.virustotal_only
+    runs-on: macos-latest
+    env:
+      NFD_REF: 258a8850230f74ffdcf1c78d9bb012ea540e1bc5
+      RABBITIZER_REF: 5b95b96f4d5eb2509eee1ab6ec494c87aedc4ac0
+      # Same floor as the .app's LSMinimumSystemVersion (publish_release.py).
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+    steps:
+      - name: Check out nativefiledialog
+        uses: actions/checkout@v7
+        with:
+          repository: milleniumbug/nativefiledialog
+          ref: ${{ env.NFD_REF }}
+          path: nfd
+          persist-credentials: false
+
+      - name: Check out rabbitizer
+        uses: actions/checkout@v7
+        with:
+          repository: Decompollaborate/rabbitizer
+          ref: ${{ env.RABBITIZER_REF }}
+          path: rabbitizer
+          persist-credentials: false
+
+      - name: Build libnfd.dylib (arm64)
+        # nfd_common.c + the Cocoa backend, like build/gmake_macosx (release).
+        run: |
+          mkdir -p out/osx-arm64 out/osx-x64
+          clang -arch arm64 -O2 -fPIC -Wall -DNDEBUG -Infd/src/include \
+            -dynamiclib -install_name @rpath/libnfd.dylib \
+            -o out/osx-arm64/libnfd.dylib nfd/src/nfd_common.c nfd/src/nfd_cocoa.m \
+            -framework AppKit
+
+      - name: Build librabbitizer.dylib (x64)
+        # Like RabbitizerSharp: every rabbitizer/src/**/*.c, C11, one library.
+        run: |
+          clang -arch x86_64 -O2 -fPIC -std=c11 -DNDEBUG -Irabbitizer/include -Irabbitizer/tables \
+            -dynamiclib -install_name @rpath/librabbitizer.dylib \
+            -o out/osx-x64/librabbitizer.dylib $(find rabbitizer/src -name '*.c')
+
+      - name: Check architecture and exports
+        # Same C exports as the other macOS build in each NuGet package.
+        run: |
+          mkdir -p ref
+          curl -sSfL -o ref/nfd.nupkg https://api.nuget.org/v3-flatcontainer/nativefiledialogsharp/0.5.0/nativefiledialogsharp.0.5.0.nupkg
+          curl -sSfL -o ref/rab.nupkg https://api.nuget.org/v3-flatcontainer/rabbitizersharp/0.1.0/rabbitizersharp.0.1.0.nupkg
+          unzip -p ref/nfd.nupkg runtimes/osx-x64/native/libnfd.dylib > ref/libnfd.dylib
+          unzip -p ref/rab.nupkg runtimes/osx-arm64/native/librabbitizer.dylib > ref/librabbitizer.dylib
+          exports() { nm -gUj "$1" | sort; }
+          check() {
+            lipo "$2" -verify_arch "$3" || { echo "::error::$2 is not $3"; exit 1; }
+            if ! diff <(exports "$1") <(exports "$2"); then
+              echo "::error::$(basename "$2") exports differ from the NuGet package's macOS build"
+              exit 1
+            fi
+            echo "$(basename "$2"): $3, $(exports "$2" | wc -l) exports, minos $(otool -l "$2" | awk '/minos/{print $2; exit}')"
+          }
+          check ref/libnfd.dylib out/osx-arm64/libnfd.dylib arm64
+          check ref/librabbitizer.dylib out/osx-x64/librabbitizer.dylib x86_64
+
+      - name: Write SOURCES.txt
+        run: |
+          {
+            echo "Built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Runner: $(sw_vers -productName) $(sw_vers -productVersion), $(clang --version | head -1)"
+            echo "libnfd.dylib (arm64):       https://github.com/milleniumbug/nativefiledialog/tree/$NFD_REF"
+            echo "librabbitizer.dylib (x64):  https://github.com/Decompollaborate/rabbitizer/tree/$RABBITIZER_REF"
+            echo
+            (cd out && shasum -a 256 osx-arm64/libnfd.dylib osx-x64/librabbitizer.dylib)
+          } > out/SOURCES.txt
+          cat out/SOURCES.txt
+
+      - name: Upload
+        # For a local "publish_release.py --platform macos[-x64]" on a Mac:
+        # copy osx-arm64/ and osx-x64/ into native/.
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-natives
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
+
+  build-macos:
+    # On a Mac: codesign signs the .app ad hoc (Apple Silicon runs signed code
+    # only) and sips/iconutil make its icon. No Apple account involved.
+    name: Build ${{ matrix.platform }}
+    needs: [version, mac-natives]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos, macos-x64]
+    env:
+      PYTHONUNBUFFERED: '1'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.3xx'
+
+      - name: Get the macOS natives
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-natives
+          path: native
+
+      - name: Build
+        run: python3 publish_release.py --platform ${{ matrix.platform }}
+
+      - name: Start it once
+        # --help starts the runtime and exits: catches a bad signature or a
+        # missing runtime piece. The x64 build runs under Rosetta when present.
+        run: |
+          case "${{ matrix.platform }}" in
+            macos)     dir=publish-macos ;;
+            macos-x64) dir=publish-macos-x64 ;;
+          esac
+          exe="$dir/Crash Bandicoot Recompiled.app/Contents/MacOS/CrashBandicoot"
+          if [ "${{ matrix.platform }}" = macos-x64 ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::warning::No Rosetta on this runner, the x64 start check is skipped"
+          else
+            "$exe" --help
+          fi
+
+      - name: Pack the release file
+        env:
+          V: ${{ inputs.version }}
+        run: |
+          mkdir dist
+          case "${{ matrix.platform }}" in
+            macos)     python3 tools/release_hashes.py pack macos "$V" "publish-macos/Crash Bandicoot Recompiled.app" dist ;;
+            macos-x64) python3 tools/release_hashes.py pack macos-x64 "$V" "publish-macos-x64/Crash Bandicoot Recompiled.app" dist ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Draft release
-    needs: [version, build]
+    needs: [version, build, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -580,8 +740,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           ls -l dist
-          if [ "$(ls dist | wc -l)" -ne 5 ]; then
-            echo "::error::Expected 5 release files"
+          if [ "$(ls dist | wc -l)" -ne 7 ]; then
+            echo "::error::Expected 7 release files"
             exit 1
           fi
           if gh release view "$V" >/dev/null 2>&1; then

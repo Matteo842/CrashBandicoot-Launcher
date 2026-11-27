@@ -171,7 +171,11 @@ sealed partial class LauncherWindow
             ? "Added to your applications menu as \"Crash Bandicoot: Recompiled\". Steam can add it from there (Add a Non-Steam Game)."
             : "Could not add the menu entry: " + detail;
 
-        OpenSheet(SheetLayout(598, "About", body, ButtonRow(back, menu), scroll: false), [back, menu]);
+        // macOS (#14) has no freedesktop app menu: the .app itself goes in Applications.
+        if (OperatingSystem.IsMacOS())
+            OpenSheet(SheetLayout(598, "About", body, ButtonRow(back), scroll: false), [back]);
+        else
+            OpenSheet(SheetLayout(598, "About", body, ButtonRow(back, menu), scroll: false), [back, menu]);
     }
 
     void ShowControls()
