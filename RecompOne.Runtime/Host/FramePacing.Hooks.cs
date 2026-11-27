@@ -453,7 +453,10 @@ public static partial class FramePacing
         // and its picture presented. Everything below sees the real state.
         bool drawOnly = InterpFinishRender(c, m);
         if (!drawOnly)
+        {
             UpdatePityMask(c, m);
+            UpdateMapWrap(m);
+        }
         // Quick save / load (#130) only where the recompiled call chain is fixed.
         SaveStates.AtSafePoint(c, m);
         InterpPlan(c, m, drawOnly);

@@ -134,6 +134,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _pityMask;
     ThemeCheck? _introOnNewGame;
     ThemeCheck? _doubleWumpaCrate;
+    ThemeCheck? _mapWrapAround;
     ThemeCheck? _startPauseMenu;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
@@ -366,6 +367,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_pityMask, state, "pityMask");
         SetCheck(_introOnNewGame, state, "introOnNewGame");
         SetCheck(_doubleWumpaCrate, state, "doubleWumpaCrate");
+        SetCheck(_mapWrapAround, state, "mapWrapAround");
         SetCheck(_startPauseMenu, state, "startPauseMenu");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
@@ -1949,6 +1951,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         page.Controls.Add(_doubleWumpaCrate);
         y += 52;
         AddHint("A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.");
+        _mapWrapAround = MakeCheck("Island map wrap-around");
+        _mapWrapAround.Location = new Point(12, y);
+        page.Controls.Add(_mapWrapAround);
+        y += 52;
+        AddHint("On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original.");
 
         // Scroll extent = last control + a small margin (no empty hint gap at the end).
         foreach (var p in pages)
@@ -1986,6 +1993,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 pityMask = _pityMask?.Checked ?? false,
                 introOnNewGame = _introOnNewGame?.Checked ?? false,
                 doubleWumpaCrate = _doubleWumpaCrate?.Checked ?? false,
+                mapWrapAround = _mapWrapAround?.Checked ?? false,
                 startPauseMenu = _startPauseMenu?.Checked ?? true,
             });
             CloseSheet();

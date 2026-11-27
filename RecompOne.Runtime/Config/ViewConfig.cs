@@ -582,4 +582,16 @@ public class ViewConfig
         get => GetBool("DoubleWumpaCrate");
         set => SetBool("DoubleWumpaCrate", value);
     }
+
+    /// <summary>
+    /// Island map wrap-around (#213): once the Cortex level is unlocked, pushing
+    /// forward on it goes to N. Sanity Beach and pushing back on N. Sanity Beach goes
+    /// to the Cortex level (a short fade, as when coming back from a level). Off by
+    /// default.
+    /// </summary>
+    public bool MapWrapAround
+    {
+        get => GetBool("MapWrapAround");
+        set => SetBool("MapWrapAround", value);
+    }
 }

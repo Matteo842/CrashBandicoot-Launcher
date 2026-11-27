@@ -147,6 +147,13 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGui.TextDisabled("Wumpa crate: 2 wumpa per bounce instead of 1, like Crash 3");
+        bool mapWrap = ConfigManager.View.MapWrapAround;
+        if (ImGui.Checkbox("Island map wrap-around", ref mapWrap))
+        {
+            ConfigManager.View.MapWrapAround = mapWrap;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Map: forward on Cortex goes to the first level, back on it to Cortex");
 
         bool vsync = ConfigManager.View.VSync;
         if (ImGui.Checkbox("VSync", ref vsync))

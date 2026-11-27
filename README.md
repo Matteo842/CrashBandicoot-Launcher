@@ -31,6 +31,7 @@ This isn't an emulator. The original PS1 code is **statically recompiled** into 
 - **Japanese box drop.** Optional: at the level end, only one box drops on Crash for all the boxes you missed, like the Japanese version. The counter still shows how many you missed.
 - **Story intro on New Game.** Optional: New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it.
 - **Double wumpa crate.** Optional: the bouncy wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3.
+- **Island map wrap-around.** Optional: once the Cortex level is unlocked, push forward on it to go back to N. Sanity Beach, or back on N. Sanity Beach to go to the Cortex level.
 - **Level warp.** Jump to any level or bonus round from the Dev Menu, including **Stormy Ascent**, the level cut from the original game.
 - **Cheats.** Infinite lives, level select (secret levels too), god mode, **fly mode** and all 26 gems on or off.
 - **Mods.** Drop C# mods, texture packs and asset overlays into `mods/` and switch them on or off from the launcher or the in-game Dev Menu. See the [modding guide](docs/MODDING.md).

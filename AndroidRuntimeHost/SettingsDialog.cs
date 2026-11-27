@@ -161,6 +161,9 @@ static class SettingsDialog
         var doubleWumpaCrate = AddSwitch(activity, card, "Double wumpa crate", view.DoubleWumpaCrate, bodyBold);
         card.AddView(Hint(activity,
             "A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.",
+        var mapWrapAround = AddSwitch(activity, card, "Island map wrap-around", view.MapWrapAround, bodyBold);
+        card.AddView(Hint(activity,
+            "On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original.",
             bodyFont));
 
         if (gpuLabRequested != null)
@@ -232,6 +235,7 @@ static class SettingsDialog
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
+            view.MapWrapAround = mapWrapAround.Checked;
 
             ConfigManager.SaveGame();
             ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());

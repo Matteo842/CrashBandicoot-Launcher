@@ -301,6 +301,7 @@ sealed partial class LauncherWindow
         var pityMask = Nav(new ThemeCheck("Pity mask") { Checked = view.PityMask });
         var introOnNewGame = Nav(new ThemeCheck("Story intro on New Game") { Checked = view.IntroOnNewGame });
         var doubleWumpaCrate = Nav(new ThemeCheck("Double wumpa crate") { Checked = view.DoubleWumpaCrate });
+        var mapWrapAround = Nav(new ThemeCheck("Island map wrap-around") { Checked = view.MapWrapAround });
 
         var strengthRow = Row(Label("Filter strength", 202), strength, 30);
         void SyncStrength() => strengthRow.IsVisible = ComboValue(texFilter, 0) != 0;
@@ -383,7 +384,9 @@ sealed partial class LauncherWindow
                     WithMargin(introOnNewGame, new Thickness(0, 0, 0, 14)),
                     Hint("New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original."),
                     WithMargin(doubleWumpaCrate, new Thickness(0, 0, 0, 14)),
-                    Hint("A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.", 8),
+                    Hint("A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original."),
+                    WithMargin(mapWrapAround, new Thickness(0, 0, 0, 14)),
+                    Hint("On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original.", 8),
                 },
             },
         ];
@@ -430,6 +433,7 @@ sealed partial class LauncherWindow
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
+            view.MapWrapAround = mapWrapAround.Checked;
             view.StartPauseMenu = startPauseMenu.Checked;
             ConfigManager.SaveGame();
             SaveView();

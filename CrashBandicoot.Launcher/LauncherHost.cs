@@ -237,6 +237,7 @@ public sealed class LauncherHost : Form
             pityMask = ConfigManager.View.PityMask,
             introOnNewGame = ConfigManager.View.IntroOnNewGame,
             doubleWumpaCrate = ConfigManager.View.DoubleWumpaCrate,
+            mapWrapAround = ConfigManager.View.MapWrapAround,
             startPauseMenu = ConfigManager.View.StartPauseMenu,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
@@ -718,6 +719,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.IntroOnNewGame = ing.GetBoolean();
         if (root.TryGetProperty("doubleWumpaCrate", out var dwc))
             ConfigManager.View.DoubleWumpaCrate = dwc.GetBoolean();
+        if (root.TryGetProperty("mapWrapAround", out var mwa))
+            ConfigManager.View.MapWrapAround = mwa.GetBoolean();
         if (root.TryGetProperty("startPauseMenu", out var spm))
             ConfigManager.View.StartPauseMenu = spm.GetBoolean();
 
