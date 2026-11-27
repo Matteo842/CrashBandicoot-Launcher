@@ -138,6 +138,11 @@ static class SettingsDialog
             "On the map, a card shows what each level's gem needs: all boxes without dying, and which colored gem opens its gem path. In levels: a reminder at the start, which gem an inactive gem platform needs, and a notice when a death loses the gem.",
             bodyFont));
 
+        var gemSparkle = AddSwitch(activity, card, "Gem sparkle", view.GemSparkle, bodyBold);
+        card.AddView(Hint(activity,
+            "Gems glow and twinkle like the Crash 2 and 3 crystals: the gems at the level end and on the map get a soft colored glow and little stars; owned gem platforms only the stars.",
+            bodyFont));
+
         var singleBoxDrop = AddSwitch(activity, card, "Japanese box drop (one box)", view.SingleBoxDrop, bodyBold);
         card.AddView(Hint(activity,
             "At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original.",
@@ -217,6 +222,7 @@ static class SettingsDialog
             view.ClassicBoxCounter = classicBoxCounter.Checked;
             view.ClassicBoxCounterOnBreak = classicBoxCounterOnBreak.Checked;
             view.GemHints = gemHints.Checked;
+            view.GemSparkle = gemSparkle.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;

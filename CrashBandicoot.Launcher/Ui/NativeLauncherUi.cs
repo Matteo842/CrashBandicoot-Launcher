@@ -129,6 +129,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _classicBoxCounter;
     ThemeCheck? _classicBoxCounterOnBreak;
     ThemeCheck? _gemHints;
+    ThemeCheck? _gemSparkle;
     ThemeCheck? _singleBoxDrop;
     ThemeCheck? _pityMask;
     ThemeCheck? _introOnNewGame;
@@ -359,6 +360,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_classicBoxCounter, state, "classicBoxCounter");
         SetCheck(_classicBoxCounterOnBreak, state, "classicBoxCounterOnBreak");
         SetCheck(_gemHints, state, "gemHints");
+        SetCheck(_gemSparkle, state, "gemSparkle");
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
         SetCheck(_pityMask, state, "pityMask");
         SetCheck(_introOnNewGame, state, "introOnNewGame");
@@ -1916,6 +1918,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 52;
         AddHint("On the map, a card shows what each level's gem needs: all boxes without dying, and which colored gem opens its gem path. In levels: a reminder at the start, which gem an inactive gem platform needs, and a notice when a death loses the gem.");
 
+        _gemSparkle = MakeCheck("Gem sparkle");
+        _gemSparkle.Location = new Point(12, y);
+        page.Controls.Add(_gemSparkle);
+        y += 52;
+        AddHint("Gems glow and twinkle like the Crash 2 and 3 crystals: the gems at the level end and on the map get a soft colored glow and little stars; owned gem platforms only the stars.");
+
         _singleBoxDrop = MakeCheck("Japanese box drop (one box)");
         _singleBoxDrop.Location = new Point(12, y);
         page.Controls.Add(_singleBoxDrop);
@@ -1965,6 +1973,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 classicBoxCounter = _classicBoxCounter?.Checked ?? true,
                 classicBoxCounterOnBreak = _classicBoxCounterOnBreak?.Checked ?? false,
                 gemHints = _gemHints?.Checked ?? false,
+                gemSparkle = _gemSparkle?.Checked ?? false,
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
                 pityMask = _pityMask?.Checked ?? false,
                 introOnNewGame = _introOnNewGame?.Checked ?? false,

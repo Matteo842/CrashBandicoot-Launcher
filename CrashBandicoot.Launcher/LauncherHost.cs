@@ -232,6 +232,7 @@ public sealed class LauncherHost : Form
             classicBoxCounter = ConfigManager.View.ClassicBoxCounter,
             classicBoxCounterOnBreak = ConfigManager.View.ClassicBoxCounterOnBreak,
             gemHints = ConfigManager.View.GemHints,
+            gemSparkle = ConfigManager.View.GemSparkle,
             singleBoxDrop = ConfigManager.View.SingleBoxDrop,
             pityMask = ConfigManager.View.PityMask,
             introOnNewGame = ConfigManager.View.IntroOnNewGame,
@@ -706,6 +707,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.ClassicBoxCounterOnBreak = cbob.GetBoolean();
         if (root.TryGetProperty("gemHints", out var gh))
             ConfigManager.View.GemHints = gh.GetBoolean();
+        if (root.TryGetProperty("gemSparkle", out var gsp))
+            ConfigManager.View.GemSparkle = gsp.GetBoolean();
         if (root.TryGetProperty("singleBoxDrop", out var sbd))
             ConfigManager.View.SingleBoxDrop = sbd.GetBoolean();
         if (root.TryGetProperty("pityMask", out var pm))

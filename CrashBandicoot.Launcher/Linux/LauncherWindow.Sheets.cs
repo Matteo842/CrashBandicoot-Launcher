@@ -296,6 +296,7 @@ sealed partial class LauncherWindow
         var classicBoxCounterOnBreak = Nav(new ThemeCheck("Show box counter when a box breaks") { Checked = view.ClassicBoxCounterOnBreak });
         var boxCounter = Nav(new ThemeCheck("Corner box counter") { Checked = view.BoxCounter });
         var gemHints = Nav(new ThemeCheck("Gem hints") { Checked = view.GemHints });
+        var gemSparkle = Nav(new ThemeCheck("Gem sparkle") { Checked = view.GemSparkle });
         var singleBoxDrop = Nav(new ThemeCheck("Japanese box drop (one box)") { Checked = view.SingleBoxDrop });
         var pityMask = Nav(new ThemeCheck("Pity mask") { Checked = view.PityMask });
         var introOnNewGame = Nav(new ThemeCheck("Story intro on New Game") { Checked = view.IntroOnNewGame });
@@ -372,6 +373,8 @@ sealed partial class LauncherWindow
                     Hint("Always shows boxes broken / boxes needed for the gem in the corner during levels. Turns gray when a death loses the gem: Crash 1 forgets the boxes broken before the last checkpoint."),
                     WithMargin(gemHints, new Thickness(0, 0, 0, 14)),
                     Hint("On the map, a card shows what each level's gem needs: all boxes without dying, and which colored gem opens its gem path. In levels: a reminder at the start, which gem an inactive gem platform needs, and a notice when a death loses the gem."),
+                    WithMargin(gemSparkle, new Thickness(0, 0, 0, 14)),
+                    Hint("Gems glow and twinkle like the Crash 2 and 3 crystals: the gems at the level end and on the map get a soft colored glow and little stars; owned gem platforms only the stars."),
                     WithMargin(singleBoxDrop, new Thickness(0, 0, 0, 14)),
                     Hint("At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original."),
                     WithMargin(pityMask, new Thickness(0, 0, 0, 14)),
@@ -419,6 +422,7 @@ sealed partial class LauncherWindow
             view.ClassicBoxCounter = classicBoxCounter.Checked;
             view.ClassicBoxCounterOnBreak = classicBoxCounterOnBreak.Checked;
             view.GemHints = gemHints.Checked;
+            view.GemSparkle = gemSparkle.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;

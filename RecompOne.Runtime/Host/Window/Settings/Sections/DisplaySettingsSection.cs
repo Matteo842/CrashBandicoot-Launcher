@@ -108,6 +108,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("What each gem needs: map card, level start, gem platforms");
 
+        bool gemSparkle = ConfigManager.View.GemSparkle;
+        if (ImGui.Checkbox("Gem sparkle", ref gemSparkle))
+        {
+            ConfigManager.View.GemSparkle = gemSparkle;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Gems glow and twinkle like the Crash 2/3 crystals");
+
         bool singleDrop = ConfigManager.View.SingleBoxDrop;
         if (ImGui.Checkbox("Japanese box drop (one box)", ref singleDrop))
         {

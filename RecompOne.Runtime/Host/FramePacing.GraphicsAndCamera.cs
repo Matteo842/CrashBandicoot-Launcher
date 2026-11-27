@@ -22,6 +22,7 @@ public static partial class FramePacing
         RestoreNativeWideObjectFrustum(m);
         // #243 classic box counter crate: no lerp, no 16:9 repairs.
         if (_classicGhost) return true;
+        BeginGemSparkle(c, m);
         WidenNativeWideObjectFrustum(c, m);
         WidenNativeWideEpilogueBackground(c, m);
         BeginNativeWideObjectRepair(c, m);
@@ -61,6 +62,7 @@ public static partial class FramePacing
     public static void PostGfxTransformMesh(CpuContext c, IMemory m)
     {
         if (_classicGhost) return;
+        EndGemSparkle(m);
         EndNativeWideObjectRepair(m);
         EndNativeWideCoreDepthObject(m);
         RestoreSvtx(m);

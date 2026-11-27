@@ -531,6 +531,17 @@ public class ViewConfig
     }
 
     /// <summary>
+    /// Gem sparkle (#244): gems get a soft colored glow and twinkling stars like the
+    /// Crash 2/3 crystals (level end gems, map gem icons; gem platforms only the stars).
+    /// Off by default.
+    /// </summary>
+    public bool GemSparkle
+    {
+        get => GetBool("GemSparkle");
+        set => SetBool("GemSparkle", value);
+    }
+
+    /// <summary>
     /// Japanese level end (#170): after a deathless run with missed boxes, only one
     /// box drops on Crash, and the counter text appears with the full missed count once
     /// that box has hit him (#174). Off by default (NTSC-U: one box per missed box).

@@ -83,6 +83,12 @@ int titleMenuRenders = 0;
 if (Environment.GetEnvironmentVariable("PACELOG") == "1") ConfigManager.View.SetBool("Diagnostics.FramePacing", true);
 // CAMTRACE=1 writes state/logs/camtrace.txt (one line per CamFollow: progress, LevelUpdate branch, cam_speed).
 if (Environment.GetEnvironmentVariable("CAMTRACE") == "1") FramePacing.CameraTrace = true;
+// VIEWBOOL=<Key,...>: turn on ViewConfig bool settings (e.g. GemSparkle, #244).
+foreach (string key in (Environment.GetEnvironmentVariable("VIEWBOOL") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+    ConfigManager.View.SetBool(key, true);
+// POKE=<hexaddr>=<hexval>,...: RAM words written before every render (e.g. 80061988=3FFFFFFE owns every gem).
+var pokes = (Environment.GetEnvironmentVariable("POKE") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+    .Select(p => p.Split('=')).Select(p => (Addr: Convert.ToUInt32(p[0], 16), Value: Convert.ToUInt32(p[1], 16))).ToArray();
 ConfigManager.SaveGame(); ConfigManager.SaveView([]);
 string? stateFile = Environment.GetEnvironmentVariable("STATE");
 int stateAt = int.TryParse(Environment.GetEnvironmentVariable("STATEAT"), out int sa) ? sa : 120;
@@ -353,6 +359,7 @@ using var triHook = triLogRender >= 0 || wedge
 using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
     (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((original, c, m) =>
     {
+        foreach (var (pa, pv) in pokes) m.WriteU32(pa, pv);
         if (aspect > 0 && GpuHle.WideAspect != aspect) { GpuHle.WideAspect = aspect; GpuHle.RefreshWideFov(); }
         // MAPLEVEL=<slot>: after New Game, the island map opens at that node (written
         // every frame until IsldC has started, so it wins over the new game's 99).
