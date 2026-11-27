@@ -135,6 +135,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _introOnNewGame;
     ThemeCheck? _doubleWumpaCrate;
     ThemeCheck? _mapWrapAround;
+    ThemeCheck? _cortexPowerFirst;
     ThemeCheck? _startPauseMenu;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
@@ -368,6 +369,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_introOnNewGame, state, "introOnNewGame");
         SetCheck(_doubleWumpaCrate, state, "doubleWumpaCrate");
         SetCheck(_mapWrapAround, state, "mapWrapAround");
+        SetCheck(_cortexPowerFirst, state, "cortexPowerFirst");
         SetCheck(_startPauseMenu, state, "startPauseMenu");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
@@ -1956,6 +1958,11 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         page.Controls.Add(_mapWrapAround);
         y += 52;
         AddHint("On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original.");
+        _cortexPowerFirst = MakeCheck("Cortex Power before Heavy Machinery");
+        _cortexPowerFirst.Location = new Point(12, y);
+        page.Controls.Add(_cortexPowerFirst);
+        y += 52;
+        AddHint("On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished.");
 
         // Scroll extent = last control + a small margin (no empty hint gap at the end).
         foreach (var p in pages)
@@ -1994,6 +2001,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 introOnNewGame = _introOnNewGame?.Checked ?? false,
                 doubleWumpaCrate = _doubleWumpaCrate?.Checked ?? false,
                 mapWrapAround = _mapWrapAround?.Checked ?? false,
+                cortexPowerFirst = _cortexPowerFirst?.Checked ?? false,
                 startPauseMenu = _startPauseMenu?.Checked ?? true,
             });
             CloseSheet();

@@ -34,10 +34,12 @@ public static class LevelWarpList
 
         public void Warp()
         {
+            // #173 Cortex Power first: the level keeps the slot the map plays it from.
+            uint slot = MapLevelSwap.Slot(MapSlot, LevelId);
             if (IsBonus)
-                CheatManager.RequestBonusWarp(LevelId, MapSlot, BonusLevelId, BonusRound);
+                CheatManager.RequestBonusWarp(LevelId, slot, BonusLevelId, BonusRound);
             else
-                CheatManager.RequestWarp(LevelId, MapSlot);
+                CheatManager.RequestWarp(LevelId, slot);
         }
     }
 

@@ -416,7 +416,8 @@ public static class GemHints
         foreach (var l in Levels)
         {
             if (l.Lid != lid) continue;
-            level = l;
+            // #173: with Cortex Power first, a level's gem bit is the slot it plays from.
+            level = l with { Slot = MapLevelSwap.Slot(l.Slot, l.Lid) };
             return true;
         }
         level = default;
@@ -428,7 +429,7 @@ public static class GemHints
         foreach (var l in Levels)
         {
             if (l.Slot != slot) continue;
-            lid = l.Lid;
+            lid = MapLevelSwap.Lid(slot, l.Lid);
             return true;
         }
         return OtherSlots.TryGetValue(slot, out lid);

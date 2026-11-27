@@ -594,4 +594,16 @@ public class ViewConfig
         get => GetBool("MapWrapAround");
         set => SetBool("MapWrapAround", value);
     }
+
+    /// <summary>
+    /// Cortex Power first (#173): on the third island the first map node (Crash in
+    /// front of the power plant) loads Cortex Power and the second Heavy Machinery,
+    /// names swapped too. Progress and gems stay on the map node, so with only one of
+    /// the two finished, turning it off swaps which one counts as done. Off by default.
+    /// </summary>
+    public bool CortexPowerFirst
+    {
+        get => GetBool("CortexPowerFirst");
+        set => SetBool("CortexPowerFirst", value);
+    }
 }

@@ -164,6 +164,9 @@ static class SettingsDialog
         var mapWrapAround = AddSwitch(activity, card, "Island map wrap-around", view.MapWrapAround, bodyBold);
         card.AddView(Hint(activity,
             "On the island map, once the Cortex level is unlocked: push forward on the Cortex level to go to N. Sanity Beach, and back on N. Sanity Beach to go to the Cortex level. The map fades out and in. Off: both ends stop, as in the original.",
+        var cortexPowerFirst = AddSwitch(activity, card, "Cortex Power before Heavy Machinery", view.CortexPowerFirst, bodyBold);
+        card.AddView(Hint(activity,
+            "On the third island, the first level (where Crash stands at the power plant) is Cortex Power and the second is Heavy Machinery, so the map and the level order match. Progress and gems stay with the map spot: turned off with only one of the two finished, the other one counts as finished.",
             bodyFont));
 
         if (gpuLabRequested != null)
@@ -236,6 +239,7 @@ static class SettingsDialog
             view.IntroOnNewGame = introOnNewGame.Checked;
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
             view.MapWrapAround = mapWrapAround.Checked;
+            view.CortexPowerFirst = cortexPowerFirst.Checked;
 
             ConfigManager.SaveGame();
             ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());

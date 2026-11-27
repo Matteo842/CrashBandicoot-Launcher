@@ -154,6 +154,13 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
         ImGui.TextDisabled("Map: forward on Cortex goes to the first level, back on it to Cortex");
+        bool cortexFirst = ConfigManager.View.CortexPowerFirst;
+        if (ImGui.Checkbox("Cortex Power before Heavy Machinery", ref cortexFirst))
+        {
+            ConfigManager.View.CortexPowerFirst = cortexFirst;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Island 3: the power plant spot loads Cortex Power; progress stays per map spot");
 
         bool vsync = ConfigManager.View.VSync;
         if (ImGui.Checkbox("VSync", ref vsync))

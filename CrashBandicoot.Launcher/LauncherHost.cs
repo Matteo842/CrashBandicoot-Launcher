@@ -238,6 +238,7 @@ public sealed class LauncherHost : Form
             introOnNewGame = ConfigManager.View.IntroOnNewGame,
             doubleWumpaCrate = ConfigManager.View.DoubleWumpaCrate,
             mapWrapAround = ConfigManager.View.MapWrapAround,
+            cortexPowerFirst = ConfigManager.View.CortexPowerFirst,
             startPauseMenu = ConfigManager.View.StartPauseMenu,
             infiniteLives = CheatConfig.InfiniteLives,
             levelSelect = CheatConfig.LevelSelect,
@@ -721,6 +722,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.DoubleWumpaCrate = dwc.GetBoolean();
         if (root.TryGetProperty("mapWrapAround", out var mwa))
             ConfigManager.View.MapWrapAround = mwa.GetBoolean();
+        if (root.TryGetProperty("cortexPowerFirst", out var cpf))
+            ConfigManager.View.CortexPowerFirst = cpf.GetBoolean();
         if (root.TryGetProperty("startPauseMenu", out var spm))
             ConfigManager.View.StartPauseMenu = spm.GetBoolean();
 

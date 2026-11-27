@@ -123,6 +123,7 @@ public static partial class FramePacing
             if (_interpEngaged) InterpMark(17, c.A0);
         }
         NoteBoxDropUpdate(c.A0);
+        NoteMapSwapUpdate(c.A0);
         // Hold / NSInit run GOOL with pacing off. Hoppers Wait then Jump
         // (may OR SOLID_TOP). If we do not record them here, unlock treats
         // them as pillars and i+=1 runs every present until Crash dies and
@@ -311,6 +312,7 @@ public static partial class FramePacing
                 ApplySingleBoxDrop(m);
                 // A0 is not preserved across the call: use the noted fruit.
                 DoubleWumpaCrateFruit(m, _wumpaCrateFruit);
+                ApplyMapLevelSwap(m);
                 RestorePadSpin(m);
                 RestoreCrashStamp(m);
                 RestoreCardTaps(m);
