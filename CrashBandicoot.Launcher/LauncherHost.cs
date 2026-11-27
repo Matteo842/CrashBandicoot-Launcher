@@ -234,6 +234,7 @@ public sealed class LauncherHost : Form
             gemHints = ConfigManager.View.GemHints,
             gemSparkle = ConfigManager.View.GemSparkle,
             singleBoxDrop = ConfigManager.View.SingleBoxDrop,
+            newGemOnly = ConfigManager.View.NewGemOnly,
             pityMask = ConfigManager.View.PityMask,
             introOnNewGame = ConfigManager.View.IntroOnNewGame,
             doubleWumpaCrate = ConfigManager.View.DoubleWumpaCrate,
@@ -714,6 +715,8 @@ public sealed class LauncherHost : Form
             ConfigManager.View.GemSparkle = gsp.GetBoolean();
         if (root.TryGetProperty("singleBoxDrop", out var sbd))
             ConfigManager.View.SingleBoxDrop = sbd.GetBoolean();
+        if (root.TryGetProperty("newGemOnly", out var ngo))
+            ConfigManager.View.NewGemOnly = ngo.GetBoolean();
         if (root.TryGetProperty("pityMask", out var pm))
             ConfigManager.View.PityMask = pm.GetBoolean();
         if (root.TryGetProperty("introOnNewGame", out var ing))

@@ -553,6 +553,17 @@ public class ViewConfig
     }
 
     /// <summary>
+    /// New gem only (#77): when a gem is earned, the level end screen skips the parade
+    /// of every gem already collected and shows only the new one. The gem is still
+    /// saved. Off by default (original: all owned gems fly by first).
+    /// </summary>
+    public bool NewGemOnly
+    {
+        get => GetBool("NewGemOnly");
+        set => SetBool("NewGemOnly", value);
+    }
+
+    /// <summary>
     /// Pity mask (#186): after 3 deaths in a row without a new checkpoint, Crash
     /// respawns with an Aku Aku mask, like Crash 2 and 3. Off by default.
     /// </summary>

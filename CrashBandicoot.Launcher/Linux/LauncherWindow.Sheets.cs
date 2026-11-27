@@ -298,6 +298,7 @@ sealed partial class LauncherWindow
         var gemHints = Nav(new ThemeCheck("Gem hints") { Checked = view.GemHints });
         var gemSparkle = Nav(new ThemeCheck("Gem sparkle") { Checked = view.GemSparkle });
         var singleBoxDrop = Nav(new ThemeCheck("Japanese box drop (one box)") { Checked = view.SingleBoxDrop });
+        var newGemOnly = Nav(new ThemeCheck("New gem only") { Checked = view.NewGemOnly });
         var pityMask = Nav(new ThemeCheck("Pity mask") { Checked = view.PityMask });
         var introOnNewGame = Nav(new ThemeCheck("Story intro on New Game") { Checked = view.IntroOnNewGame });
         var doubleWumpaCrate = Nav(new ThemeCheck("Double wumpa crate") { Checked = view.DoubleWumpaCrate });
@@ -380,6 +381,8 @@ sealed partial class LauncherWindow
                     Hint("Gems glow and twinkle like the Crash 2 and 3 crystals: the gems at the level end and on the map get a soft colored glow and little stars; owned gem platforms only the stars."),
                     WithMargin(singleBoxDrop, new Thickness(0, 0, 0, 14)),
                     Hint("At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original."),
+                    WithMargin(newGemOnly, new Thickness(0, 0, 0, 14)),
+                    Hint("When you earn a gem, the level end shows only the new gem and skips the parade of every gem you already have. The gem is still saved. Off: all your gems fly by first, as in the original."),
                     WithMargin(pityMask, new Thickness(0, 0, 0, 14)),
                     Hint("After 3 deaths in a row without reaching a new checkpoint, Crash respawns with an Aku Aku mask, and again after every later death there, like Crash 2 and 3. Not in boss fights or on the hog."),
                     WithMargin(introOnNewGame, new Thickness(0, 0, 0, 14)),
@@ -433,6 +436,7 @@ sealed partial class LauncherWindow
             view.GemHints = gemHints.Checked;
             view.GemSparkle = gemSparkle.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
+            view.NewGemOnly = newGemOnly.Checked;
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;

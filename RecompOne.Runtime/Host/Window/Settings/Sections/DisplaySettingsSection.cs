@@ -124,6 +124,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Level end: one box drops for all missed boxes, like NTSC-J");
 
+        bool newGemOnly = ConfigManager.View.NewGemOnly;
+        if (ImGui.Checkbox("New gem only", ref newGemOnly))
+        {
+            ConfigManager.View.NewGemOnly = newGemOnly;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Gem earned: skip the parade of owned gems, show only the new one");
+
         bool pityMask = ConfigManager.View.PityMask;
         if (ImGui.Checkbox("Pity mask", ref pityMask))
         {

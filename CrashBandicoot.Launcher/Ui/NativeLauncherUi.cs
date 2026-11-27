@@ -131,6 +131,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _gemHints;
     ThemeCheck? _gemSparkle;
     ThemeCheck? _singleBoxDrop;
+    ThemeCheck? _newGemOnly;
     ThemeCheck? _pityMask;
     ThemeCheck? _introOnNewGame;
     ThemeCheck? _doubleWumpaCrate;
@@ -365,6 +366,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_gemHints, state, "gemHints");
         SetCheck(_gemSparkle, state, "gemSparkle");
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
+        SetCheck(_newGemOnly, state, "newGemOnly");
         SetCheck(_pityMask, state, "pityMask");
         SetCheck(_introOnNewGame, state, "introOnNewGame");
         SetCheck(_doubleWumpaCrate, state, "doubleWumpaCrate");
@@ -1936,6 +1938,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 52;
         AddHint("At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original.");
 
+        _newGemOnly = MakeCheck("New gem only");
+        _newGemOnly.Location = new Point(12, y);
+        page.Controls.Add(_newGemOnly);
+        y += 52;
+        AddHint("When you earn a gem, the level end shows only the new gem and skips the parade of every gem you already have. The gem is still saved. Off: all your gems fly by first, as in the original.");
+
         _pityMask = MakeCheck("Pity mask");
         _pityMask.Location = new Point(12, y);
         page.Controls.Add(_pityMask);
@@ -1997,6 +2005,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 gemHints = _gemHints?.Checked ?? false,
                 gemSparkle = _gemSparkle?.Checked ?? false,
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
+                newGemOnly = _newGemOnly?.Checked ?? false,
                 pityMask = _pityMask?.Checked ?? false,
                 introOnNewGame = _introOnNewGame?.Checked ?? false,
                 doubleWumpaCrate = _doubleWumpaCrate?.Checked ?? false,

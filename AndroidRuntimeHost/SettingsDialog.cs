@@ -148,6 +148,11 @@ static class SettingsDialog
             "At the level end, after a run without deaths, only one box drops on Crash for the boxes you missed, like the Japanese version. The number still shows how many you missed. Off: one box per missed box, as in the original.",
             bodyFont));
 
+        var newGemOnly = AddSwitch(activity, card, "New gem only", view.NewGemOnly, bodyBold);
+        card.AddView(Hint(activity,
+            "When you earn a gem, the level end shows only the new gem and skips the parade of every gem you already have. The gem is still saved. Off: all your gems fly by first, as in the original.",
+            bodyFont));
+
         var pityMask = AddSwitch(activity, card, "Pity mask", view.PityMask, bodyBold);
         card.AddView(Hint(activity,
             "After 3 deaths in a row without reaching a new checkpoint, Crash respawns with an Aku Aku mask, and again after every later death there, like Crash 2 and 3. Not in boss fights or on the hog.",
@@ -235,6 +240,7 @@ static class SettingsDialog
             view.GemHints = gemHints.Checked;
             view.GemSparkle = gemSparkle.Checked;
             view.SingleBoxDrop = singleBoxDrop.Checked;
+            view.NewGemOnly = newGemOnly.Checked;
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
             view.DoubleWumpaCrate = doubleWumpaCrate.Checked;

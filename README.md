@@ -29,6 +29,7 @@ This isn't an emulator. The original PS1 code is **statically recompiled** into 
 - **Gem hints.** Optional: on the map, a card shows what the selected level's gem needs (all boxes without dying, and the colored gem that opens its gem path). In levels it reminds you at the start, tells which gem an inactive gem platform needs, and warns when a death loses the gem.
 - **Gem sparkle.** Optional: gems glow and twinkle like the Crash 2 and 3 crystals (level end gems, map gem icons; owned gem platforms get the stars).
 - **Japanese box drop.** Optional: at the level end, only one box drops on Crash for all the boxes you missed, like the Japanese version. The counter still shows how many you missed.
+- **New gem only.** Optional: when you earn a gem, the level end shows only the new gem instead of the parade of every gem you already have.
 - **Story intro on New Game.** Optional: New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it.
 - **Double wumpa crate.** Optional: the bouncy wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3.
 - **Island map wrap-around.** Optional: once the Cortex level is unlocked, push forward on it to go back to N. Sanity Beach, or back on N. Sanity Beach to go to the Cortex level.
