@@ -864,6 +864,7 @@ public static partial class FramePacing
     public static bool PreChangeState(CpuContext c, IMemory m)
     {
         NoteNewObject(c);
+        DoubleWumpaCrateFruit(m, c.A0);
         if (!IsActive(m)) return true;
         try
         {

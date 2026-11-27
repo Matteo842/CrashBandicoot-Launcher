@@ -116,6 +116,7 @@ public static partial class FramePacing
         _inCrashUpdate = false;
         // Interpolated FPS: a draw-only pass draws the object and runs nothing.
         if (_interpRender) return InterpDrawObject(c, m);
+        NoteWumpaCrateFruit(m, c.A0);
         if (_interpOn)
         {
             _interpObj = c.A0;
@@ -308,6 +309,8 @@ public static partial class FramePacing
                 if (_interpRender) return;
                 if (_interpOn) InterpCapturePose(m);
                 ApplySingleBoxDrop(m);
+                // A0 is not preserved across the call: use the noted fruit.
+                DoubleWumpaCrateFruit(m, _wumpaCrateFruit);
                 RestorePadSpin(m);
                 RestoreCrashStamp(m);
                 RestoreCardTaps(m);

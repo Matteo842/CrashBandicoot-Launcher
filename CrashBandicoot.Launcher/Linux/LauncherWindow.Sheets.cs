@@ -300,6 +300,7 @@ sealed partial class LauncherWindow
         var singleBoxDrop = Nav(new ThemeCheck("Japanese box drop (one box)") { Checked = view.SingleBoxDrop });
         var pityMask = Nav(new ThemeCheck("Pity mask") { Checked = view.PityMask });
         var introOnNewGame = Nav(new ThemeCheck("Story intro on New Game") { Checked = view.IntroOnNewGame });
+        var doubleWumpaCrate = Nav(new ThemeCheck("Double wumpa crate") { Checked = view.DoubleWumpaCrate });
 
         var strengthRow = Row(Label("Filter strength", 202), strength, 30);
         void SyncStrength() => strengthRow.IsVisible = ComboValue(texFilter, 0) != 0;
@@ -380,7 +381,9 @@ sealed partial class LauncherWindow
                     WithMargin(pityMask, new Thickness(0, 0, 0, 14)),
                     Hint("After 3 deaths in a row without reaching a new checkpoint, Crash respawns with an Aku Aku mask, and again after every later death there, like Crash 2 and 3. Not in boss fights or on the hog."),
                     WithMargin(introOnNewGame, new Thickness(0, 0, 0, 14)),
-                    Hint("New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original.", 8),
+                    Hint("New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original."),
+                    WithMargin(doubleWumpaCrate, new Thickness(0, 0, 0, 14)),
+                    Hint("A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.", 8),
                 },
             },
         ];
@@ -426,6 +429,7 @@ sealed partial class LauncherWindow
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
+            view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
             view.StartPauseMenu = startPauseMenu.Checked;
             ConfigManager.SaveGame();
             SaveView();

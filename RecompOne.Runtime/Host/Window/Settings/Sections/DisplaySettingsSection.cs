@@ -140,6 +140,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("New Game plays the story cutscene first, like Crash 2 and 3");
 
+        bool doubleWumpa = ConfigManager.View.DoubleWumpaCrate;
+        if (ImGui.Checkbox("Double wumpa crate", ref doubleWumpa))
+        {
+            ConfigManager.View.DoubleWumpaCrate = doubleWumpa;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Wumpa crate: 2 wumpa per bounce instead of 1, like Crash 3");
+
         bool vsync = ConfigManager.View.VSync;
         if (ImGui.Checkbox("VSync", ref vsync))
         {

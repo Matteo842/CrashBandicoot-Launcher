@@ -133,6 +133,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
     ThemeCheck? _singleBoxDrop;
     ThemeCheck? _pityMask;
     ThemeCheck? _introOnNewGame;
+    ThemeCheck? _doubleWumpaCrate;
     ThemeCheck? _startPauseMenu;
     ThemeCheck? _cheatLives;
     ThemeCheck? _cheatLevel;
@@ -364,6 +365,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         SetCheck(_singleBoxDrop, state, "singleBoxDrop");
         SetCheck(_pityMask, state, "pityMask");
         SetCheck(_introOnNewGame, state, "introOnNewGame");
+        SetCheck(_doubleWumpaCrate, state, "doubleWumpaCrate");
         SetCheck(_startPauseMenu, state, "startPauseMenu");
         SetCheck(_cheatLives, state, "infiniteLives");
         SetCheck(_cheatLevel, state, "levelSelect");
@@ -1942,6 +1944,12 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
         y += 52;
         AddHint("New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original.");
 
+        _doubleWumpaCrate = MakeCheck("Double wumpa crate");
+        _doubleWumpaCrate.Location = new Point(12, y);
+        page.Controls.Add(_doubleWumpaCrate);
+        y += 52;
+        AddHint("A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.");
+
         // Scroll extent = last control + a small margin (no empty hint gap at the end).
         foreach (var p in pages)
             p.AutoScrollMinSize = new Size(0, p.Controls.Cast<Control>().Max(c => c.Bottom) + 12);
@@ -1977,6 +1985,7 @@ public sealed class NativeLauncherUi : UserControl, ILauncherUi
                 singleBoxDrop = _singleBoxDrop?.Checked ?? false,
                 pityMask = _pityMask?.Checked ?? false,
                 introOnNewGame = _introOnNewGame?.Checked ?? false,
+                doubleWumpaCrate = _doubleWumpaCrate?.Checked ?? false,
                 startPauseMenu = _startPauseMenu?.Checked ?? true,
             });
             CloseSheet();

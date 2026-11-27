@@ -158,6 +158,11 @@ static class SettingsDialog
             "New Game plays the story cutscene before the map, like Crash 2 and 3. Start skips it. Off: the intro only plays when you wait on the title screen, as in the original.",
             bodyFont));
 
+        var doubleWumpaCrate = AddSwitch(activity, card, "Double wumpa crate", view.DoubleWumpaCrate, bodyBold);
+        card.AddView(Hint(activity,
+            "A wumpa crate gives 2 wumpa for each bounce instead of 1, like Crash 3. Off: 1 wumpa per bounce, as in the original.",
+            bodyFont));
+
         if (gpuLabRequested != null)
         {
             card.AddView(Hint(activity, "Diagnostics", bodyBold), Margin(activity, top: 10, bottom: 2));
@@ -226,6 +231,7 @@ static class SettingsDialog
             view.SingleBoxDrop = singleBoxDrop.Checked;
             view.PityMask = pityMask.Checked;
             view.IntroOnNewGame = introOnNewGame.Checked;
+            view.DoubleWumpaCrate = doubleWumpaCrate.Checked;
 
             ConfigManager.SaveGame();
             ConfigManager.SaveView(Array.Empty<RecompOne.Runtime.Host.Window.IPanel>());

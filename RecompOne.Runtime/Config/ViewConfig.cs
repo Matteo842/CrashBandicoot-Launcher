@@ -572,4 +572,14 @@ public class ViewConfig
         get => GetBool("IntroOnNewGame", true);
         set => SetBool("IntroOnNewGame", value);
     }
+
+    /// <summary>
+    /// Double wumpa crate (#216): the bouncy wumpa crate gives 2 wumpa per bounce
+    /// instead of 1, like Crash 3. Off by default.
+    /// </summary>
+    public bool DoubleWumpaCrate
+    {
+        get => GetBool("DoubleWumpaCrate");
+        set => SetBool("DoubleWumpaCrate", value);
+    }
 }
