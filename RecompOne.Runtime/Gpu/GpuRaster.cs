@@ -33,6 +33,9 @@ public sealed partial class Gpu
         bool semi = (cmd & (1u << 25)) != 0;
         bool raw = (cmd & (1u << 24)) != 0;
         int n = quad ? 4 : 3;
+        // Backend readiness cannot change inside one primitive; one interface
+        // call instead of one per vertex.
+        bool hle = HleOn;
 
         Span<Vert> v = stackalloc Vert[4];
         int idx = 1;
@@ -57,7 +60,7 @@ public sealed partial class Gpu
             v[i].Subpixel = false;
             v[i].HasGteZ = false;
             v[i].GteZ = 0f;
-            if ((HleOn || Hle.GpuHle.DejitterActive) &&
+            if ((hle || Hle.GpuHle.DejitterActive) &&
                 GteScreenCache.TryFindVertex(vsrc, vw, gx, gy, out float fx, out float fy, out float gz))
             {
                 if (gz > 0f)
@@ -75,7 +78,7 @@ public sealed partial class Gpu
                         v[i].Subpixel = true;
                         // The Android/software path has no floating-point GPU rasterizer.
                         // Rounded GTE coordinates still remove the truncation wobble.
-                        if (!HleOn)
+                        if (!hle)
                         {
                             v[i].X = _drawOffsetX + (int)MathF.Round(fx);
                             v[i].Y = _drawOffsetY + (int)MathF.Round(fy);
@@ -138,7 +141,7 @@ public sealed partial class Gpu
                 }
         }
 
-        if (HleOn)
+        if (hle)
         {
             if (quad && !tex && !gouraud && HleWideScreenQuad(v, semi)) return;
             if (quad && tex && semi && !gouraud && !raw && (HleWideFogQuad(v, clut) || HleWideRainTile(v, clut))) return;

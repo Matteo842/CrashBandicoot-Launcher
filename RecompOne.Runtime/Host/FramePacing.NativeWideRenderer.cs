@@ -52,7 +52,16 @@ public static partial class FramePacing
     static readonly NativeWideWorld[] _nativeWideWorldPool =
         [.. Enumerable.Range(0, NativeWideMaxWorlds).Select(_ => new NativeWideWorld())];
     static readonly NativeWideClipVertex[][] _nativeWideCameraVertices = new NativeWideClipVertex[NativeWideMaxWorlds][];
-    static readonly bool[][] _nativeWideVertexShaded = new bool[NativeWideMaxWorlds][];
+    // Shaded this frame when the entry equals _nativeWideShadeStamp: no per-frame clear.
+    static readonly int[][] _nativeWideVertexShaded = new int[NativeWideMaxWorlds][];
+    static int _nativeWideShadeStamp;
+    // Diagnostics (WideProbe WIDEVERIFY): false takes the original slow paths, which must
+    // submit exactly the same triangles.
+    static bool _nativeWideFastPaths = true;
+    // Each camera vertex's screen position, projected once per frame instead of once
+    // per polygon that uses it (three to six divisions per polygon before).
+    static readonly float[][] _nativeWideScreenX = new float[NativeWideMaxWorlds][];
+    static readonly float[][] _nativeWideScreenY = new float[NativeWideMaxWorlds][];
     static byte[]? _nativeWideRam;
     static int _nativeWideRamMask;
     public static double LastNativeWideCpuMs { get; private set; }
@@ -96,7 +105,14 @@ public static partial class FramePacing
         public int[]? Only;
         public readonly uint[] NeighborTpages = new uint[8];
         public NativeWideClipVertex[]? CameraVertices;
-        public bool[]? VertexShaded;
+        public int[]? VertexShaded;
+        // NativeWideProjectAxis of CameraVertices[0..ScreenCount) for this projection and origin.
+        public float[]? ScreenX;
+        public float[]? ScreenY;
+        public int ScreenCount;
+        public int ScreenProjection;
+        public int ScreenOriginX;
+        public int ScreenOriginY;
     }
 
     readonly record struct NativeWideTriangle(
@@ -525,6 +541,14 @@ public static partial class FramePacing
         float viewCenterY = gpu.DrawOffsetY + screenY;
         float near = projection * 0.5f + 1f;
 
+        if (++_nativeWideShadeStamp <= 0)
+        {
+            foreach (var stamps in _nativeWideVertexShaded)
+                if (stamps != null) Array.Clear(stamps);
+            _nativeWideShadeStamp = 1;
+        }
+        int screenOriginX = gpu.DrawOffsetX + screenX;
+        int screenOriginY = gpu.DrawOffsetY + screenY;
         for (int wi = 0; wi < drawWorldCount; wi++)
         {
             var world = worlds[wi];
@@ -533,13 +557,29 @@ public static partial class FramePacing
                 _nativeWideCameraVertices[wi] = vertices = new NativeWideClipVertex[world.VertexCount];
             var shaded = _nativeWideVertexShaded[wi];
             if (shaded == null || shaded.Length < world.VertexCount)
-                _nativeWideVertexShaded[wi] = shaded = new bool[world.VertexCount];
-            else
-                Array.Clear(shaded, 0, world.VertexCount);
+                _nativeWideVertexShaded[wi] = shaded = new int[world.VertexCount];
+            var sxs = _nativeWideScreenX[wi];
+            var sys = _nativeWideScreenY[wi];
+            if (sxs == null || sxs.Length < world.VertexCount)
+            {
+                _nativeWideScreenX[wi] = sxs = new float[world.VertexCount];
+                _nativeWideScreenY[wi] = sys = new float[world.VertexCount];
+            }
             for (int vi = 0; vi < world.VertexCount; vi++)
+            {
                 TryReadNativeWideCameraVertex(m, world, vi, matrix, 0, 0, shade: false, out vertices[vi]);
+                ref readonly var v = ref vertices[vi];
+                sxs[vi] = NativeWideProjectAxis(v.X, v.Z, projection, screenOriginX);
+                sys![vi] = NativeWideProjectAxis(v.Y, v.Z, projection, screenOriginY);
+            }
             world.CameraVertices = vertices;
             world.VertexShaded = shaded;
+            world.ScreenX = sxs;
+            world.ScreenY = sys;
+            world.ScreenCount = _nativeWideFastPaths ? world.VertexCount : 0;
+            world.ScreenProjection = projection;
+            world.ScreenOriginX = screenOriginX;
+            world.ScreenOriginY = screenOriginY;
         }
 
         uint drawCount = m.ReadU32(DrawCountAddr);
@@ -923,6 +963,40 @@ public static partial class FramePacing
         return (word & 0xFF000003u) == 0x80000002u ? word : 0;
     }
 
+    /// <summary>
+    /// Diagnostics (WideProbe): a hash of every field of the side and core triangles
+    /// waiting to be drawn, so two builds can be shown to submit the same geometry.
+    /// </summary>
+    public static ulong NativeWidePendingHash()
+    {
+        ulong h = 14695981039346656037ul;
+        void Mix(ulong v) { h = (h ^ v) * 1099511628211ul; }
+        void Vertex(in HleVertex v)
+        {
+            Mix(BitConverter.SingleToUInt32Bits(v.X)); Mix(BitConverter.SingleToUInt32Bits(v.Y));
+            Mix(BitConverter.SingleToUInt32Bits(v.Z));
+            Mix((ulong)v.R | (ulong)v.G << 8 | (ulong)v.B << 16 | (ulong)(ushort)v.U << 24
+                | (ulong)(ushort)v.V << 40 | (v.HasGteZ ? 1ul << 56 : 0));
+        }
+        void Triangles(List<NativeWideTriangle> list)
+        {
+            Mix((ulong)list.Count);
+            foreach (ref readonly var t in CollectionsMarshal.AsSpan(list))
+            {
+                Vertex(t.A); Vertex(t.B); Vertex(t.C);
+                var f = t.Flags;
+                Mix((f.Textured ? 1ul : 0) | (f.SemiTrans ? 2ul : 0) | (f.RawTexture ? 4ul : 0) | (f.Gouraud ? 8ul : 0)
+                    | (ulong)f.TPage << 8 | (ulong)f.Clut << 24 | (ulong)(uint)f.OtIndex << 40);
+                Mix((ulong)(int)f.WideMode);
+                Mix(BitConverter.SingleToUInt32Bits(t.Depth));
+            }
+        }
+        Triangles(_nativeWidePending);
+        Triangles(_nativeWideCorePending);
+        Mix((ulong)_nativeWideUserCore.Count);
+        return h;
+    }
+
     public static double ConsumeNativeWideCpuPeakMs()
     {
         double peak = LastNativeWideCpuPeakMs;
@@ -1007,29 +1081,40 @@ public static partial class FramePacing
         List<NativeWideTriangle> opaque, List<NativeWideTriangle> transparent)
     {
         double near = projection * 0.5 + 1.0;
-        Span<NativeWideClipVertex> clipped = stackalloc NativeWideClipVertex[4];
-        int clippedCount = 0;
-        var previous = input[2];
-        bool previousInside = previous.Z >= near;
-        for (int i = 0; i < 3; i++)
-        {
-            var current = input[i];
-            bool currentInside = current.Z >= near;
-            if (currentInside != previousInside)
-            {
-                float t = (float)((near - previous.Z) / (current.Z - previous.Z));
-                clipped[clippedCount++] = NativeWideLerp(previous, current, t);
-            }
-            if (currentInside)
-                clipped[clippedCount++] = current;
-            previous = current;
-            previousInside = currentInside;
-        }
-        if (clippedCount < 3) return 0;
-
         Span<HleVertex> projected = stackalloc HleVertex[4];
-        for (int i = 0; i < clippedCount; i++)
-            projected[i] = ProjectNativeWideClipVertex(clipped[i], projection, screenX, screenY, drawX, drawY);
+        int clippedCount;
+        // Wholly in front of the near plane (nearly every triangle): the clip below
+        // would only copy the three corners in order.
+        if (_nativeWideFastPaths && input[0].Z >= near && input[1].Z >= near && input[2].Z >= near)
+        {
+            clippedCount = 3;
+            for (int i = 0; i < 3; i++)
+                projected[i] = ProjectNativeWideClipVertex(input[i], projection, screenX, screenY, drawX, drawY);
+        }
+        else
+        {
+            Span<NativeWideClipVertex> clipped = stackalloc NativeWideClipVertex[4];
+            clippedCount = 0;
+            var previous = input[2];
+            bool previousInside = previous.Z >= near;
+            for (int i = 0; i < 3; i++)
+            {
+                var current = input[i];
+                bool currentInside = current.Z >= near;
+                if (currentInside != previousInside)
+                {
+                    float t = (float)((near - previous.Z) / (current.Z - previous.Z));
+                    clipped[clippedCount++] = NativeWideLerp(previous, current, t);
+                }
+                if (currentInside)
+                    clipped[clippedCount++] = current;
+                previous = current;
+                previousInside = currentInside;
+            }
+            if (clippedCount < 3) return 0;
+            for (int i = 0; i < clippedCount; i++)
+                projected[i] = ProjectNativeWideClipVertex(clipped[i], projection, screenX, screenY, drawX, drawY);
+        }
 
         int added = 0;
         for (int i = 1; i + 1 < clippedCount; i++)
@@ -1107,10 +1192,28 @@ public static partial class FramePacing
         Span<HleVertex> output = stackalloc HleVertex[8];
         input[0] = a; input[1] = b; input[2] = c;
         int count = 3;
-        count = ClipHlePlane(input, count, output, x0, vertical: true, keepPositive: true);
-        count = ClipHlePlane(output, count, input, x1, vertical: true, keepPositive: false);
-        count = ClipHlePlane(input, count, output, y0, vertical: false, keepPositive: true);
-        count = ClipHlePlane(output, count, input, y1, vertical: false, keepPositive: false);
+        // A plane no corner is outside of would only copy the polygon: skip it.
+        // The polygon is back in `input` after each plane.
+        if (!_nativeWideFastPaths || !NativeWideAllInside(input, count, x0, vertical: true, keepPositive: true))
+        {
+            count = ClipHlePlane(input, count, output, x0, vertical: true, keepPositive: true);
+            output[..count].CopyTo(input);
+        }
+        if (!_nativeWideFastPaths || !NativeWideAllInside(input, count, x1, vertical: true, keepPositive: false))
+        {
+            count = ClipHlePlane(input, count, output, x1, vertical: true, keepPositive: false);
+            output[..count].CopyTo(input);
+        }
+        if (!_nativeWideFastPaths || !NativeWideAllInside(input, count, y0, vertical: false, keepPositive: true))
+        {
+            count = ClipHlePlane(input, count, output, y0, vertical: false, keepPositive: true);
+            output[..count].CopyTo(input);
+        }
+        if (!_nativeWideFastPaths || !NativeWideAllInside(input, count, y1, vertical: false, keepPositive: false))
+        {
+            count = ClipHlePlane(input, count, output, y1, vertical: false, keepPositive: false);
+            output[..count].CopyTo(input);
+        }
         if (count < 3) return 0;
 
         int added = 0;
@@ -1127,6 +1230,18 @@ public static partial class FramePacing
             added++;
         }
         return added;
+    }
+
+    // ClipHlePlane's own inside test, for every corner.
+    static bool NativeWideAllInside(ReadOnlySpan<HleVertex> polygon, int count, float edge, bool vertical, bool keepPositive)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            float coord = vertical ? polygon[i].X : polygon[i].Y;
+            float dist = keepPositive ? coord - edge : edge - coord;
+            if (!(dist >= 0f)) return false;
+        }
+        return true;
     }
 
     static int ClipHlePlane(
@@ -1229,11 +1344,12 @@ public static partial class FramePacing
     {
         var shaded = world.VertexShaded;
         var verts = world.CameraVertices;
-        if (shaded == null || verts == null || (uint)vertexIndex >= (uint)shaded.Length || shaded[vertexIndex])
+        if (shaded == null || verts == null || (uint)vertexIndex >= (uint)shaded.Length
+            || shaded[vertexIndex] == _nativeWideShadeStamp)
             return;
         if (_nativeWideShader is NativeWideShader.Normal or NativeWideShader.Ripple)
         {
-            shaded[vertexIndex] = true;
+            shaded[vertexIndex] = _nativeWideShadeStamp;
             return;
         }
 
@@ -1255,7 +1371,7 @@ public static partial class FramePacing
         }
         NativeWideShadeVertex(m, world, lx, ly, lz, v.Z, lightBank, ref r, ref g, ref b);
         verts[vertexIndex] = v with { R = r, G = g, B = b };
-        shaded[vertexIndex] = true;
+        shaded[vertexIndex] = _nativeWideShadeStamp;
     }
 
     static void NativeWideShadeVertex(IMemory m, NativeWideWorld world, int x, int y, int z,
@@ -1326,6 +1442,18 @@ public static partial class FramePacing
         return origin + projection * ir / sz;
     }
 
+    // NativeWideProjectAxis of a camera vertex, from the per-frame cache when it was
+    // projected with the same projection and origin (always, for the zone pass).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static float NativeWideScreenX(NativeWideWorld world, int index, in NativeWideClipVertex v, int projection, int originX) =>
+        (uint)index < (uint)world.ScreenCount && originX == world.ScreenOriginX && projection == world.ScreenProjection
+            ? world.ScreenX![index] : NativeWideProjectAxis(v.X, v.Z, projection, originX);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static float NativeWideScreenY(NativeWideWorld world, int index, in NativeWideClipVertex v, int projection, int originY) =>
+        (uint)index < (uint)world.ScreenCount && originY == world.ScreenOriginY && projection == world.ScreenProjection
+            ? world.ScreenY![index] : NativeWideProjectAxis(v.Y, v.Z, projection, originY);
+
     static bool NativeWideTouchesSides(
         NativeWideWorld world, int ia, int ib, int ic, float near,
         int projection, int screenX, int screenY, int drawX, int drawY,
@@ -1335,21 +1463,21 @@ public static partial class FramePacing
         if (verts == null || (uint)ia >= (uint)verts.Length
             || (uint)ib >= (uint)verts.Length || (uint)ic >= (uint)verts.Length)
             return false;
-        var a = verts[ia]; var b = verts[ib]; var c = verts[ic];
+        ref readonly var a = ref verts[ia]; ref readonly var b = ref verts[ib]; ref readonly var c = ref verts[ic];
         if (a.Z < near || b.Z < near || c.Z < near) return true;
 
         int ox = drawX + screenX, oy = drawY + screenY;
-        float ax = NativeWideProjectAxis(a.X, a.Z, projection, ox);
-        float bx = NativeWideProjectAxis(b.X, b.Z, projection, ox);
-        float cx = NativeWideProjectAxis(c.X, c.Z, projection, ox);
+        float ax = NativeWideScreenX(world, ia, a, projection, ox);
+        float bx = NativeWideScreenX(world, ib, b, projection, ox);
+        float cx = NativeWideScreenX(world, ic, c, projection, ox);
         float minX = Math.Min(ax, Math.Min(bx, cx));
         float maxX = Math.Max(ax, Math.Max(bx, cx));
         if (maxX < viewCenterX - wideHalf || minX > viewCenterX + wideHalf) return false;
         if (minX >= viewCenterX - coreHalf && maxX <= viewCenterX + coreHalf) return false;
 
-        float ay = NativeWideProjectAxis(a.Y, a.Z, projection, oy);
-        float by = NativeWideProjectAxis(b.Y, b.Z, projection, oy);
-        float cy = NativeWideProjectAxis(c.Y, c.Z, projection, oy);
+        float ay = NativeWideScreenY(world, ia, a, projection, oy);
+        float by = NativeWideScreenY(world, ib, b, projection, oy);
+        float cy = NativeWideScreenY(world, ic, c, projection, oy);
         float minY = Math.Min(ay, Math.Min(by, cy));
         float maxY = Math.Max(ay, Math.Max(by, cy));
         return maxY >= viewCenterY - halfHeight && minY <= viewCenterY + halfHeight;
@@ -1366,20 +1494,20 @@ public static partial class FramePacing
         if (verts == null || (uint)ia >= (uint)verts.Length
             || (uint)ib >= (uint)verts.Length || (uint)ic >= (uint)verts.Length)
             return false;
-        var a = verts[ia]; var b = verts[ib]; var c = verts[ic];
+        ref readonly var a = ref verts[ia]; ref readonly var b = ref verts[ib]; ref readonly var c = ref verts[ic];
         if (a.Z < near && b.Z < near && c.Z < near) return false;
         if (a.Z < near || b.Z < near || c.Z < near) return true;
 
         int ox = drawX + screenX, oy = drawY + screenY;
-        float ax = NativeWideProjectAxis(a.X, a.Z, projection, ox);
-        float bx = NativeWideProjectAxis(b.X, b.Z, projection, ox);
-        float cx = NativeWideProjectAxis(c.X, c.Z, projection, ox);
+        float ax = NativeWideScreenX(world, ia, a, projection, ox);
+        float bx = NativeWideScreenX(world, ib, b, projection, ox);
+        float cx = NativeWideScreenX(world, ic, c, projection, ox);
         if (Math.Max(ax, Math.Max(bx, cx)) <= viewCenterX - coreHalf
             || Math.Min(ax, Math.Min(bx, cx)) >= viewCenterX + coreHalf) return false;
 
-        float ay = NativeWideProjectAxis(a.Y, a.Z, projection, oy);
-        float by = NativeWideProjectAxis(b.Y, b.Z, projection, oy);
-        float cy = NativeWideProjectAxis(c.Y, c.Z, projection, oy);
+        float ay = NativeWideScreenY(world, ia, a, projection, oy);
+        float by = NativeWideScreenY(world, ib, b, projection, oy);
+        float cy = NativeWideScreenY(world, ic, c, projection, oy);
         return Math.Max(ay, Math.Max(by, cy)) >= viewCenterY - halfHeight
             && Math.Min(ay, Math.Min(by, cy)) <= viewCenterY + halfHeight;
     }
@@ -1540,16 +1668,16 @@ public static partial class FramePacing
         var verts = world.CameraVertices!;
         if ((uint)ia >= (uint)verts.Length || (uint)ib >= (uint)verts.Length || (uint)ic >= (uint)verts.Length)
             return false;
-        var a = verts[ia]; var b = verts[ib]; var c = verts[ic];
+        ref readonly var a = ref verts[ia]; ref readonly var b = ref verts[ib]; ref readonly var c = ref verts[ic];
         if (a.Z < near && b.Z < near && c.Z < near) return false;
         if (a.Z < near || b.Z < near || c.Z < near) return true;
-        float ax = NativeWideProjectAxis(a.X, a.Z, projection, originX);
-        float bx = NativeWideProjectAxis(b.X, b.Z, projection, originX);
-        float cx = NativeWideProjectAxis(c.X, c.Z, projection, originX);
+        float ax = NativeWideScreenX(world, ia, a, projection, originX);
+        float bx = NativeWideScreenX(world, ib, b, projection, originX);
+        float cx = NativeWideScreenX(world, ic, c, projection, originX);
         if (Math.Max(ax, Math.Max(bx, cx)) < x0 || Math.Min(ax, Math.Min(bx, cx)) > x1) return false;
-        float ay = NativeWideProjectAxis(a.Y, a.Z, projection, originY);
-        float by = NativeWideProjectAxis(b.Y, b.Z, projection, originY);
-        float cy = NativeWideProjectAxis(c.Y, c.Z, projection, originY);
+        float ay = NativeWideScreenY(world, ia, a, projection, originY);
+        float by = NativeWideScreenY(world, ib, b, projection, originY);
+        float cy = NativeWideScreenY(world, ic, c, projection, originY);
         return Math.Max(ay, Math.Max(by, cy)) >= y0 && Math.Min(ay, Math.Min(by, cy)) <= y1;
     }
 
@@ -1601,18 +1729,22 @@ public static partial class FramePacing
     {
         float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
         int behind = 0;
-        foreach (var p in points)
+        // The same products as matrix[i] * p (short to float is exact), loaded once.
+        float m0 = matrix[0], m1 = matrix[1], m2 = matrix[2], m3 = matrix[3], m4 = matrix[4],
+            m5 = matrix[5], m6 = matrix[6], m7 = matrix[7], m8 = matrix[8];
+        int ox = drawX + screenX, oy = drawY + screenY;
+        foreach (ref readonly var p in points)
         {
-            float z = MathF.Floor((matrix[6] * p.X + matrix[7] * p.Y + matrix[8] * p.Z) / 4096f) + world.Z;
+            float z = MathF.Floor((m6 * p.X + m7 * p.Y + m8 * p.Z) / 4096f) + world.Z;
             if (z < near)
             {
                 behind++;
                 continue;
             }
-            float x = MathF.Floor((matrix[0] * p.X + matrix[1] * p.Y + matrix[2] * p.Z) / 4096f) + world.X;
-            float y = MathF.Floor((matrix[3] * p.X + matrix[4] * p.Y + matrix[5] * p.Z) / 4096f) + world.Y;
-            float sx = NativeWideProjectAxis(x, z, projection, drawX + screenX);
-            float sy = NativeWideProjectAxis(y, z, projection, drawY + screenY);
+            float x = MathF.Floor((m0 * p.X + m1 * p.Y + m2 * p.Z) / 4096f) + world.X;
+            float y = MathF.Floor((m3 * p.X + m4 * p.Y + m5 * p.Z) / 4096f) + world.Y;
+            float sx = NativeWideProjectAxis(x, z, projection, ox);
+            float sy = NativeWideProjectAxis(y, z, projection, oy);
             minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx);
             minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
         }
@@ -1634,9 +1766,9 @@ public static partial class FramePacing
         if (n > verts.Length) n = verts.Length;
         for (int i = 0; i < n; i++)
         {
-            var v = verts[i];
+            ref readonly var v = ref verts[i];
             if (v.Z < near) return true;
-            float x = NativeWideProjectAxis(v.X, v.Z, projection, originX);
+            float x = NativeWideScreenX(world, i, v, projection, originX);
             if (x < left || x > right) return true;
         }
         return false;

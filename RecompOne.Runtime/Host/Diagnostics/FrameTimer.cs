@@ -8,7 +8,7 @@ namespace RecompOne.Runtime.Host.Diagnostics;
 /// the previous mark to a phase, so phases never overlap and always sum to the frame.
 /// All calls come from the game thread (OnRender runs inside DoRender).
 /// </summary>
-internal static class FrameTimer
+public static class FrameTimer
 {
     public enum Phase
     {
@@ -105,6 +105,22 @@ internal static class FrameTimer
         _worst = 0;
         _frames = 0;
         _windowStart = now;
+    }
+
+    /// <summary>
+    /// Forget the frame in flight (game held at the frame clock: app in background,
+    /// Android pause screen), so the hold is not reported as one huge frame.
+    /// </summary>
+    public static void Reset()
+    {
+        _mark = 0;
+        _frameStart = 0;
+        _windowStart = 0;
+        _frames = 0;
+        _worst = 0;
+        _frameGame = 0;
+        _frameWait = 0;
+        Array.Clear(_acc);
     }
 
     static double ToMs(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;

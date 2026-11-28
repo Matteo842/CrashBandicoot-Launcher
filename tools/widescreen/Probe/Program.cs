@@ -178,8 +178,19 @@ bool booted = false;
 int frames = 0, renders = 0;
 int[]? origin = null;
 var frameLog = new List<object>();
-void Save() => File.WriteAllText(Path.Combine(output, "log.json"),
-    JsonSerializer.Serialize(frameLog, new JsonSerializerOptions { WriteIndented = true }));
+// cpu.txt: the native-wide pass's CPU time (wideCpu, ms) of every render, one per line.
+var cpuLog = new System.Text.StringBuilder();
+var hashLog = new System.Text.StringBuilder();
+int verifyFrames = 0, verifyBad = 0;
+var verifyLog = new System.Text.StringBuilder();
+void Save()
+{
+    File.WriteAllText(Path.Combine(output, "log.json"),
+        JsonSerializer.Serialize(frameLog, new JsonSerializerOptions { WriteIndented = true }));
+    File.WriteAllText(Path.Combine(output, "cpu.txt"), cpuLog.ToString());
+    if (hashLog.Length > 0) File.WriteAllText(Path.Combine(output, "hash.txt"), hashLog.ToString());
+    if (verifyFrames > 0) File.WriteAllText(Path.Combine(output, "verify.txt"), $"frames {verifyFrames} differing {verifyBad}{Environment.NewLine}{verifyLog}");
+}
 
 using var boot = new Hook(typeof(FramePacing).GetMethod(nameof(FramePacing.PreNsInit))!,
     (Func<Func<CpuContext, IMemory, bool>, CpuContext, IMemory, bool>)((original, c, m) =>
@@ -290,6 +301,34 @@ using var voidHook = Environment.GetEnvironmentVariable("VOID") == "1"
     ? new Hook(typeof(FramePacing).GetMethod(nameof(FramePacing.DrawNativeWideWorld))!,
         (Action<Action>)(original => { fogField.SetValue(null, (uint?)0xFF00FFu); original(); }))
     : null;
+// WIDEHASH=1: hash.txt gets "<render> <hash>" of the side/core triangles each DrawNativeWideWorld
+// submits (FramePacing.NativeWidePendingHash): two builds' runs show whether they draw the same.
+using var hashHook = Environment.GetEnvironmentVariable("WIDEHASH") == "1"
+    ? new Hook(typeof(FramePacing).GetMethod(nameof(FramePacing.DrawNativeWideWorld))!,
+        (Action<Action>)(original => { hashLog.Append(renders).Append(' ').Append(FramePacing.NativeWidePendingHash().ToString("X16")).AppendLine(); original(); }))
+    : null;
+// WIDEVERIFY=1: every native-wide pass runs twice, original slow paths then fast paths
+// (FramePacing._nativeWideFastPaths); verify.txt counts frames whose triangles differ.
+const BindingFlags Priv = BindingFlags.Static | BindingFlags.NonPublic;
+var fastField = typeof(FramePacing).GetField("_nativeWideFastPaths", Priv);
+using var verifyHook = Environment.GetEnvironmentVariable("WIDEVERIFY") == "1"
+    ? new Hook(typeof(FramePacing).GetMethod("RenderNativeWideWorldSides", Priv)!,
+        (Func<Func<IMemory, bool>, IMemory, bool>)((original, m) =>
+        {
+            fastField!.SetValue(null, false);
+            bool slowOk = original(m);
+            ulong slow = FramePacing.NativeWidePendingHash();
+            foreach (string list in new[] { "_nativeWidePending", "_nativeWideCorePending" })
+                ((System.Collections.IList)typeof(FramePacing).GetField(list, Priv)!.GetValue(null)!).Clear();
+            typeof(FramePacing).GetMethod("ClearNativeWideUserCore", Priv)!.Invoke(null, null);
+            fastField.SetValue(null, true);
+            bool fastOk = original(m);
+            ulong fast = FramePacing.NativeWidePendingHash();
+            verifyFrames++;
+            if (slow != fast || slowOk != fastOk) { verifyBad++; verifyLog.Append(renders).Append(' ').Append(slow.ToString("X16")).Append(' ').Append(fast.ToString("X16")).AppendLine(); }
+            return fastOk;
+        }))
+    : null;
 var repairType = typeof(FramePacing).GetNestedType("NativeWideRepair", BindingFlags.NonPublic)!;
 using var noFix = Environment.GetEnvironmentVariable("NOFIX") == "1"
     ? new Hook(typeof(FramePacing).GetMethod("NativeWideSceneRepairs", BindingFlags.Static | BindingFlags.NonPublic)!,
@@ -377,6 +416,7 @@ using var draw = new Hook(typeof(LibGpu).GetMethod(nameof(LibGpu.DrawOTag))!,
         if (renders + 1 == triLogRender) TriLog.Start(Path.Combine(output, $"tris{renders + 1:D5}.txt"));
         else if (wedge && FramePacing.IslandMapShowing(m)) TriLog.StartProbe();
         original(c, m); renders++;
+        cpuLog.Append(FramePacing.LastNativeWideCpuMs.ToString("0.000", Invariant)).AppendLine();
         if (wedge && TriLog.Probing)
         {
             string buf = TriLog.TakeBuffer();

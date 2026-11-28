@@ -14,6 +14,8 @@ enum GamepadRoute
     Launcher,
     Gameplay,
     DevMenu,
+    /// <summary>Our Start pause screen: pad drives the menu, game frozen.</summary>
+    Pause,
 }
 
 [Flags]
@@ -146,6 +148,12 @@ static class AndroidGamepad
         dialog.SetOnKeyListener(new DialogKeyListener());
     }
 
+    /// <summary>Pad key while the pause screen is up (UI thread).</summary>
+    public static Action<Keycode>? PauseKey { get; set; }
+    /// <summary>Stick / hat up-down edge while the pause screen is up.</summary>
+    public static Action<int>? PauseDirection { get; set; }
+    static int _pauseStickDir;
+
     public static bool TryHandleKey(KeyEvent e)
     {
         if (!IsPadKey(e.KeyCode) && !(e.KeyCode == Keycode.Back && IsFromPad(e)))
@@ -184,6 +192,15 @@ static class AndroidGamepad
             return true;
         }
 
+        if (route == GamepadRoute.Pause)
+        {
+            PublishGameplay(forceClear: true);
+            bool direction = e.KeyCode is Keycode.DpadUp or Keycode.DpadDown;
+            if (down && (direction || e.RepeatCount == 0))
+                PauseKey?.Invoke(e.KeyCode);
+            return true;
+        }
+
         PublishGameplay(forceClear: true);
         if (!down) return true;
         var action = LauncherActionFromKey(e.KeyCode, e);
@@ -219,6 +236,15 @@ static class AndroidGamepad
 
         PublishGameplay(forceClear: true);
         if (route == GamepadRoute.DevMenu) return true;
+        if (route == GamepadRoute.Pause)
+        {
+            float y;
+            lock (Gate) y = Math.Abs(_hatY) > 0.5f ? _hatY : _ly;
+            int dir = y < -0.6f ? -1 : y > 0.6f ? 1 : 0;
+            if (dir != 0 && dir != _pauseStickDir) PauseDirection?.Invoke(dir);
+            _pauseStickDir = dir;
+            return true;
+        }
 
         UpdateLauncherStick();
         return true;

@@ -5,6 +5,8 @@ using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Host.Cheats;
 
+using FrameTimer = RecompOne.Runtime.Host.Diagnostics.FrameTimer;
+
 namespace CrashBandicoot.AndroidRuntime;
 
 sealed class AndroidPlatformHost(
@@ -19,6 +21,7 @@ sealed class AndroidPlatformHost(
     bool _firstFrame = true;
     long _fpsWindow = System.Diagnostics.Stopwatch.GetTimestamp();
     int _fpsFrames;
+    long _logDrawn = -1;
     double _prepareMilliseconds;
     double _surfaceMilliseconds;
     double _swapMilliseconds;
@@ -121,12 +124,16 @@ sealed class AndroidPlatformHost(
         if (elapsed >= 2.0)
         {
             var frames = Math.Max(1, _fpsFrames);
-            Android.Util.Log.Info("CrashGPU", $"{_fpsFrames / elapsed:F1} FPS, surface {surfaceWidth}x{surfaceHeight}, " +
+            long drawnNow = backend.DrawnFrames;
+            double drawnPerSec = _logDrawn >= 0 ? (drawnNow - _logDrawn) / elapsed : 0;
+            _logDrawn = drawnNow;
+            Android.Util.Log.Info("CrashGPU", $"{_fpsFrames / elapsed:F1} FPS ({drawnPerSec:F1} drawn), surface {surfaceWidth}x{surfaceHeight}, " +
                                                $"present {presented.w}x{presented.h}, CPU submit " +
                                                $"{_prepareMilliseconds / frames:F2}+{_surfaceMilliseconds / frames:F2} ms, " +
                                                $"swap {_swapMilliseconds / frames:F2} ms, " +
                                                $"wideCpu {RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs:F1} ms " +
                                                $"(peak {RecompOne.Runtime.Host.FramePacing.ConsumeNativeWideCpuPeakMs():F1}), " +
+                                               $"vsync phase {RecompOne.Runtime.Host.FrameClock.PhaseErrorMs:+0.0;-0.0} ms, " +
                                                $"scale {GlVram.Scale}x, " +
                                                $"batches {_flushes / (double)frames:F1}, writes {_writebacks / (double)frames:F1}, " +
                                                $"verts {_vertices / (double)frames:F0}, {video.Name} {backend.LastDiagnostic}");
@@ -199,13 +206,86 @@ sealed class AndroidPlatformHost(
             long workingSet = 0;
             try { workingSet = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64; }
             catch { /* HUD is best-effort */ }
-            text = $"{fps:0.0} fps\n{AndroidDisplayPacing.Describe()}\n{FormatBytes(workingSet)}";
+            text = DetailedHud(fps, _hudGameFps > 0 ? _hudGameFps : fps, workingSet);
         }
         activity.RunOnUiThread(() =>
         {
             if (_hud == null) return;
             _hud.Text = text;
         });
+    }
+
+    /// <summary>
+    /// Detailed HUD: the desktop numbers (frame phases, peaks, batches) plus
+    /// who limits the frame rate, so a CPU limit can be told from a GPU one.
+    /// On Android "game" = recompiled game + PS1 GPU commands + 16:9 sides,
+    /// "present" = final pass + submit/swap (GPU back-pressure shows here),
+    /// "wait" = idle time left before the next present.
+    /// </summary>
+    string DetailedHud(double presentsFps, double drawnFps, long workingSet)
+    {
+        double frame = FrameTimer.AverageFrameMs;
+        double game = FrameTimer.Average(FrameTimer.Phase.Game);
+        double swap = FrameTimer.Average(FrameTimer.Phase.Swap);
+        double wait = FrameTimer.Average(FrameTimer.Phase.Wait);
+        double wide = RecompOne.Runtime.Host.FramePacing.LastNativeWideCpuMs;
+        int gpuBusy = ReadGpuBusyPercent();
+
+        // Limit: on time with idle left = the cap; else whichever side ate the frame.
+        // Menus / original 30 run on the 60 Hz vblank whatever the cap (FrameClock.Throttle).
+        double periodMs = RecompOne.Runtime.Host.FramePacing.NeedsOriginalVblank
+            ? 1000.0 / 60.0
+            : 1000.0 / Math.Max(1.0, RecompOne.Runtime.Host.FrameClock.TargetHz);
+        bool onTime = frame <= periodMs * 1.03;
+        string limit = onTime ? "cap (spare time)"
+            : gpuBusy >= 90 || swap > game ? "GPU"
+            : "CPU";
+
+        var sb = new System.Text.StringBuilder(320);
+        sb.Append($"{presentsFps:0.0} fps · {drawnFps:0.0} drawn/s\n");
+        sb.Append($"limit: {limit}\n");
+        sb.Append($"frame {frame,6:0.00} ms   worst {FrameTimer.WorstFrameMs,6:0.00}\n");
+        sb.Append($"peak 5s {FrameTimer.PeakFrameMs,6:0.00}   jit {FrameTimer.PeakJitMs:0.0}  gc {FrameTimer.PeakGcMs:0.0}\n");
+        sb.Append($"game {game,6:0.00}   16:9 sides {wide,5:0.0}\n");
+        sb.Append($"present {swap,6:0.00}   wait {wait,6:0.00}\n");
+        sb.Append(gpuBusy >= 0 ? $"GPU busy {gpuBusy}%\n" : "GPU busy n/a\n");
+        sb.Append($"{video.Name} {GlVram.Scale}x · batches {backend.LastFrameFlushes} · verts {backend.LastFrameVertices}\n");
+        sb.Append($"cpu reads {backend.LastFrameCpuReads} · rt copies {backend.LastFrameWritebacks}\n");
+        sb.Append($"{AndroidDisplayPacing.Describe()}\n");
+        sb.Append($"jit warmup {RecompOne.Runtime.Host.JitWarmup.Status} · {FormatBytes(workingSet)}");
+        return sb.ToString();
+    }
+
+    static string? _gpuBusyPath;
+    static bool _gpuBusyMissing;
+
+    /// <summary>GPU load in %, -1 when the driver does not expose it to apps (Adreno kgsl, Mali utilisation).</summary>
+    static int ReadGpuBusyPercent()
+    {
+        if (_gpuBusyMissing) return -1;
+        try
+        {
+            if (_gpuBusyPath == null)
+            {
+                foreach (var path in new[]
+                {
+                    "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
+                    "/sys/kernel/gpu/gpu_busy",
+                    "/sys/class/misc/mali0/device/utilization",
+                })
+                    if (File.Exists(path)) { _gpuBusyPath = path; break; }
+                if (_gpuBusyPath == null) { _gpuBusyMissing = true; return -1; }
+            }
+            var raw = File.ReadAllText(_gpuBusyPath).Trim().TrimEnd('%').Trim();
+            int space = raw.IndexOf(' ');
+            if (space > 0) raw = raw[..space];
+            return int.TryParse(raw, out int v) ? Math.Clamp(v, 0, 100) : -1;
+        }
+        catch
+        {
+            _gpuBusyMissing = true; // SELinux denies the node: stop trying
+            return -1;
+        }
     }
 
     /// <summary>Box counter (#131); the view is touched only when the text or color changes.</summary>

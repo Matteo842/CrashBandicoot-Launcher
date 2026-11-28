@@ -25,12 +25,71 @@ public static class FrameClock
     /// <summary>When true, skip software throttle (display VSync paces the frame).</summary>
     public static bool SkipThrottle { get; set; }
 
+    // Display vsync grid reported by the platform (Android Choreographer).
+    // The present clock stays software-timed, but its phase is pulled to the
+    // middle of a vsync interval: a free-running 60 Hz timer drifts across
+    // the latch point, so some images stay up 1 vblank and others 3 (judder,
+    // worst at 30 FPS where each image should stay exactly 2).
+    static long _vsyncTs;        // Stopwatch timestamp of a recent vsync
+    static double _vsyncPeriodMs; // 0 = no vsync source
+    static double _phaseErrMs;
+
+    /// <summary>Lock the present phase to the reported vsync grid (on by default when a platform reports vsync).</summary>
+    public static bool VsyncPhaseLock { get; set; } = true;
+
+    /// <summary>
+    /// Platform vsync tick: <paramref name="stopwatchTimestamp"/> in
+    /// <see cref="Stopwatch.GetTimestamp"/> units, <paramref name="periodMs"/>
+    /// the display refresh period. Any thread.
+    /// </summary>
+    public static void ReportVsync(long stopwatchTimestamp, double periodMs)
+    {
+        Volatile.Write(ref _vsyncTs, stopwatchTimestamp);
+        Volatile.Write(ref _vsyncPeriodMs, periodMs);
+    }
+
+    /// <summary>Filtered present phase error from mid vsync, ms (diagnostics; 0 without vsync).</summary>
+    public static double PhaseErrorMs => Volatile.Read(ref _vsyncPeriodMs) > 0 ? _phaseErrMs : 0;
+
+    /// <summary>Stop phase locking (vsync source gone, e.g. app in background).</summary>
+    public static void ClearVsync()
+    {
+        Volatile.Write(ref _vsyncPeriodMs, 0);
+        _phaseErrMs = 0;
+    }
+
+    static readonly long _clockStartTs = Stopwatch.GetTimestamp() - _clock.ElapsedTicks;
+
+    /// <summary>
+    /// Nudge the next deadline so the present that just finished (Throttle
+    /// entry) lands mid vsync interval. At most 0.25 ms per frame, so the
+    /// vblank clock (music, PS1 pad) never jumps.
+    /// </summary>
+    static void LockPhase(double period, double now)
+    {
+        double vp = Volatile.Read(ref _vsyncPeriodMs);
+        if (!VsyncPhaseLock || vp < 2.0) return;
+        double ratio = period / vp;
+        double n = Math.Round(ratio);
+        if (n < 1 || Math.Abs(ratio - n) > 0.02) return; // cap not a multiple of the display rate
+
+        long vts = Volatile.Read(ref _vsyncTs);
+        double vsyncMs = (vts - _clockStartTs) * 1000.0 / Stopwatch.Frequency;
+        if (now - vsyncMs > 1000.0) return; // stale: no vsync for a second
+        double phase = (now - vsyncMs) % vp;
+        if (phase < 0) phase += vp;
+        double err = phase - vp * 0.5;
+        _phaseErrMs += (err - _phaseErrMs) * 0.1;
+        _nextFrameMs -= Math.Clamp(_phaseErrMs * 0.1, -0.25, 0.25);
+    }
+
     public static void PauseTiming() => _runSignal.Reset();
 
     public static void ResumeTiming()
     {
         _nextFrameMs = _clock.Elapsed.TotalMilliseconds;
         FramePacing.Reset();
+        Diagnostics.FrameTimer.Reset(); // the hold is not a frame
         _runSignal.Set();
     }
 
@@ -42,6 +101,7 @@ public static class FrameClock
 
         _nextFrameMs += period;
         double now = _clock.Elapsed.TotalMilliseconds;
+        LockPhase(period, now);
         double waitMs = _nextFrameMs - now;
 
         if (waitMs < 0)

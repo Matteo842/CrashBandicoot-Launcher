@@ -150,6 +150,8 @@ public static class Runtime
         Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Game);
         if (_platformHost != null)
         {
+            // Exit to Map pad pulses (Android pause screen); the desktop ticks them in HostWindow.Present.
+            Host.ExitToMapInjector.Tick();
             _platformHost.Present(Gpu);
             // Android: present / swap time, so AutoTune can tell it from the throttle.
             Host.Diagnostics.FrameTimer.Mark(Host.Diagnostics.FrameTimer.Phase.Swap);

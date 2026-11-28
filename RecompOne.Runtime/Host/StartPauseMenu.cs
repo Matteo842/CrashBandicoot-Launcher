@@ -12,8 +12,16 @@ namespace RecompOne.Runtime.Host;
 /// <see cref="InputManager.Poll"/>, before <see cref="ExitToMapInjector.ApplyOverlay"/>,
 /// so the injected Start of Exit to Map is never caught.
 /// </summary>
-internal static class StartPauseMenu
+public static class StartPauseMenu
 {
+    /// <summary>
+    /// Platform pause screen when there is no ImGui pause card (Android): Start
+    /// calls <see cref="PlatformOpen"/> on the game thread; <see cref="PlatformIsOpen"/>
+    /// must be readable from it. The platform closes its own screen (it owns the pad then).
+    /// </summary>
+    public static Action? PlatformOpen { get; set; }
+    public static Func<bool>? PlatformIsOpen { get; set; }
+
     // NTSC-U globals of CoreLoop's can_pause (wurlyfox/c1 main.c; retail 0x80012030).
     const uint PausedAddr = 0x80056400u;
     /// <summary><c>ns.ldat</c>; the level id CoreLoop tests is at +4.</summary>
@@ -46,8 +54,9 @@ internal static class StartPauseMenu
     /// <param name="padStart">Pad 1 Start binding is down (keyboard Start = Enter also picks menu rows).</param>
     public static void Filter(bool padStart)
     {
-        // Desktop only: Android has no pause card.
-        if (PanelManager.Get<PauseMenuPopup>() is not { } pause) return;
+        var pause = PanelManager.Get<PauseMenuPopup>();
+        var platformOpen = pause == null ? PlatformOpen : null;
+        if (pause == null && (platformOpen == null || PlatformIsOpen == null)) return;
 
         ushort state = Controller.State;
         bool start = (state & Controller.Start) == 0;
@@ -61,12 +70,22 @@ internal static class StartPauseMenu
 
         // Buttons held when the menu closes stay released for the game until let go: the
         // Cross that picked Resume must not jump, the Start that closed it must not pause.
-        bool open = pause.IsOpen;
+        bool open = pause?.IsOpen ?? PlatformIsOpen!();
         _latch &= (ushort)~state;
         if (_wasOpen && !open) _latch |= (ushort)(~state & LatchButtons);
         _wasOpen = open;
 
-        if (!ExitToMapInjector.Active
+        if (platformOpen != null)
+        {
+            // The platform screen reads the pad itself while open (game frozen).
+            if (!open && !ExitToMapInjector.Active && startEdge
+                && ConfigManager.View.StartPauseMenu && NativePauseAllowed())
+            {
+                _latch |= Controller.Start;
+                platformOpen();
+            }
+        }
+        else if (!ExitToMapInjector.Active
             && (open
                 ? padEdge && !InputSettingsSection.PadCaptureActive
                 : startEdge && ConfigManager.View.StartPauseMenu && NativePauseAllowed()))
@@ -76,7 +95,7 @@ internal static class StartPauseMenu
         }
 
         // Retail pause + Select returns to the map (to the title on the map): same here.
-        if (open && selectEdge && !ExitToMapInjector.Active && !InputSettingsSection.PadCaptureActive)
+        if (pause != null && open && selectEdge && !ExitToMapInjector.Active && !InputSettingsSection.PadCaptureActive)
             _exit = true;
 
         Controller.State = (ushort)(state | _latch);

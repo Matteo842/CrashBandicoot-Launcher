@@ -2,6 +2,8 @@ using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Events;
 using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Memory;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace RecompOne.Runtime.Sdk;
 
@@ -9,6 +11,14 @@ public static class LibGpu
 {
     static readonly DrawEnvEvent _drawEnvEvent = new();
     static readonly DispEnvEvent _dispEnvEvent = new();
+
+    /// <summary>
+    /// DrawOTag hands whole packets to <see cref="Gpu.WritePacket"/> (same
+    /// decoder, same words). Hidden dev switch: CRASH_OT_FAST=0 restores the
+    /// per-word GP0 feed.
+    /// </summary>
+    public static bool FastOrderingTable { get; set; } =
+        Environment.GetEnvironmentVariable("CRASH_OT_FAST") != "0";
 
     public static void DrawOTag(CpuContext c, IMemory m)
     {
@@ -19,6 +29,11 @@ public static class LibGpu
         // Crash passes its 0x800-word ordering table; each slot word links the
         // primitives filed under it before the next slot.
         uint otBase = addr;
+        // Fast path: packets straight from guest RAM. Reads that the RAM map /
+        // memory editor log keep the per-word IMemory path.
+        var psm = FastOrderingTable && !RamLogger.TrackReads ? m as PSMemory : null;
+        byte[]? ram = psm?.RamBuffer;
+        uint ramEnd = (uint)(ram?.Length ?? 0);
         Host.FramePacing.InterpMarkGpu(10);
         try
         {
@@ -26,8 +41,21 @@ public static class LibGpu
             Host.FramePacing.DrawNativeWideWorld();
             for (int guard = 0; guard < 0x100000; guard++)
             {
-                uint header = m.ReadU32(addr);
-                uint count = header >> 24;
+                uint count;
+                uint header;
+                bool rawHeader = ram != null && addr + 4u <= ramEnd;
+                bool fast = false;
+                if (rawHeader)
+                {
+                    header = Unsafe.ReadUnaligned<uint>(ref ram![addr]);
+                    count = header >> 24;
+                    fast = addr + 4u + count * 4u <= ramEnd;
+                }
+                else
+                {
+                    header = m.ReadU32(addr);
+                    count = header >> 24;
+                }
                 if (addr - otBase < 0x2000u)
                 {
                     int slot = (int)((addr - otBase) >> 2);
@@ -51,10 +79,20 @@ public static class LibGpu
                     GpuHle.CurrentPrimitiveKind = hud >= 0 ? GpuHle.PrimitiveKind.Hud : GpuHle.PrimitiveKind.Default;
                     GpuHle.CurrentCoreDepth = hud < 0 && Host.FramePacing.IsNativeWideCoreDepthPrimitive(addr);
                 }
-                for (uint i = 0; i < count; i++)
+                if (fast)
                 {
-                    uint wordAddr = addr + 4u + i * 4u;
-                    gpu.WriteGp0(m.ReadU32(wordAddr), wordAddr);
+                    psm!.CountAccesses(1 + (int)count);
+                    if (count != 0)
+                        gpu.WritePacket(MemoryMarshal.Cast<byte, uint>(ram.AsSpan((int)addr + 4, (int)count * 4)), addr + 4u);
+                }
+                else
+                {
+                    if (rawHeader) psm!.CountAccesses(1);
+                    for (uint i = 0; i < count; i++)
+                    {
+                        uint wordAddr = addr + 4u + i * 4u;
+                        gpu.WriteGp0(m.ReadU32(wordAddr), wordAddr);
+                    }
                 }
                 uint next = header & 0xFFFFFFu;
                 if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;

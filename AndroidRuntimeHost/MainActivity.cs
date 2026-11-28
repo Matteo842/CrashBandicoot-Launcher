@@ -63,12 +63,15 @@ public sealed class MainActivity : Activity
         AndroidGamepad.Attach(this);
         AndroidGamepad.ResolveRoute = () =>
         {
+            if (_gameUiVisible && _pauseMenu?.IsOpen == true) return GamepadRoute.Pause;
             if (_gameUiVisible && _devMenu?.IsOpen == true) return GamepadRoute.DevMenu;
             if (_gameUiVisible) return GamepadRoute.Gameplay;
             return GamepadRoute.Launcher;
         };
         AndroidGamepad.LauncherInput = action => _launcher?.HandlePad(action);
         AndroidGamepad.CloseDevMenu = () => _devMenu?.Close();
+        AndroidGamepad.PauseKey = key => _pauseMenu?.HandlePadKey(key);
+        AndroidGamepad.PauseDirection = dir => _pauseMenu?.HandlePadDirection(dir);
         AndroidGamepad.ConnectionChanged = _ => RunOnUiThread(SyncTouchOverlay);
         Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
         if (Window != null)
@@ -99,6 +102,9 @@ public sealed class MainActivity : Activity
     {
         _gameUiVisible = false;
         _devMenu = null;
+        _pauseMenu = null;
+        RecompOne.Runtime.Host.StartPauseMenu.PlatformOpen = null;
+        RecompOne.Runtime.Host.StartPauseMenu.PlatformIsOpen = null;
         _devHud = null;
         _boxHud = null;
         _gemHud = null;
@@ -181,6 +187,7 @@ public sealed class MainActivity : Activity
             Visibility = ConfigManager.View.ShowDevHud ? ViewStates.Visible : ViewStates.Gone,
         };
         _devHud.SetTextColor(Color.Rgb(244, 228, 188));
+        _devHud.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal); // detailed HUD columns line up
         _devHud.SetBackgroundColor(Color.Argb(120, 8, 8, 8));
         _devHud.SetPadding(Dp(8), Dp(4), Dp(8), Dp(4));
         root.AddView(_devHud, new FrameLayout.LayoutParams(
@@ -261,6 +268,24 @@ public sealed class MainActivity : Activity
         });
         root.AddView(_devMenu, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        // Start pause screen (desktop StartPauseMenu counterpart): holds the game thread at
+        // the frame clock and mutes audio while it is up.
+        _pauseMenu = new AndroidPauseMenu(this,
+            freeze: () =>
+            {
+                _activeHost?.PauseAudio(); // also holds the frame clock
+                AndroidGamepad.SyncGameplay();
+            },
+            unfreeze: () =>
+            {
+                _activeHost?.ResumeAudio();
+                AndroidGamepad.SyncGameplay();
+            },
+            openDevMenu: ToggleDevMenu);
+        root.AddView(_pauseMenu, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+        RecompOne.Runtime.Host.StartPauseMenu.PlatformOpen = () => _pauseMenu?.RequestOpen();
+        RecompOne.Runtime.Host.StartPauseMenu.PlatformIsOpen = () => _pauseMenu?.IsOpen == true;
         root.ThreeFingerHold = ToggleDevMenu;
         SetContentView(root);
     }
@@ -297,6 +322,11 @@ public sealed class MainActivity : Activity
 
     public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
     {
+        if (keyCode == Keycode.Back && _gameUiVisible && _pauseMenu?.IsOpen == true)
+        {
+            _pauseMenu.Close();
+            return true;
+        }
         if (keyCode == Keycode.Back && _gameUiVisible && _devMenu?.IsOpen == true)
         {
             _devMenu.Close();
@@ -425,9 +455,12 @@ public sealed class MainActivity : Activity
     }
 
     AndroidPlatformHost? _activeHost;
+    AndroidVsync? _vsync;
+    AndroidPauseMenu? _pauseMenu;
 
     protected override void OnPause()
     {
+        _vsync?.Stop();
         RecompOne.Runtime.Hardware.Controller.SetVirtualPadState(0);
         AndroidGamepad.ReleaseHeld();
         // Never leak game audio into the home screen / lock screen.
@@ -438,7 +471,9 @@ public sealed class MainActivity : Activity
     protected override void OnResume()
     {
         base.OnResume();
-        _activeHost?.ResumeAudio();
+        (_vsync ??= new AndroidVsync(this)).Start();
+        // The Start pause screen keeps the game held until it is closed.
+        if (_pauseMenu?.IsOpen != true) _activeHost?.ResumeAudio();
         if (_openBrowserWhenResumed)
         {
             _openBrowserWhenResumed = false;

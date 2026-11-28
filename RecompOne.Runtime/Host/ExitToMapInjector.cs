@@ -7,7 +7,7 @@ namespace RecompOne.Runtime.Host;
 /// Also re-applies host pause mute after every Poll — BiosB.PadRead polls again
 /// at frame end and would otherwise let gameplay input through the Esc overlay.
 /// </summary>
-internal static class ExitToMapInjector
+public static class ExitToMapInjector
 {
     enum Phase : byte
     {

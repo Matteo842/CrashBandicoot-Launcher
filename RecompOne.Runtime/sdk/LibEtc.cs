@@ -104,6 +104,7 @@ public static class LibEtc
             uint ticks = FramePacing.AdvanceWallClock(m);
             m.WriteU32(TicksElapsedAddr, ticks);
             Runtime.PresentFrame();
+            _catchUpsSincePresent = 0;
             FramePacing.NoteGpuPresent();
             return TickCounters(c, m, addTicks: false);
         }
@@ -112,6 +113,9 @@ public static class LibEtc
             _catchUpGuard--;
         }
     }
+
+    /// <summary>Catch-up vblanks since the last presented one (original vblank only).</summary>
+    static int _catchUpsSincePresent;
 
     public static void MaybeCatchUpVBlank()
     {
@@ -142,7 +146,24 @@ public static class LibEtc
                 FramePacing.NoteVblankIrq();
                 return;
             }
-            TickSequencer(Runtime.Cpu, m);
+            // Original vblank (#248): a 30 FPS frame has two vblanks of budget, but its
+            // whole CPU work runs in the gap after the second present. Ticking at one
+            // vblank there advanced the counter with no present, the game's next wait
+            // ended a present early and one image stayed up 1 vblank instead of 2
+            // (judder on slow phones). The first tick after a present therefore waits
+            // for two vblanks and then catches both up, so time, music and a guest
+            // stuck in a wait still get every vblank.
+            int due = 1;
+            if (_catchUpsSincePresent == 0 && !FramePacing.InterpEngaged)
+            {
+                if (now - _lastVblankTs < 2 * VblankTicks) return;
+                due = 2;
+            }
+            for (int i = 0; i < due; i++)
+            {
+                TickSequencer(Runtime.Cpu, m);
+                _catchUpsSincePresent++;
+            }
         }
         finally
         {
@@ -165,6 +186,7 @@ public static class LibEtc
         try
         {
             Runtime.PresentFrame();
+            _catchUpsSincePresent = 0;
             return TickCounters(c, m, addTicks: true);
         }
         finally

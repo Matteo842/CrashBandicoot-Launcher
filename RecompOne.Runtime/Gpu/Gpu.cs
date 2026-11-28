@@ -146,6 +146,39 @@ public sealed partial class Gpu
         if (_fifo.Count >= _need) { Execute(); if (!_loadImage) _fifo.Clear(); }
     }
 
+    /// <summary>
+    /// DrawOTag fast path: one ordering-table packet straight from guest RAM.
+    /// Each command that lies wholly inside the packet goes to the decoder in
+    /// one copy instead of word by word through <see cref="WriteGp0(uint, uint)"/>;
+    /// the decoder sees the same FIFO words and source addresses. Anything
+    /// unusual (a command still open in the FIFO, polylines, image loads, a
+    /// command running past the packet) takes the per-word path from there on.
+    /// </summary>
+    /// <param name="words">Packet words after the header, read lazily from guest RAM.</param>
+    /// <param name="source">RAM address of <paramref name="words"/>[0].</param>
+    public void WritePacket(ReadOnlySpan<uint> words, uint source)
+    {
+        int i = 0;
+        if (!_loadImage && !_polyline && _fifo.Count == 0)
+        {
+            while (i < words.Length)
+            {
+                // LenPolyline / LenImageLoad are negative and fall back.
+                int need = CommandLength(words[i]);
+                if (need < 1 || need > _fifoSrc.Length || need > words.Length - i) break;
+                System.Runtime.InteropServices.CollectionsMarshal.SetCount(_fifo, need);
+                words.Slice(i, need).CopyTo(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_fifo));
+                uint src = source + (uint)i * 4u;
+                for (int k = 0; k < need; k++) _fifoSrc[k] = src + (uint)k * 4u;
+                // Image loads never get here, so Execute cannot leave a load open.
+                Execute();
+                _fifo.Clear();
+                i += need;
+            }
+        }
+        for (; i < words.Length; i++) WriteGp0(words[i], source + (uint)i * 4u);
+    }
+
     public void WriteGp1(uint word)
     {
         uint op = (word >> 24) & 0xFF;

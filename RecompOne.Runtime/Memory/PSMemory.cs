@@ -142,6 +142,16 @@ public sealed class PSMemory : IMemory
         if (--_memYield <= 0) MemYield();
     }
 
+    /// <summary>
+    /// <paramref name="count"/> RAM reads done straight on <see cref="RamBuffer"/>
+    /// (DrawOTag fast path) still count toward the VBlank catch-up check.
+    /// </summary>
+    internal void CountAccesses(int count)
+    {
+        _memYield -= count;
+        if (_memYield <= 0) MemYield();
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void MemYield()
     {

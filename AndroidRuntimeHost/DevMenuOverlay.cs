@@ -144,7 +144,12 @@ sealed partial class DevMenuOverlay : FrameLayout
         {
             ConfigManager.View.DevHudDetails = value;
             ConfigManager.SaveView(Array.Empty<IPanel>());
-        }, "Adds display pacing and memory under the FPS.");
+        }, "Frame phases, who limits the FPS (CPU / GPU), GPU load, batches.");
+        Toggle("Start opens pause menu", ConfigManager.View.StartPauseMenu, value =>
+        {
+            ConfigManager.View.StartPauseMenu = value;
+            ConfigManager.SaveView(Array.Empty<IPanel>());
+        }, "Off: Start shows the game's own pause screen.");
         LiveMono();
         UpdateRootFps();
         Divider();
