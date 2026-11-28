@@ -2,6 +2,8 @@
 <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
 <a href="https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/Matteo842/CrashBandicoot-Launcher"></a>
 <a href="https://github.com/Matteo842/CrashBandicoot-Launcher/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Matteo842/CrashBandicoot-Launcher/total.svg"></a>
+<a href="https://github.com/Matteo842/CrashBandicoot-Launcher/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Matteo842/CrashBandicoot-Launcher?style=flat&color=ff8a00"></a>
+<a href="https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest"><img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-ff8a00"></a>
 </p>
 
 ---
