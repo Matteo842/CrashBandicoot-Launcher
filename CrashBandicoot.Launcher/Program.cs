@@ -46,9 +46,7 @@ internal static class Program
 
         using (singleInstance)
         {
-#if !WINDOWS
-            LinuxLaunch.StartLog(args);
-#endif
+            RunLog.Start(args);
 
             if (args.Length >= 2 && string.Equals(args[0], "--prepare", StringComparison.OrdinalIgnoreCase))
             {
@@ -184,7 +182,7 @@ internal static class Program
             Console.Error.WriteLine(ex);
 #if !WINDOWS
             if (desktop)
-                LinuxLaunch.Notify($"{ex.GetBaseException().Message}\n\nDetails: {LinuxLaunch.LogPath}", error: true);
+                LinuxLaunch.Notify($"{ex.GetBaseException().Message}\n\nDetails: {RunLog.LogPath}", error: true);
 #endif
             return 1;
         }

@@ -58,7 +58,7 @@ static class LinuxGui
         catch (Exception ex)
         {
             Console.Error.WriteLine("[Launcher] FAIL: " + ex);
-            LinuxLaunch.Notify($"The launcher stopped: {ex.GetBaseException().Message}\n\nDetails: {LinuxLaunch.LogPath}",
+            LinuxLaunch.Notify($"The launcher stopped: {ex.GetBaseException().Message}\n\nDetails: {RunLog.LogPath}",
                 error: true);
             exitCode = 1;
             return true;

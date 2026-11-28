@@ -407,6 +407,8 @@ public sealed class LauncherHost : Form
             _ = _gameHost.Handle;
             Runtime.SetEmbedParent(_gameHost.Handle);
 
+            // logs/last-run.txt holds this game session from here on.
+            RunLog.Restart($"game started from the launcher: {cuePath}");
             Console.WriteLine($"[CrashBandicoot] launching (embedded) {dllPath}");
             GameLoader.Run(dllPath, cuePath);
         }
@@ -414,6 +416,7 @@ public sealed class LauncherHost : Form
         {
             var msg = Unwrap(ex);
             Console.Error.WriteLine("[CrashBandicoot] launch failed: " + msg);
+            Console.Error.WriteLine(ex);
             MessageBox.Show(
                 msg,
                 "Crash Bandicoot: Recompiled",

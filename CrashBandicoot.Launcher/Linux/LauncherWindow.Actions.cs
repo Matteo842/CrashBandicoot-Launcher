@@ -305,7 +305,7 @@ sealed partial class LauncherWindow
         _hiddenForGame = false;
         // Free the pad so the game is the only one reading it.
         _pad.Release();
-        LinuxLaunch.RestartLog($"game started from the launcher: {cuePath}");
+        RunLog.Restart($"game started from the launcher: {cuePath}");
         ShowPrep("Starting game", "Opening the game window…", 0, indeterminate: true,
             note: "The launcher comes back when you close the game.");
 
