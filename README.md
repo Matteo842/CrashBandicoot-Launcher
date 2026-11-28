@@ -4,18 +4,18 @@
 
 # Crash Bandicoot Launcher
 
-<a href="https://recomplauncher.com/game/crashbandicoot-launcher"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
-
 *Unofficial fan project.*
-
-**The 1996 classic, running natively on PC and Android. In widescreen, at 240 FPS, in 4K.**
-
-This isn't an emulator. The original PS1 code is **statically recompiled** into a native program on your own machine, then given the upgrades the PS1 never could: a real 16:9 view of the world, high frame rates, high resolutions, mods and cheats.
 
 ---
 <img width="1920" alt="Crash Bandicoot Launcher" src="tools/banner/banner.png" />
 
 ---
+
+<a href="https://recomplauncher.com/game/crashbandicoot-launcher"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
+**The 1996 classic, running natively on PC and Android. In widescreen, at 240 FPS, in 4K.**
+
+This isn't an emulator. The original PS1 code is **statically recompiled** into a native program on your own machine, then given the upgrades the PS1 never could: a real 16:9 view of the world, high frame rates, high resolutions, mods and cheats.
 
 ## What you get
 
