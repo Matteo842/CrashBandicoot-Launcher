@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<!--
+  README hero banner for Crash Bandicoot Launcher.
+  Render with tools/banner/render.py (headless Chrome/Edge) -> tools/banner/banner.png
+  Canvas: 1200x500 CSS px, rendered at 2x (2400x1000, same 2.4:1 as the old 1920x800 banner).
+  shot.jpg = a 16:9 in-game screenshot (native widescreen).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Bungee"; src: url("../../CrashBandicoot.Launcher/Ui/fonts/Bungee-Regular.ttf"); }
+  @font-face { font-family: "Nunito"; font-weight: 800; src: url("../../CrashBandicoot.Launcher/Ui/fonts/Nunito-ExtraBold.ttf"); }
+  @font-face { font-family: "Nunito"; font-weight: 600; src: url("../../CrashBandicoot.Launcher/Ui/fonts/Nunito-SemiBold.ttf"); }
+
+  :root {
+    /* NativeTheme.cs */
+    --night: #061018;
+    --jungle: #0a2818;
+    --warm: #120a08;
+    --wumpa: #ff8a00;
+    --wumpa-hot: #ffb020;
+    --wumpa-deep: #3a1500;
+    --sand: #f4e4bc;
+    --ok: #7dff9a;
+    --card-top: #163325;
+    --card-bot: #0c1618;
+    --wood-light: #d0893a;
+    --wood-mid: #c47a2a;
+    --wood-dark: #8a4a12;
+    --wood-deep: #5c3008;
+    --mark-yellow: #ffe14a;
+    --muted: #a9b8ad;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1200px; height: 500px; overflow: hidden; }
+  body {
+    font-family: "Nunito", "Segoe UI", sans-serif; font-weight: 600;
+    color: var(--sand);
+    background: linear-gradient(160deg, var(--jungle) 0%, var(--night) 55%, var(--warm) 100%);
+    position: relative;
+  }
+
+  /* ---------- background ---------- */
+  .bg-glow {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(520px 360px at 860px 250px, rgba(255, 138, 0, 0.20), transparent 70%),
+      radial-gradient(500px 340px at 80px 0px, rgba(60, 140, 80, 0.22), transparent 70%);
+  }
+  .bg-grid {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(244, 228, 188, 0.09) 1px, transparent 1.4px);
+    background-size: 22px 22px;
+    -webkit-mask-image: linear-gradient(100deg, transparent 0%, transparent 40%, #000 75%);
+            mask-image: linear-gradient(100deg, transparent 0%, transparent 40%, #000 75%);
+  }
+  .island {
+    position: absolute; left: 330px; top: 300px; width: 300px; opacity: 0.13;
+    filter: saturate(0.6) blur(0.3px);
+    -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+            mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+  }
+
+  /* ---------- left column ---------- */
+  .left { position: absolute; left: 56px; top: 48px; width: 510px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img {
+    width: 54px; height: 54px; border-radius: 50%;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+  }
+  .brand span { font-weight: 800; font-size: 21px; letter-spacing: 0.3px; color: var(--sand); }
+  h1 {
+    margin-top: 34px;
+    font-family: "Bungee", "Segoe UI Black", sans-serif; font-weight: 400;
+    font-size: 41px; line-height: 1.08; letter-spacing: 0.3px; white-space: nowrap;
+    color: var(--sand);
+    text-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  }
+  h1 em {
+    font-style: normal; color: var(--wumpa);
+    -webkit-text-stroke: 2px var(--wumpa-deep); paint-order: stroke fill;
+    text-shadow: 0 4px 0 var(--wumpa-deep), 0 8px 18px rgba(255, 138, 0, 0.25);
+  }
+  .sub {
+    margin-top: 18px; width: 470px;
+    font-size: 15.5px; line-height: 1.55; color: var(--muted);
+  }
+  .sub b { color: var(--sand); font-weight: 800; }
+  .pills { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; width: 480px; }
+  .pill {
+    font-size: 13px; font-weight: 800; letter-spacing: 0.2px;
+    padding: 6px 13px; border-radius: 999px;
+    background: rgba(255, 138, 0, 0.10);
+    border: 1px solid rgba(255, 138, 0, 0.45);
+    color: var(--wumpa-hot);
+  }
+  .platforms {
+    position: absolute; left: 56px; bottom: 34px;
+    font-size: 13.5px; color: var(--muted); letter-spacing: 0.3px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .platforms .dot { width: 4px; height: 4px; border-radius: 50%; background: #5d6f63; }
+  .platforms .tag {
+    margin-left: 8px; padding: 3px 9px; border-radius: 6px;
+    border: 1px dashed rgba(244, 228, 188, 0.35); color: var(--sand); font-weight: 800; font-size: 12px;
+  }
+
+  /* ---------- game screen (16:9) ---------- */
+  .screen {
+    position: absolute; left: 588px; top: 64px; width: 568px; height: 320px;
+    border-radius: 12px; overflow: hidden;
+    border: 3px solid var(--wumpa);
+    background: #000 url("shot.jpg") center / cover no-repeat;
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.6),
+      0 30px 60px -12px rgba(0,0,0,0.7),
+      0 0 60px rgba(255, 138, 0, 0.18);
+  }
+  /* PS1 4:3 area inside the 16:9 frame: (4/3) / (16/9) = 75% of the width */
+  .ps1 {
+    position: absolute; top: 0; bottom: 0; left: 12.5%; width: 75%;
+    border-left: 2px dashed rgba(255, 225, 74, 0.85);
+    border-right: 2px dashed rgba(255, 225, 74, 0.85);
+  }
+  .ps1 .lbl {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    font-family: "Bungee", sans-serif; font-size: 11px; letter-spacing: 1px;
+    color: var(--mark-yellow); background: rgba(0,0,0,0.55);
+    padding: 3px 8px; border-radius: 4px; white-space: nowrap;
+  }
+  .side {
+    position: absolute; top: 0; bottom: 0; width: 66px;
+    background: linear-gradient(90deg, rgba(255,138,0,0.18), rgba(255,138,0,0));
+  }
+  .side.l { left: 0; }
+  .side.r { right: 0; transform: scaleX(-1); }
+  /* same look as the in-game counter: grey box, light grey text, just bigger */
+  .fps {
+    position: absolute; right: 10px; top: 10px;
+    font-family: "Cascadia Mono", Consolas, monospace; font-size: 17px; font-weight: 600;
+    letter-spacing: 1.5px; color: #e4e4e4;
+    background: rgba(40, 42, 44, 0.88); padding: 5px 11px; border-radius: 3px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+
+  /* ---------- floating cards ---------- */
+  .card {
+    position: absolute; border-radius: 12px;
+    background: linear-gradient(180deg, var(--card-top), var(--card-bot));
+    border: 1px solid rgba(255, 138, 0, 0.35);
+    box-shadow: 0 18px 40px -8px rgba(0,0,0,0.75);
+  }
+  .opts { left: 560px; top: 330px; width: 246px; padding: 12px 15px 10px; }
+  .opts .h {
+    font-family: "Bungee", sans-serif; font-size: 13px; color: var(--wumpa); letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .opt { display: flex; align-items: center; font-size: 13.5px; padding: 4px 0; color: var(--sand); }
+  .opt .v { margin-left: auto; font-weight: 800; color: var(--wumpa-hot); font-size: 12.5px; }
+  .tog {
+    margin-left: auto; width: 30px; height: 16px; border-radius: 8px; position: relative;
+    background: var(--wumpa);
+  }
+  .tog::after {
+    content: ""; position: absolute; right: 2px; top: 2px; width: 12px; height: 12px;
+    border-radius: 50%; background: #fff;
+  }
+  .tog.off { background: #34443b; }
+  .tog.off::after { right: auto; left: 2px; background: #9aa89f; }
+
+  .boxes { left: 952px; top: 352px; padding: 10px 14px; display: flex; align-items: center; gap: 11px; }
+  .crate {
+    width: 34px; height: 34px; border-radius: 3px; position: relative; flex: none;
+    background: linear-gradient(135deg, var(--wood-light), var(--wood-mid) 55%, var(--wood-dark));
+    border: 3px solid var(--wood-deep);
+    box-shadow: inset 0 0 0 2px rgba(255, 200, 120, 0.35);
+    overflow: hidden;
+  }
+  .crate::before, .crate::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 3px; margin: -1.5px 0 0 -22px;
+    background: var(--wood-deep); transform: rotate(45deg);
+  }
+  .crate::after { transform: rotate(-45deg); }
+  .boxes .n { font-family: "Bungee", sans-serif; font-size: 20px; color: var(--sand); line-height: 1; }
+  .boxes .n small { color: var(--muted); font-size: 15px; }
+  .boxes .s { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+  .note {
+    position: absolute; left: 470px; top: 18px;
+    font-family: "Segoe Print", cursive; font-size: 15px; color: var(--wumpa-hot);
+    transform: rotate(-3deg);
+  }
+  svg.arrow { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="bg-grid"></div>
+  <img class="island" src="../../CrashBandicoot.Launcher/Ui/world_map.png" alt="">
+
+  <div class="left">
+    <div class="brand">
+      <img src="../../icon.png" alt="">
+      <span>Crash Bandicoot Launcher</span>
+    </div>
+    <h1>The 1996 classic,<br><em>recompiled.</em></h1>
+    <p class="sub">
+      Not an emulator: the original PS1 code is <b>statically recompiled</b>
+      into a native program, with a real <b>16:9 world</b>,
+      high frame rates, 4K, mods and cheats.
+    </p>
+    <div class="pills">
+      <span class="pill">Native 16:9</span>
+      <span class="pill">Uncapped FPS</span>
+      <span class="pill">8x / 4K</span>
+            <span class="pill">Mods &amp; cheats</span>
+    </div>
+  </div>
+  <div class="platforms">
+    Windows <span class="dot"></span> Linux <span class="dot"></span> macOS <span class="dot"></span> Android
+    <span class="tag">Unofficial fan project</span>
+  </div>
+
+  <!-- game screen -->
+  <div class="screen">
+    <div class="side l"></div><div class="side r"></div>
+    <div class="ps1"><span class="lbl">PS1 4:3</span></div>
+    <div class="fps">500+ FPS</div>
+  </div>
+
+  <div class="note">more world on both sides</div>
+  <svg class="arrow" width="1200" height="500">
+    <g fill="none" stroke="#ffb020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M560 44 C 590 46, 608 60, 614 84"/>
+      <path d="M606 76 L 614 86 L 619 74"/>
+    </g>
+  </svg>
+
+  <!-- floating: settings -->
+  <div class="card opts">
+    <div class="h">Graphics</div>
+    <div class="opt">Internal resolution <span class="v">8x (4K)</span></div>
+    <div class="opt">Dejitter <span class="tog"></span></div>
+    <div class="opt">Dedither <span class="tog"></span></div>
+    <div class="opt">CRT filter <span class="tog off"></span></div>
+  </div>
+
+  <!-- floating: box counter -->
+  <div class="card boxes">
+    <div class="crate"></div>
+    <div>
+      <div class="n">23<small> / 45</small></div>
+      <div class="s">Box counter &middot; gem still on</div>
+    </div>
+  </div>
+</body>
+</html>

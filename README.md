@@ -13,7 +13,7 @@
 This isn't an emulator. The original PS1 code is **statically recompiled** into a native program on your own machine, then given the upgrades the PS1 never could: a real 16:9 view of the world, high frame rates, high resolutions, mods and cheats.
 
 ---
-<img width="1920" height="800" alt="Crash-Launcher1" src="https://github.com/user-attachments/assets/3682fe9c-0deb-466c-adbe-285a1fd7bbcc" />
+<img width="1920" alt="Crash Bandicoot Launcher" src="tools/banner/banner.png" />
 
 ---
 
