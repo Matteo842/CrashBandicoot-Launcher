@@ -32,7 +32,7 @@ layout(push_constant) uniform Prim {
     int   scaledDither;
     int   scale;
     int   blendPass;
-    int   pad0;
+    int   premultiply;
 } pc;
 
 void main() {

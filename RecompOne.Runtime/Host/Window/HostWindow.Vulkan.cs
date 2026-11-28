@@ -25,7 +25,8 @@ internal static partial class HostWindow
 
     static bool UsingVulkan => _vkBackend != null;
 
-    static string VulkanName => $"Vulkan {_vkGpu?.ApiVersionText} ({_vkGpu?.DeviceName})";
+    static string VulkanName => $"Vulkan {_vkGpu?.ApiVersionText} ({_vkGpu?.DeviceName}" +
+        (_vkGpu is { DualSrcBlend: false } ? ", single-source blend)" : ")");
 
     static void ResetVulkanState()
     {

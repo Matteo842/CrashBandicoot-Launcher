@@ -783,7 +783,8 @@ public sealed class MainActivity : Activity
             var ms = (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000.0
                 / System.Diagnostics.Stopwatch.Frequency;
             Android.Util.Log.Info("CrashGPU",
-                $"Vulkan {video.ApiVersion} on {video.DeviceName}; init {ms:F0} ms");
+                $"Vulkan {video.ApiVersion} on {video.DeviceName}; " +
+                $"{(video.DualSrcBlend ? "dual-source" : "single-source")} blend; init {ms:F0} ms");
             return video;
         }
         catch (Exception ex)

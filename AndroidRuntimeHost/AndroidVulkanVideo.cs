@@ -40,6 +40,7 @@ sealed unsafe class AndroidVulkanVideo : IAndroidVideo
     public string ApiVersion => _gpu?.ApiVersionText ?? "?";
     public string DriverVersion => _gpu?.DriverVersionText ?? "?";
     public uint VendorId => _gpu?.VendorId ?? 0;
+    public bool DualSrcBlend => _gpu?.DualSrcBlend ?? false;
     public string PresentModeLabel => _swapchain?.PresentMode.ToString() ?? "?";
     public int SurfaceWidth => _swapchain is { Width: > 0 } s ? s.Width : _expectedWidth;
     public int SurfaceHeight => _swapchain is { Height: > 0 } s ? s.Height : _expectedHeight;

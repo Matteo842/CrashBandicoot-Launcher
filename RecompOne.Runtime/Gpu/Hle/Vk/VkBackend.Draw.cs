@@ -785,6 +785,9 @@ public sealed unsafe partial class VkBackend
         Span<ScissorBand> bands = stackalloc ScissorBand[2];
         int bandCount = BuildScissorBands(rt, bands);
 
+        bool blended = _kSubtractBatch || _batchHasSemi;
+        bool single = SingleSourceBlend && blended;
+        push.Premultiply = single ? 1 : 0;
         if (_kSubtractBatch)
         {
             // Opaque texels first, then dst - src for the semi-transparent ones.
@@ -802,7 +805,21 @@ public sealed unsafe partial class VkBackend
         else
         {
             push.BlendPass = 0;
-            BindPrim(cb, rt, depthLess, _batchHasSemi ? BlendAdd : BlendOff);
+            BindPrim(cb, rt, depthLess, blended ? BlendAdd : BlendOff);
+            _vk.CmdPushConstants(cb, _primLayout, ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit, 0, (uint)sizeof(PrimPush), &push);
+            DrawScissored(bands, bandCount, s, targetW, targetH);
+        }
+
+        if (single && (rt == null || _kWideMode != WidePrimitiveMode.CoreDepthOnly))
+        {
+            // Single-source blend wrote RGB only: draw the batch once more to
+            // write alpha (the mask bit = src.a, last fragment wins as with
+            // dual-source). Depth was written by the colour draw, so a
+            // depth-writing state retests at equal depth without writing.
+            push.Premultiply = 0;
+            int alphaDepth = depthLess is 1 or 3 ? 4 : depthLess;
+            var alphaPipe = rt == null ? _vramAlphaPipe : _rtAlphaPipes[alphaDepth];
+            _vk.CmdBindPipeline(cb, PipelineBindPoint.Graphics, alphaPipe);
             _vk.CmdPushConstants(cb, _primLayout, ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit, 0, (uint)sizeof(PrimPush), &push);
             DrawScissored(bands, bandCount, s, targetW, targetH);
         }

@@ -28,6 +28,17 @@ public sealed unsafe class VkGpu : IDisposable
     public string DriverVersionText { get; private set; } = "";
     public uint VendorId { get; private set; }
 
+    /// <summary>
+    /// The device enabled dualSrcBlend. Mali (Dimensity, Exynos, Pixel Tensor)
+    /// drivers do not offer it: VkBackend then uses the two-draw single-source
+    /// blend path (#248).
+    /// </summary>
+    public bool DualSrcBlend { get; private set; }
+
+    /// <summary>Developer switch (env CRASH_VK_NO_DUALSRC=1): use the single-source blend path on any GPU.</summary>
+    public static bool ForceSingleSourceBlend { get; set; } =
+        Environment.GetEnvironmentVariable("CRASH_VK_NO_DUALSRC") == "1";
+
     VkGpu(Vk vk) => Vk = vk;
 
     const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
@@ -199,11 +210,6 @@ public sealed unsafe class VkGpu : IDisposable
         foreach (var candidate in devices)
         {
             if (!TryQueueFamily(candidate, surface, out uint family)) { reject = "no graphics+present queue"; continue; }
-            PhysicalDeviceFeatures features;
-            Vk.GetPhysicalDeviceFeatures(candidate, &features);
-            // Every PS1 blend mode (and the opaque texels of a semi-transparent
-            // primitive) is resolved by one dual-source blend state.
-            if (!features.DualSrcBlend) { reject = "dualSrcBlend not supported"; continue; }
             if (!HasDeviceExtension(candidate, KhrSwapchain.ExtensionName)) { reject = "no VK_KHR_swapchain"; continue; }
             // Laptops list the integrated GPU too: keep looking for a discrete one.
             PhysicalDeviceProperties candidateProps;
@@ -236,7 +242,13 @@ public sealed unsafe class VkGpu : IDisposable
             QueueCount = 1,
             PQueuePriorities = &priority,
         };
-        var enabled = new PhysicalDeviceFeatures { DualSrcBlend = true };
+        // Every PS1 blend mode (and the opaque texels of a semi-transparent
+        // primitive) is resolved by one dual-source blend state when the GPU
+        // has it; otherwise VkBackend falls back to two single-source draws.
+        PhysicalDeviceFeatures features;
+        Vk.GetPhysicalDeviceFeatures(Physical, &features);
+        DualSrcBlend = features.DualSrcBlend && !ForceSingleSourceBlend;
+        var enabled = new PhysicalDeviceFeatures { DualSrcBlend = DualSrcBlend };
         nint exts = SilkMarshal.StringArrayToPtr(new[] { KhrSwapchain.ExtensionName });
         try
         {

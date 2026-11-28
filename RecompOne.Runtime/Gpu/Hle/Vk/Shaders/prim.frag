@@ -1,5 +1,6 @@
 #version 450
-// Vulkan port of GlShaders.PrimFs (dual-source blend path). Rebuild the
+// Vulkan port of GlShaders.PrimFs (dual-source blend path; SINGLE_SOURCE
+// builds the no-dualSrcBlend variant). Rebuild the
 // SPIR-V with tools/vulkan/build_shaders.py after editing.
 //
 // Blend state is fixed: color = src * BlendColor.rgb + dst * BlendColor.a
@@ -16,8 +17,17 @@ layout(location = 5) flat in int   vDither;
 layout(location = 6) flat in int   vSemiTrans;
 layout(location = 7) flat in int   vBlendMode;
 
+#ifdef SINGLE_SOURCE
+// No dualSrcBlend (Mali, #248): pc.premultiply 1 = colour draw, output
+// premultiplied src * BlendColor.rgb with BlendColor.a in alpha, blended as
+// src * 1 + dst * src.a (RGB written only); the same batch is then drawn once
+// more with no blend and only alpha written, for the mask bit.
+layout(location = 0) out vec4 FragColor;
+vec4 BlendColor;
+#else
 layout(location = 0, index = 0) out vec4 FragColor;
 layout(location = 0, index = 1) out vec4 BlendColor;
+#endif
 
 layout(set = 0, binding = 0) uniform sampler2D uVram;
 layout(set = 0, binding = 1) uniform sampler2D uDest;
@@ -36,7 +46,7 @@ layout(push_constant) uniform Prim {
     int   scaledDither;
     int   scale;
     int   blendPass;
-    int   pad0;
+    int   premultiply;
 } pc;
 
 const int ditherTbl[16] = int[16](
@@ -150,6 +160,13 @@ vec4 blendFactors(bool stp) {
     return vec4(1.0);
 }
 
+void emit() {
+#ifdef SINGLE_SOURCE
+    if (pc.premultiply != 0)
+        FragColor = vec4(FragColor.rgb * BlendColor.rgb, BlendColor.a);
+#endif
+}
+
 void main() {
     if (pc.wideMode == 1) {
         float x1 = gl_FragCoord.x / float(pc.scale);
@@ -160,6 +177,7 @@ void main() {
     if (texMode == 4) {
         FragColor = vec4(quant5(ivec3(vColor.rgb * 255.0 + 0.5)), pc.setMask);
         BlendColor = blendFactors(true);
+        emit();
         return;
     }
 
@@ -182,4 +200,5 @@ void main() {
     }
     FragColor = vec4(quant5(c8), max(texel.a, pc.setMask));
     BlendColor = blendFactors(texel.a >= 0.5);
+    emit();
 }

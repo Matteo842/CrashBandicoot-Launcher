@@ -29,7 +29,7 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
     {
         public float PosBiasX, PosBiasY, FbInvX, FbInvY, WideCoreX, WideCoreY, SetMask, FilterStrength;
         public int TwAndX, TwAndY, TwOrX, TwOrY;
-        public int CheckMask, WideMode, FilterMode, Dedither, ScaledDither, Scale, BlendPass, Pad0;
+        public int CheckMask, WideMode, FilterMode, Dedither, ScaledDither, Scale, BlendPass, Premultiply;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -85,6 +85,11 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
     readonly Pipeline[] _rtPipes = new Pipeline[DepthStates * 3];
     // Depth write, no colour: WidePrimitiveMode.CoreDepthOnly.
     Pipeline _rtDepthOnlyPipe;
+    // Single-source blend path only (no dualSrcBlend, #248): alpha-only
+    // redraw of a blended batch that writes the mask bit.
+    Pipeline _vramAlphaPipe;
+    readonly Pipeline[] _rtAlphaPipes = new Pipeline[DepthStates];
+    bool SingleSourceBlend => !_gpu.DualSrcBlend;
     RenderPass _presentPipesPass;
     Pipeline _presentPipe, _present24Pipe;
     CommandPool _cmdPool;
@@ -380,7 +385,7 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
     void CreateShaderModules()
     {
         _primVs = CreateShaderModule(VkShaderCode.PrimVert);
-        _primFs = CreateShaderModule(VkShaderCode.PrimFrag);
+        _primFs = CreateShaderModule(_gpu.DualSrcBlend ? VkShaderCode.PrimFrag : VkShaderCode.PrimFragSingle);
         _fullVs = CreateShaderModule(VkShaderCode.FullscreenVert);
         _presentFs = CreateShaderModule(VkShaderCode.PresentFrag);
         _present24Fs = CreateShaderModule(VkShaderCode.Present24Frag);
@@ -461,10 +466,17 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
             for (int blend = 0; blend < 3; blend++)
                 _rtPipes[depth * 3 + blend] = CreatePrimPipeline(_rtPass, depthAttachment: true, depth, blend);
         _rtDepthOnlyPipe = CreatePrimPipeline(_rtPass, depthAttachment: true, 1, BlendOff, colorWrite: false);
+        if (SingleSourceBlend)
+        {
+            _vramAlphaPipe = CreatePrimPipeline(_vramPass, depthAttachment: false, 0, BlendOff, alphaOnly: true);
+            for (int depth = 0; depth < DepthStates; depth++)
+                _rtAlphaPipes[depth] = CreatePrimPipeline(_rtPass, depthAttachment: true, depth, BlendOff, alphaOnly: true);
+        }
         SavePipelineCache();
     }
 
-    Pipeline CreatePrimPipeline(RenderPass pass, bool depthAttachment, int depthState, int blend, bool colorWrite = true)
+    Pipeline CreatePrimPipeline(RenderPass pass, bool depthAttachment, int depthState, int blend, bool colorWrite = true,
+        bool alphaOnly = false)
     {
         var entry = (byte*)Marshal.StringToHGlobalAnsi("main");
         try
@@ -515,18 +527,26 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
             };
 
             // color = src * BlendColor.rgb + dst * BlendColor.a, alpha = src.a.
+            // Single-source: the shader outputs src * BlendColor.rgb with
+            // BlendColor.a in alpha, so blended draws write RGB only and the
+            // alpha-only pipeline writes the mask bit in a second draw.
+            bool single = SingleSourceBlend;
+            var rgba = ColorComponentFlags.RBit | ColorComponentFlags.GBit |
+                       ColorComponentFlags.BBit | ColorComponentFlags.ABit;
+            var writeMask = !colorWrite ? ColorComponentFlags.None
+                : alphaOnly ? ColorComponentFlags.ABit
+                : single && blend != BlendOff ? rgba & ~ColorComponentFlags.ABit
+                : rgba;
             var attachment = new PipelineColorBlendAttachmentState
             {
                 BlendEnable = blend != BlendOff,
-                SrcColorBlendFactor = BlendFactor.Src1Color,
-                DstColorBlendFactor = BlendFactor.Src1Alpha,
+                SrcColorBlendFactor = single ? BlendFactor.One : BlendFactor.Src1Color,
+                DstColorBlendFactor = single ? BlendFactor.SrcAlpha : BlendFactor.Src1Alpha,
                 ColorBlendOp = blend == BlendRevSub ? BlendOp.ReverseSubtract : BlendOp.Add,
                 SrcAlphaBlendFactor = BlendFactor.One,
                 DstAlphaBlendFactor = BlendFactor.Zero,
                 AlphaBlendOp = BlendOp.Add,
-                ColorWriteMask = !colorWrite ? ColorComponentFlags.None
-                    : ColorComponentFlags.RBit | ColorComponentFlags.GBit |
-                      ColorComponentFlags.BBit | ColorComponentFlags.ABit,
+                ColorWriteMask = writeMask,
             };
 
             return CreatePipeline(pass, _primLayout, stages, &vertexInput,
@@ -986,6 +1006,8 @@ public sealed unsafe partial class VkBackend : IGpuBackend, IDisposable
         foreach (var p in _vramPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
         foreach (var p in _rtPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
         if (_rtDepthOnlyPipe.Handle != 0) _vk.DestroyPipeline(_dev, _rtDepthOnlyPipe, null);
+        foreach (var p in _rtAlphaPipes) if (p.Handle != 0) _vk.DestroyPipeline(_dev, p, null);
+        if (_vramAlphaPipe.Handle != 0) _vk.DestroyPipeline(_dev, _vramAlphaPipe, null);
         foreach (var (normal, rgb24) in _presentPipes.Values)
         {
             _vk.DestroyPipeline(_dev, normal, null);
