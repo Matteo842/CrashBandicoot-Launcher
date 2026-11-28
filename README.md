@@ -2,14 +2,14 @@
 [![Latest Release](https://img.shields.io/github/v/release/Matteo842/CrashBandicoot-Launcher)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/Matteo842/CrashBandicoot-Launcher/total.svg)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases)
 
-# Crash Bandicoot Launcher
-
-*Unofficial fan project.*
-
 ---
 <img width="1920" alt="Crash Bandicoot Launcher" src="tools/banner/banner.png" />
 
 ---
+
+# Crash Bandicoot Launcher
+
+*Unofficial fan project.*
 
 <a href="https://recomplauncher.com/game/crashbandicoot-launcher"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
 
