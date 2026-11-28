@@ -52,7 +52,7 @@ internal static class RunLog
         if (_sink == null) return;
         try
         {
-            _sink.Replace(OpenLog(reason));
+            _sink.Replace(() => OpenLog(reason));
         }
         catch (Exception ex)
         {
@@ -91,7 +91,11 @@ internal static class RunLog
         long _skipped;
         bool _finished;
 
-        public void Replace(StreamWriter file)
+        /// <summary>
+        /// Close the current file first: Windows keeps it locked while open, so
+        /// opening the same path again would fail.
+        /// </summary>
+        public void Replace(Func<StreamWriter> open)
         {
             lock (_gate)
             {
@@ -103,7 +107,8 @@ internal static class RunLog
                 {
                     // ignore
                 }
-                _file = file;
+                _file = null;
+                _file = open();
                 _lines = 0;
                 _skipped = 0;
                 _tail.Clear();
@@ -199,7 +204,8 @@ internal static class RunLog
                             _file.WriteLine(line);
                         _tail.Clear();
                     }
-                    _file.WriteLine($"---- {closing} ----");
+                    _file.WriteLine($"---- {closing.TrimEnd()}");
+                    _file.WriteLine("----");
                     _file.Flush();
                 }
                 catch
