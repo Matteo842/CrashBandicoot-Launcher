@@ -1,6 +1,8 @@
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Latest Release](https://img.shields.io/github/v/release/Matteo842/CrashBandicoot-Launcher)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Matteo842/CrashBandicoot-Launcher/total.svg)](https://github.com/Matteo842/CrashBandicoot-Launcher/releases)
+<p align="center">
+<a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+<a href="https://github.com/Matteo842/CrashBandicoot-Launcher/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/Matteo842/CrashBandicoot-Launcher"></a>
+<a href="https://github.com/Matteo842/CrashBandicoot-Launcher/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Matteo842/CrashBandicoot-Launcher/total.svg"></a>
+</p>
 
 ---
 <img width="1920" alt="Crash Bandicoot Launcher" src="tools/banner/banner.png" />
